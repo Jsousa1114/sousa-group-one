@@ -1,0 +1,17 @@
+{
+  "name": "Sousa Group One",
+  "short_name": "SG One",
+  "description": "Gestion intégrée de Sousa Group",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#0a110e",
+  "theme_color": "#0b1511",
+  "icons": [
+    {
+      "src": "assets/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

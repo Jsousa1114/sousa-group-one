@@ -1,7 +1,7 @@
 # Sousa Group One — Backend
 
-Petite API Express + PostgreSQL qui sert le frontend existant (dossier `public/`)
-et lui donne une vraie persistance : tant que le serveur tourne, les données
+Petite API Express + PostgreSQL qui sert le frontend existant (fichiers à la
+racine du dépôt) et lui donne une vraie persistance : tant que le serveur tourne, les données
 sont sauvegardées dans une vraie base de données et partagées entre tous les
 utilisateurs et appareils.
 

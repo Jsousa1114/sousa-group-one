@@ -1,8 +1,8 @@
 const path = require("path");
 const express = require("express");
 const { migrate } = require("./db");
-const authRoutes = require("./routes/auth");
-const stateRoutes = require("./routes/state");
+const authRoutes = require("./auth-routes");
+const stateRoutes = require("./state-routes");
 
 const app = express();
 app.use(express.json({ limit: "5mb" }));
@@ -12,11 +12,25 @@ app.get("/healthz", (req, res) => res.json({ ok: true }));
 app.use("/api/auth", authRoutes);
 app.use("/api/state", stateRoutes);
 
-app.use(express.static(path.join(__dirname, "public")));
+// Frontend files are served explicitly (not via a static folder) so that
+// only these exact files are ever exposed publicly.
+const FRONTEND_FILES = {
+  "/": "index.html",
+  "/index.html": "index.html",
+  "/styles.css": "styles.css",
+  "/app.js": "app.js",
+  "/manifest.webmanifest": "manifest.webmanifest",
+  "/service-worker.js": "service-worker.js",
+  "/icon.svg": "icon.svg"
+};
 
-// Single-page app: any unknown non-API route falls back to index.html
+for (const [route, file] of Object.entries(FRONTEND_FILES)) {
+  app.get(route, (req, res) => res.sendFile(path.join(__dirname, file)));
+}
+
+// Anything else (that isn't an API route) falls back to the app shell.
 app.get(/^(?!\/api).*/, (req, res) => {
-  res.sendFile(path.join(__dirname, "public", "index.html"));
+  res.sendFile(path.join(__dirname, "index.html"));
 });
 
 const PORT = process.env.PORT || 3000;
