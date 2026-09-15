@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0b1511">
+<meta name="description" content="Sousa Group One — plateforme de gestion complète">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="styles.css">
+<title>Sousa Group One</title>
+</head>
+<body>
+<section id="login" class="login">
+  <div class="login-art">
+    <div class="brand"><div class="logo">SG</div><div><b>Sousa Group</b><span>ONE</span></div></div>
+    <div class="hero">
+      <span class="pill">PLATEFORME DE GESTION INTÉGRÉE</span>
+      <h1>Une seule application pour tout le groupe.</h1>
+      <p>Salariés, heures, planning, chantiers, clients, devis, factures, stock, véhicules, maintenance, rapports et espace client.</p>
+      <div class="metrics"><div><b>7</b><span>profils d’accès</span></div><div><b>30+</b><span>modules</span></div><div><b>360°</b><span>vision du groupe</span></div></div>
+    </div>
+    <small>Prototype local complet — les données restent dans votre navigateur.</small>
+  </div>
+  <div class="login-side">
+    <div class="login-card">
+      <div class="mobile-brand brand"><div class="logo">SG</div><div><b>Sousa Group</b><span>ONE</span></div></div>
+      <p class="eyebrow">CONNEXION</p><h2>Bienvenue</h2><p class="muted">Choisissez un profil de démonstration.</p>
+      <label>Profil</label>
+      <select id="loginRole">
+        <option value="admin">Administrateur du groupe</option>
+        <option value="direction">Direction</option>
+        <option value="hr">Ressources humaines</option>
+        <option value="manager">Responsable de chantier</option>
+        <option value="accounting">Comptabilité</option>
+        <option value="employee">Salarié</option>
+        <option value="client">Client</option>
+      </select>
+      <label>E-mail</label><input id="loginEmail" type="email" value="direction@sousagroup.ch">
+      <label>Mot de passe</label><input id="loginPassword" type="password" value="demo1234">
+      <p id="loginError" class="muted" style="color:#ff9999;display:none;margin:10px 0 0"></p>
+      <button id="loginBtn" class="btn primary wide">Accéder à l’application</button>
+      <button id="resetLogin" class="btn ghost wide">Effacer toutes les données (partagé, irréversible)</button>
+      <small>Mot de passe de démonstration pour tous les profils : <b>demo1234</b></small>
+    </div>
+  </div>
+</section>
+
+<div id="app" class="app hidden">
+  <aside id="sidebar" class="sidebar">
+    <div class="side-brand brand"><div class="logo">SG</div><div><b>Sousa Group</b><span>ONE</span></div><button id="closeSide" class="icon mobile">✕</button></div>
+    <div class="company-box"><label>Vue active</label><select id="companyFilter"></select></div>
+    <nav id="nav"></nav>
+    <div class="side-bottom"><button id="installBtn" class="btn ghost wide hidden">Installer l’application</button><button id="logoutBtn" class="btn ghost wide">Déconnexion</button></div>
+  </aside>
+  <div id="backdrop" class="backdrop hidden"></div>
+  <main class="main">
+    <header class="topbar">
+      <div class="top-left"><button id="openSide" class="icon mobile">☰</button><div><p id="crumb" class="eyebrow">SOUSA GROUP ONE</p><h2 id="title">Tableau de bord</h2></div></div>
+      <div class="top-actions">
+        <div class="search"><span>⌕</span><input id="search" placeholder="Rechercher…"></div>
+        <button id="themeBtn" class="icon">◐</button>
+        <button id="notifBtn" class="icon notif">🔔<b id="notifCount">4</b></button>
+        <div class="profile"><div id="avatar" class="avatar">JS</div><div><b id="userName">Joao Sousa</b><span id="userRole">Direction</span></div></div>
+      </div>
+    </header>
+    <section id="content" class="content"></section>
+  </main>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+<div id="modalWrap" class="modal-wrap hidden"><section class="modal"><header><div><p class="eyebrow">SOUSA GROUP ONE</p><h3 id="modalTitle">Fenêtre</h3></div><button id="closeModal" class="icon">✕</button></header><div id="modalBody" class="modal-body"></div></section></div>
+<input id="importFile" type="file" accept="application/json" hidden>
+<script src="app.js"></script>
+</body>
+</html>
