@@ -1,196 +1,1269 @@
-const VERSION="4.0.0",KEY="sgo_complete_v4";
-const seed={
-companies:[{id:"group",code:"SG",name:"Sousa Group",type:"Groupe",employees:0},{id:"electricite",code:"SE",name:"Sousa Électricité",type:"Électricité",employees:0},{id:"home",code:"SHS",name:"Sousa Home Service",type:"Services",employees:0},{id:"tech",code:"ST",name:"Sousa Tech",type:"Informatique",employees:0}],
-employees:[],
-clients:[],
-projects:[],
-time:[],
-absences:[],
-quotes:[],
-invoices:[],
-payments:[],
-expenses:[],
-inventory:[],
-suppliers:[],
-vehicles:[],
-tools:[],
-maintenance:[],
-messages:[],
-notifications:[],
-audit:[],
-ai:[{role:"assistant",text:"Bonjour ! Je peux analyser les heures, les stocks, les factures et les chantiers dès qu'il y aura des données, ou préparer un rapport."}],
-clock:{active:false,break:false,project:""},settings:{theme:"dark"}
+"use strict";
+const $ = (id) => document.getElementById(id);
+const esc = (v) =>
+  String(v ?? "").replace(
+    /[&<>"']/g,
+    (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[
+        c
+      ],
+  );
+const money = (n) =>
+  new Intl.NumberFormat("fr-CH", {
+    style: "currency",
+    currency: "CHF",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(Number(n) || 0);
+const date = (v) =>
+  v
+    ? new Date(v.length === 10 ? v + "T12:00:00" : v).toLocaleDateString(
+        "fr-CH",
+      )
+    : "—";
+const today = () =>
+  new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Zurich",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+const same = (a, b) => a != null && b != null && String(a) === String(b);
+let token = sessionStorage.getItem("sgo_session"),
+  state = null,
+  profile = null,
+  contacts = [],
+  revision = 0,
+  page = "dashboard",
+  company = "",
+  selectedRecipient = "",
+  userAccounts = [],
+  pending = false,
+  lastFocus;
+// Remove data cached by the previous version, including the old long-lived token.
+localStorage.removeItem("sgo_token");
+localStorage.removeItem("sgo_complete_v4");
+const roles = {
+  admin: "Administration",
+  direction: "Direction",
+  hr: "RH",
+  manager: "Responsable",
+  accounting: "Comptabilité",
+  employee: "Salarié",
+  client: "Client",
 };
-const profiles={admin:{name:"Joao Sousa",role:"Administrateur groupe",avatar:"JS",employeeId:1},direction:{name:"Joao Sousa",role:"Direction",avatar:"JS",employeeId:1},hr:{name:"Ana Martins",role:"Ressources humaines",avatar:"AM",employeeId:3},manager:{name:"Sohan De Sousa",role:"Responsable chantier",avatar:"SD",employeeId:2},accounting:{name:"Ana Martins",role:"Comptabilité",avatar:"AM",employeeId:3},employee:{name:"Lucas Moreira",role:"Salarié · Électricien",avatar:"LM",employeeId:4},client:{name:"Marie Dupont",role:"Cliente",avatar:"MD",clientId:1}};
-const fullNav=[["Pilotage",[["dashboard","⌂","Tableau de bord"],["companies","◈","Entreprises"],["reports","◔","Rapports & KPI"]]],["Personnel",[["employees","♟","Salariés"],["time","◷","Heures & pointage"],["planning","▦","Planning"],["absences","☀","Absences & vacances"]]],["Opérations",[["projects","▰","Chantiers"],["clients","◎","Clients & CRM"],["maintenance","↻","Maintenance"],["messages","✉","Messages"],["documents","▤","Documents"]]],["Finance",[["quotes","▧","Devis"],["invoices","▥","Factures"],["payments","₣","Paiements"],["expenses","↘","Achats & dépenses"]]],["Ressources",[["inventory","▦","Stock & matériel"],["suppliers","♧","Fournisseurs"],["vehicles","▱","Véhicules"],["tools","⌁","Outillage"]]],["Futur",[["ai","✦","Assistant IA"],["roadmap","⬡","Versions futures"]]],["Administration",[["security","◇","Sécurité & accès"],["audit","≡","Journal"],["settings","⚙","Paramètres"]]]];
-const navs={admin:fullNav,direction:fullNav.filter(x=>x[0]!=="Administration"),hr:[["Pilotage",[["dashboard","⌂","Tableau de bord"],["reports","◔","Rapports RH"]]],["Personnel",[["employees","♟","Salariés"],["time","◷","Heures"],["planning","▦","Planning"],["absences","☀","Absences"],["documents","▤","Documents"]]],["Administration",[["audit","≡","Journal"],["settings","⚙","Paramètres"]]]],manager:[["Pilotage",[["dashboard","⌂","Tableau de bord"],["reports","◔","Rapports"]]],["Équipes",[["employees","♟","Mon équipe"],["time","◷","Heures"],["planning","▦","Planning"],["absences","☀","Absences"]]],["Opérations",[["projects","▰","Chantiers"],["clients","◎","Clients"],["inventory","▦","Matériel"],["vehicles","▱","Véhicules"],["tools","⌁","Outillage"],["messages","✉","Messages"]]]],accounting:[["Pilotage",[["dashboard","⌂","Tableau de bord"],["reports","◔","Rapports"]]],["Finance",[["quotes","▧","Devis"],["invoices","▥","Factures"],["payments","₣","Paiements"],["expenses","↘","Dépenses"],["clients","◎","Clients"]]],["Documents",[["documents","▤","Documents"],["messages","✉","Messages"]]]],employee:[["Mon travail",[["dashboard","⌂","Mon tableau de bord"],["time","◷","Mon pointage"],["planning","▦","Mon planning"],["absences","☀","Mes absences"],["projects","▰","Mes chantiers"],["inventory","▦","Matériel"],["messages","✉","Messages"],["documents","▤","Documents"]]]],client:[["Mon espace",[["dashboard","⌂","Mon espace"],["projects","▰","Mes chantiers"],["quotes","▧","Mes devis"],["invoices","▥","Mes factures"],["messages","✉","Messages"],["documents","▤","Documents"],["maintenance","↻","Contrats"]]]]};
-let db=load(),session={role:"direction",page:"dashboard",company:"group"},installPrompt=null;
-let authToken=localStorage.getItem("sgo_token")||null;
-async function apiLogin(email,password){
-  const r=await fetch("/api/auth/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email,password})});
-  const body=await r.json().catch(()=>({}));
-  if(!r.ok)throw new Error(body.error||"Connexion impossible.");
-  return body;
+const core = ["admin", "direction"],
+  hr = [...core, "hr"],
+  ops = [...core, "manager"],
+  fin = [...core, "accounting"];
+const menus = {
+  dashboard: ["Tableau de bord", Object.keys(roles)],
+  companies: ["Entreprises", core],
+  employees: ["Salariés", [...hr, "manager"]],
+  time: ["Heures", [...hr, "manager", "accounting", "employee"]],
+  planning: ["Planning", [...hr, "manager", "employee"]],
+  absences: ["Absences", [...hr, "manager", "employee"]],
+  projects: ["Chantiers", [...ops, "accounting", "employee", "client"]],
+  clients: ["Clients", [...ops, "accounting"]],
+  quotes: ["Devis", [...fin, "client"]],
+  invoices: ["Factures", [...fin, "client"]],
+  payments: ["Paiements", fin],
+  expenses: ["Dépenses", [...ops, "accounting"]],
+  inventory: ["Matériel", [...ops, "accounting", "employee"]],
+  suppliers: ["Fournisseurs", [...ops, "accounting"]],
+  vehicles: ["Véhicules", [...ops, "accounting"]],
+  tools: ["Outillage", [...ops, "accounting", "employee"]],
+  maintenance: ["Maintenance", [...ops, "accounting", "client"]],
+  documents: ["Documents", Object.keys(roles)],
+  messages: ["Messages", Object.keys(roles)],
+  reports: ["Rapports", [...core, "hr", "accounting", "manager"]],
+  users: ["Comptes", ["admin"]],
+  audit: ["Journal", hr],
+  settings: ["Mon compte", Object.keys(roles)],
+};
+const createRoles = {
+  companies: core,
+  employees: hr,
+  clients: [...ops, "accounting"],
+  projects: ops,
+  planning: ops,
+  quotes: fin,
+  invoices: fin,
+  payments: fin,
+  expenses: [...ops, "accounting"],
+  inventory: ops,
+  suppliers: ops,
+  vehicles: ops,
+  tools: ops,
+  maintenance: ops,
+};
+const can = (rs) => rs.includes(profile?.role);
+const visible = (k) =>
+  (state?.[k] || []).filter(
+    (x) => !company || !x.company || x.company === company,
+  );
+const find = (k, id) => state[k]?.find((x) => same(x.id, id));
+const name = (k, id) => {
+  const r = find(k, id);
+  return r?.name || r?.title || id || "—";
+};
+const btn = (label, action, id = "", kind = "secondary") =>
+  `<button type="button" class="btn ${kind}" data-action="${esc(action)}" data-id="${esc(id)}">${esc(label)}</button>`;
+const badge = (s) => `<span class="status neutral">${esc(s)}</span>`;
+const kpi = (label, value) =>
+  `<article class="card kpi"><p class="muted">${esc(label)}</p><b class="kpi-value">${esc(value)}</b></article>`;
+const cards = (items) =>
+  `<div class="grid g3 section">${items.map((x) => kpi(...x)).join("")}</div>`;
+function table(headers, rows) {
+  return rows.length
+    ? `<article class="card"><div class="table"><table><thead><tr>${headers.map((x) => `<th>${esc(x)}</th>`).join("")}</tr></thead><tbody>${rows.map((r) => `<tr>${r.map((x) => `<td>${x ?? ""}</td>`).join("")}</tr>`).join("")}</tbody></table></div></article>`
+    : '<article class="card empty">Aucun élément pour le moment.</article>';
 }
-async function fetchRemoteState(){
-  const r=await fetch("/api/state",{headers:{Authorization:"Bearer "+authToken}});
-  if(!r.ok)throw new Error("Impossible de charger les données du serveur.");
-  const body=await r.json();
-  return body.data;
+function heading(title, actions = "") {
+  return `<div class="section-head"><h3>${esc(title)}</h3><div class="actions">${actions}</div></div>`;
 }
-function syncState(){
-  if(!authToken)return;
-  fetch("/api/state",{method:"POST",headers:{"Content-Type":"application/json",Authorization:"Bearer "+authToken},body:JSON.stringify({data:db})}).catch(()=>{});
+function toast(t) {
+  $("toast").textContent = t;
+  $("toast").classList.remove("hidden");
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => $("toast").classList.add("hidden"), 4500);
 }
-function clone(x){return JSON.parse(JSON.stringify(x))}function load(){try{const x=JSON.parse(localStorage.getItem(KEY));if(x&&x.projects)return x}catch(e){}const x=clone(seed);localStorage.setItem(KEY,JSON.stringify(x));return x}function save(){localStorage.setItem(KEY,JSON.stringify(db));syncState()}function reset(){db=clone(seed);save()}function money(n){return new Intl.NumberFormat("fr-CH",{style:"currency",currency:"CHF",maximumFractionDigits:0}).format(+n||0)}function date(s){return s?new Date(s+"T12:00:00").toLocaleDateString("fr-CH"):"—"}function emp(id){return db.employees.find(x=>x.id==id)||{name:"—",initials:"?"}}function cli(id){return db.clients.find(x=>x.id==id)||{name:"—"}}function comp(id){return db.companies.find(x=>x.id===id)||db.companies[0]}function visible(id){return session.company==="group"||session.company===id}
-function cls(s=""){s=s.toLowerCase();if(["payée","validé","confirmé","accepté","approuv","présent","actif","disponible","terminé"].some(x=>s.includes(x)))return"success";if(["retard","maladie","bloqué","refusé"].some(x=>s.includes(x)))return"danger";if(["attente","planifié","envoyé","à envoyer","à valider","proposé","recharge"].some(x=>s.includes(x)))return"warning";if(["cours","chantier","télétravail","service"].some(x=>s.includes(x)))return"info";if(["brouillon","interne"].some(x=>s.includes(x)))return"purple";return"neutral"}function status(s){return `<span class="status ${cls(s)}">${s}</span>`}function kpi(l,v,s,i){return `<article class="card kpi"><div class="kpi-top"><span>${l}</span><b>${i}</b></div><div class="kpi-value">${v}</div><div class="kpi-sub">${s}</div></article>`}function mini(l,v){return `<div class="mini"><span>${l}</span><b>${v}</b></div>`}function section(t,d,a=""){return `<div class="section-head"><div><h3>${t}</h3><p class="muted">${d}</p></div><div class="actions">${a}</div></div>`}
-function toast(t){const e=document.getElementById("toast");e.textContent=t;e.classList.remove("hidden");clearTimeout(window.tt);window.tt=setTimeout(()=>e.classList.add("hidden"),2500)}function audit(action,object,detail){db.audit.unshift({date:new Date().toLocaleString("fr-CH"),user:profiles[session.role].name,action,object,detail});save()}function modal(t,h){document.getElementById("modalTitle").textContent=t;document.getElementById("modalBody").innerHTML=h;document.getElementById("modalWrap").classList.remove("hidden")}function closeModal(){document.getElementById("modalWrap").classList.add("hidden")}function val(id){return document.getElementById(id)?.value?.trim()||""}function download(n,t,type="text/plain"){const b=new Blob([t],{type}),u=URL.createObjectURL(b),a=document.createElement("a");a.href=u;a.download=n;a.click();URL.revokeObjectURL(u)}function csv(r){return r.map(x=>x.map(v=>`"${String(v??"").replaceAll('"','""')}"`).join(";")).join("\n")}
-function field(l,id,type="text",value="",full=false,opts=null){if(opts)return `<label class="${full?"full":""}">${l}<select id="${id}">${opts.map(o=>`<option value="${o.value}">${o.label}</option>`).join("")}</select></label>`;return `<label class="${full?"full":""}">${l}<input id="${id}" type="${type}" value="${value}"></label>`}function area(l,id){return `<label class="full">${l}<textarea id="${id}" rows="4"></textarea></label>`}function formBtns(action){return `<div class="form-actions"><button class="btn ghost" onclick="closeModal()">Annuler</button><button class="btn primary" onclick="${action}">Enregistrer</button></div>`}
-
-document.getElementById("loginRole").onchange=()=>{const r=document.getElementById("loginRole").value;document.getElementById("loginEmail").value=r+"@sousagroup.ch";document.getElementById("loginPassword").value="demo1234"};
-document.getElementById("loginBtn").onclick=async()=>{
-  const email=document.getElementById("loginEmail").value.trim();
-  const password=document.getElementById("loginPassword").value;
-  const errEl=document.getElementById("loginError");
-  errEl.style.display="none";
-  const btn=document.getElementById("loginBtn");
-  btn.disabled=true;btn.textContent="Connexion…";
-  try{
-    const {token,profile}=await apiLogin(email,password);
-    authToken=token;localStorage.setItem("sgo_token",token);
-    session.role=profile.role;session.company=profile.company;session.page="dashboard";session.profile=profile;
-    try{const remote=await fetchRemoteState();if(remote){db=remote}else{save()}}catch(e){}
-    document.getElementById("login").classList.add("hidden");
-    document.getElementById("app").classList.remove("hidden");
-    audit("Connexion","Application",profile.role);
-    shell();
-    toast("Bienvenue dans Sousa Group One");
-  }catch(e){
-    errEl.textContent=e.message||"Connexion impossible.";
-    errEl.style.display="block";
-  }finally{
-    btn.disabled=false;btn.textContent="Accéder à l’application";
+function notice(t) {
+  $("notice").textContent = t;
+  $("notice").classList.toggle("hidden", !t);
+}
+async function api(path, body) {
+  const r = await fetch("/api/" + path, {
+    method: body ? "POST" : "GET",
+    headers: {
+      ...(body ? { "Content-Type": "application/json" } : {}),
+      ...(token ? { Authorization: "Bearer " + token } : {}),
+    },
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    if (r.status === 401 && path !== "auth/login") clearSession();
+    const e = new Error(data.error || "Réponse serveur invalide.");
+    e.status = r.status;
+    throw e;
+  }
+  return data;
+}
+function clearSession() {
+  token = null;
+  state = null;
+  profile = null;
+  contacts = [];
+  userAccounts = [];
+  selectedRecipient = "";
+  company = "";
+  page = "dashboard";
+  revision = 0;
+  sessionStorage.removeItem("sgo_session");
+  $("content").replaceChildren();
+  $("modalBody").replaceChildren();
+  $("printArea").replaceChildren();
+  $("modalWrap").classList.add("hidden");
+  $("app").classList.add("hidden");
+  $("login").classList.remove("hidden");
+}
+async function refresh(renderNow = true) {
+  const out = await api("state");
+  state = out.data;
+  revision = out.revision;
+  profile = out.profile;
+  contacts = out.contacts;
+  if (renderNow) render();
+}
+async function mutate(
+  action,
+  payload = {},
+  collection,
+  endpoint = "state/command",
+  form,
+) {
+  if (pending) return;
+  pending = true;
+  const buttons = [...document.querySelectorAll("button[type=submit]")];
+  buttons.forEach((b) => (b.disabled = true));
+  let saved = false;
+  const requestId = form?.dataset.requestId || crypto.randomUUID();
+  if (form) form.dataset.requestId = requestId;
+  try {
+    await api(endpoint, { action, payload, collection, revision, requestId });
+    saved = true;
+    if (form) delete form.dataset.requestId;
+    await refresh();
+    closeModal(true);
+    notice("");
+    toast("Modification enregistrée.");
+  } catch (e) {
+    if (e.status === 409) {
+      if (form) delete form.dataset.requestId;
+      await refresh(false).catch(() => {});
+      e.message += " Votre formulaire est conservé.";
+    }
+    if (saved) {
+      closeModal(true);
+      notice(
+        "Modification enregistrée, mais actualisation impossible. Cliquez sur Actualiser.",
+      );
+    } else {
+      const target = $("formError");
+      if (target) target.textContent = e.message;
+      else notice(e.message);
+    }
+  } finally {
+    pending = false;
+    buttons.forEach((b) => (b.disabled = false));
+  }
+}
+$("loginForm").onsubmit = async (e) => {
+  e.preventDefault();
+  const b = e.target.querySelector("button");
+  b.disabled = true;
+  $("loginError").textContent = "";
+  try {
+    const out = await api("auth/login", {
+      email: $("email").value,
+      password: $("password").value,
+    });
+    token = out.token;
+    sessionStorage.setItem("sgo_session", token);
+    await refresh(false);
+    $("password").value = "";
+    $("login").classList.add("hidden");
+    $("app").classList.remove("hidden");
+    render();
+  } catch (err) {
+    $("loginError").textContent = err.message;
+    clearSession();
+  } finally {
+    b.disabled = false;
   }
 };
-document.getElementById("resetLogin").onclick=()=>{if(!confirm("Ceci efface définitivement toutes les données de l'application pour tout le monde. Continuer ?"))return;reset();toast("Toutes les données ont été effacées")};
-document.getElementById("logoutBtn").onclick=()=>{authToken=null;localStorage.removeItem("sgo_token");document.getElementById("app").classList.add("hidden");document.getElementById("login").classList.remove("hidden")};
-document.getElementById("themeBtn").onclick=()=>{db.settings.theme=db.settings.theme==="dark"?"light":"dark";save();theme()};
-document.getElementById("notifBtn").onclick=showNotifications;
-document.getElementById("closeModal").onclick=closeModal;document.getElementById("modalWrap").onclick=e=>{if(e.target.id==="modalWrap")closeModal()};
-document.getElementById("companyFilter").onchange=e=>{session.company=e.target.value;render();toast("Vue : "+comp(session.company).name)};
-document.getElementById("openSide").onclick=()=>side(true);document.getElementById("closeSide").onclick=()=>side(false);document.getElementById("backdrop").onclick=()=>side(false);
-document.getElementById("search").oninput=e=>search(e.target.value);document.getElementById("importFile").onchange=importBackup;
-function side(open){document.getElementById("sidebar").classList.toggle("open",open);document.getElementById("backdrop").classList.toggle("hidden",!open)}
-function theme(){document.body.classList.toggle("light",db.settings.theme==="light")}
-function shell(){const p=session.profile||profiles[session.role];document.getElementById("userName").textContent=p.name;document.getElementById("userRole").textContent=p.role;document.getElementById("avatar").textContent=p.avatar;document.getElementById("companyFilter").innerHTML=db.companies.map(c=>`<option value="${c.id}">${c.name}</option>`).join("");document.getElementById("companyFilter").value=session.company;document.getElementById("companyFilter").disabled=session.role==="client";nav();theme();render()}
-function nav(){document.getElementById("nav").innerHTML=navs[session.role].map(([g,items])=>`<div class="nav-group">${g}</div>${items.map(([id,ic,l])=>`<button class="nav-item ${session.page===id?"active":""}" data-page="${id}"><i>${ic}</i><span>${l}</span></button>`).join("")}`).join("");document.querySelectorAll("[data-page]").forEach(b=>b.onclick=()=>{session.page=b.dataset.page;nav();render();side(false)})}
-function render(){const names={dashboard:"Tableau de bord",companies:"Entreprises du groupe",reports:"Rapports & indicateurs",employees:"Salariés",time:"Heures & pointage",planning:"Planning",absences:"Absences & vacances",projects:"Chantiers",clients:"Clients & CRM",maintenance:"Maintenance & contrats",messages:"Messages",documents:"Documents",quotes:"Devis",invoices:"Factures",payments:"Paiements",expenses:"Achats & dépenses",inventory:"Stock & matériel",suppliers:"Fournisseurs",vehicles:"Véhicules",tools:"Outillage",ai:"Assistant IA",roadmap:"Versions futures",security:"Sécurité & accès",audit:"Journal d’activité",settings:"Paramètres"};document.getElementById("title").textContent=names[session.page]||"Sousa Group One";document.getElementById("crumb").textContent=`SOUSA GROUP ONE · ${profiles[session.role].role.toUpperCase()} · V${VERSION}`;document.getElementById("content").innerHTML=(pages[session.page]||pages.dashboard)();bind();charts();document.getElementById("notifCount").textContent=db.notifications.filter(n=>!n.read).length}
-function bind(){document.querySelectorAll("[data-action]").forEach(b=>b.onclick=()=>actions[b.dataset.action]?.());document.querySelectorAll("[data-project]").forEach(b=>b.onclick=()=>openProject(b.dataset.project));document.querySelectorAll("[data-employee]").forEach(b=>b.onclick=()=>openEmployee(+b.dataset.employee));document.querySelectorAll("[data-client]").forEach(b=>b.onclick=()=>openClient(+b.dataset.client));document.querySelectorAll("[data-doc]").forEach(b=>b.onclick=()=>openDoc(b.dataset.doc,b.dataset.kind));document.querySelectorAll("[data-tab]").forEach(b=>b.onclick=()=>{b.parentElement.querySelectorAll(".tab").forEach(x=>x.classList.remove("active"));b.classList.add("active");toast("Filtre appliqué")});if(document.getElementById("liveClock"))clock()}
-function search(q){document.querySelector(".search-results")?.remove();q=q.trim().toLowerCase();if(q.length<2)return;const r=[...db.employees.filter(x=>x.name.toLowerCase().includes(q)).map(x=>({t:x.name,s:x.job,p:"employees"})),...db.clients.filter(x=>x.name.toLowerCase().includes(q)).map(x=>({t:x.name,s:x.city,p:"clients"})),...db.projects.filter(x=>(x.id+" "+x.title).toLowerCase().includes(q)).map(x=>({t:x.id,s:x.title,p:"projects"})),...db.invoices.filter(x=>x.id.toLowerCase().includes(q)).map(x=>({t:x.id,s:money(x.amount),p:"invoices"}))].slice(0,8);const box=document.createElement("div");box.className="search-results";box.innerHTML=r.length?r.map(x=>`<div class="result" data-result="${x.p}"><b>${x.t}</b><span>${x.s}</span></div>`).join(""):`<div class="result">Aucun résultat</div>`;document.body.appendChild(box);box.querySelectorAll("[data-result]").forEach(x=>x.onclick=()=>{session.page=x.dataset.result;nav();render();box.remove();document.getElementById("search").value=""})}
-function showNotifications(){modal("Notifications",`<div class="list">${db.notifications.map(n=>`<div class="list-row"><div><b>${n.title}</b><small>${n.text}</small></div>${status(n.type==="danger"?"Urgent":n.type==="warning"?"À traiter":"Information")}</div>`).join("")}</div><div class="form-actions"><button class="btn primary" onclick="readNotifications()">Tout marquer comme lu</button></div>`)}
-function readNotifications(){db.notifications.forEach(n=>n.read=true);save();closeModal();render();toast("Notifications lues")}
-function charts(){document.querySelectorAll("canvas[data-chart]").forEach(c=>{const ctx=c.getContext("2d"),w=c.clientWidth,h=c.clientHeight,d=devicePixelRatio||1;c.width=w*d;c.height=h*d;ctx.scale(d,d);const css=getComputedStyle(document.body),border=css.getPropertyValue("--border"),muted=css.getPropertyValue("--muted"),green=css.getPropertyValue("--green"),blue=css.getPropertyValue("--blue"),yellow=css.getPropertyValue("--yellow");ctx.font="11px system-ui";ctx.strokeStyle=border;ctx.fillStyle=muted;for(let i=0;i<5;i++){let y=20+i*(h-50)/4;ctx.beginPath();ctx.moveTo(35,y);ctx.lineTo(w-10,y);ctx.stroke()}let vals,labels,color;if(c.dataset.chart==="revenue"){vals=[31,38,42,46,53,59,64,72];labels=["Jan","Fév","Mar","Avr","Mai","Juin","Juil","Août"];color=green}else if(c.dataset.chart==="hours"){vals=[420,455,470,448,512,536,498,523];labels=["S1","S2","S3","S4","S5","S6","S7","S8"];color=blue}else{vals=[12,18,15,26,22,31,28,36];labels=["Jan","Fév","Mar","Avr","Mai","Juin","Juil","Août"];color=yellow}const max=Math.max(...vals)*1.15,step=(w-55)/(vals.length-1);ctx.strokeStyle=color;ctx.lineWidth=3;ctx.beginPath();vals.forEach((v,i)=>{let x=35+i*step,y=h-30-(v/max)*(h-60);i?ctx.lineTo(x,y):ctx.moveTo(x,y)});ctx.stroke();vals.forEach((v,i)=>{let x=35+i*step,y=h-30-(v/max)*(h-60);ctx.fillStyle=color;ctx.beginPath();ctx.arc(x,y,4,0,Math.PI*2);ctx.fill();ctx.fillStyle=muted;ctx.fillText(labels[i],x-10,h-9)})})}
-function projectRow(p){return `<div style="padding:12px 0;border-bottom:1px solid var(--border)"><div style="display:flex;justify-content:space-between;gap:10px;margin-bottom:8px"><div><b style="font-size:.73rem">${p.id} · ${cli(p.clientId).name}</b><div class="muted" style="font-size:.62rem;margin-top:3px">${p.title}</div></div>${status(p.status)}</div><div class="progress"><span style="width:${p.progress}%"></span></div><div class="progress-meta"><span>${p.progress} %</span><span>${p.hours} h</span></div></div>`}
-function projectCard(p){return `<article class="card project"><div class="project-top"><div><div class="project-code">${p.id}</div><h3>${p.title}</h3><p>${cli(p.clientId).name} · ${p.address}</p></div>${status(p.status)}</div><div class="progress"><span style="width:${p.progress}%"></span></div><div class="progress-meta"><span>${p.progress} % terminé</span><span>${comp(p.company).name}</span></div><div class="mini-grid">${mini("Heures",p.hours+" h")}${mini("Budget",money(p.budget))}${mini("Matériel",p.materials+" articles")}${mini("Photos",p.photos+" fichiers")}</div><button class="btn secondary wide" data-project="${p.id}">Ouvrir</button></article>`}
-function timeTable(admin=true){return `<article class="card"><div class="table"><table><thead><tr><th>Date</th>${admin?"<th>Salarié</th>":""}<th>Chantier</th><th>Entrée</th><th>Pause</th><th>Sortie</th><th>Total</th><th>Statut</th></tr></thead><tbody>${db.time.map(t=>`<tr><td>${date(t.date)}</td>${admin?`<td>${emp(t.employeeId).name}</td>`:""}<td>${t.project}</td><td>${t.start}</td><td>${t.break} min</td><td>${t.end}</td><td><b>${t.hours.toFixed(2)} h</b></td><td>${status(t.status)}</td></tr>`).join("")}</tbody></table></div></article>`}
-function clockBox(){return `${status(db.clock.active?"En service":"Hors service")}<div id="liveClock" class="clock-time">--:--:--</div><div class="clock-date">${new Date().toLocaleDateString("fr-CH",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}</div><label>Chantier<select id="clockProject">${db.projects.slice(0,3).map(p=>`<option value="${p.id}">${p.id} · ${cli(p.clientId).name}</option>`).join("")}</select></label><div class="clock-actions"><button class="btn ${db.clock.active?"danger":"primary"}" data-action="clock">${db.clock.active?"Terminer":"Commencer"}</button><button class="btn secondary" data-action="break">${db.clock.break?"Reprendre":"Pause"}</button></div>`}
-function clock(){const e=document.getElementById("liveClock");if(!e)return;const t=()=>{if(document.body.contains(e))e.textContent=new Date().toLocaleTimeString("fr-CH")};t();setInterval(t,1000)}
-
-const pages={
-dashboard(){if(session.role==="employee")return employeeDash();if(session.role==="client")return clientDash();let ps=db.projects.filter(p=>visible(p.company));return `<div class="grid g4 section">${kpi("Salariés actifs",db.employees.length,"4 entreprises","♟")}${kpi("Heures semaine","512 h","+6,4 %","◷")}${kpi("Chantiers ouverts",ps.length,"3 échéances","▰")}${kpi("CA encaissé",money(db.invoices.reduce((a,b)=>a+b.paid,0)),"Ce mois","₣")}</div><div class="grid g3 section"><article class="card" style="grid-column:span 2"><div class="card-head"><h3>Évolution du chiffre d’affaires</h3><button class="btn small secondary" data-action="export-report">Exporter</button></div><canvas class="chart" data-chart="revenue"></canvas></article><article class="card"><div class="card-head"><h3>Alertes</h3>${status("4 actions")}</div><div class="timeline">${db.notifications.map(n=>`<div class="tl"><span class="dot"></span><div><b>${n.title}</b><p>${n.text}</p></div></div>`).join("")}</div></article></div><div class="grid g2"><article class="card"><div class="card-head"><h3>Chantiers prioritaires</h3><button class="btn small secondary" onclick="session.page='projects';nav();render()">Voir tout</button></div>${ps.slice(0,4).map(projectRow).join("")}</article><article class="card"><div class="card-head"><h3>Actions rapides</h3></div><div class="quick"><button data-action="new-project"><b>+ Chantier</b><span>Créer un dossier</span></button><button data-action="new-quote"><b>+ Devis</b><span>Préparer une offre</span></button><button data-action="new-invoice"><b>+ Facture</b><span>Facturer</span></button><button data-action="new-employee"><b>+ Salarié</b><span>Créer une fiche</span></button><button data-action="new-expense"><b>+ Dépense</b><span>Ajouter un achat</span></button><button onclick="session.page='ai';nav();render()"><b>✦ Assistant IA</b><span>Analyser et rédiger</span></button></div></article></div>`},
-companies(){return `${section("Structure de Sousa Group","Vue consolidée des sociétés.",`<button class="btn primary" data-action="new-company">+ Entreprise</button>`)}<div class="grid g4 section">${db.companies.map(c=>kpi(c.name,c.employees+" pers.",c.type,c.code)).join("")}</div><div class="grid g2">${db.companies.map(c=>{let ps=db.projects.filter(p=>p.company===c.id),rev=db.invoices.filter(i=>ps.some(p=>p.id===i.project)).reduce((a,b)=>a+b.amount,0);return `<article class="card"><div class="card-head"><div><p class="eyebrow">${c.code}</p><h3>${c.name}</h3></div>${status("Active")}</div><div class="mini-grid">${mini("Collaborateurs",c.employees)}${mini("Chantiers",ps.length)}${mini("Facturation",money(rev))}${mini("Secteur",c.type)}</div></article>`}).join("")}</div>`},
-reports(){let profit=db.projects.reduce((a,p)=>a+p.budget-p.cost,0);return `${section("Rapports consolidés","Performance financière, humaine et opérationnelle.",`<button class="btn secondary" data-action="export-report">Exporter CSV</button><button class="btn primary" onclick="window.print()">Imprimer</button>`)}<div class="grid g4 section">${kpi("Marge chantiers",money(profit),"Coûts directs déduits","↗")}${kpi("Taux de facturation","86 %","+4 points","▥")}${kpi("Occupation équipes","91 %","Capacité planifiée","♟")}${kpi("Satisfaction","4,8 / 5","37 évaluations","★")}</div><div class="grid g2 section"><article class="card"><div class="card-head"><h3>Heures produites</h3></div><canvas class="chart" data-chart="hours"></canvas></article><article class="card"><div class="card-head"><h3>Marge mensuelle</h3></div><canvas class="chart" data-chart="margin"></canvas></article></div><article class="card"><div class="table"><table><thead><tr><th>Chantier</th><th>Entreprise</th><th>Budget</th><th>Coût</th><th>Marge</th><th>Taux</th></tr></thead><tbody>${db.projects.filter(p=>visible(p.company)).map(p=>`<tr><td><b>${p.id}</b><br><span class="muted">${p.title}</span></td><td>${comp(p.company).name}</td><td>${money(p.budget)}</td><td>${money(p.cost)}</td><td><b>${money(p.budget-p.cost)}</b></td><td>${Math.round((p.budget-p.cost)/p.budget*100)} %</td></tr>`).join("")}</tbody></table></div></article>`},
-employees(){let l=db.employees.filter(e=>visible(e.company));return `${section("Fiches salariés","Contrats, heures, vacances et affectations.",`<button class="btn secondary" data-action="export-employees">Exporter</button><button class="btn primary" data-action="new-employee">+ Salarié</button>`)}<div class="grid g4 section">${kpi("Effectif",l.length,"Collaborateurs visibles","♟")}${kpi("Présents",l.filter(e=>e.status!=="Maladie").length,"Aujourd’hui","✓")}${kpi("Vacances",l.reduce((a,b)=>a+b.vacation,0)+" j","Solde cumulé","☀")}${kpi("Heures sup.",l.reduce((a,b)=>a+b.overtime,0).toFixed(1)+" h","Solde actuel","＋")}</div><article class="card"><div class="table"><table><thead><tr><th>Collaborateur</th><th>Fonction</th><th>Entreprise</th><th>Activité</th><th>Heures</th><th>Vacances</th><th>Statut</th><th></th></tr></thead><tbody>${l.map(e=>`<tr><td><b>${e.name}</b><br><span class="muted">${e.email}</span></td><td>${e.job}</td><td>${comp(e.company).name}</td><td>${e.activity} %</td><td>${e.hours} h</td><td>${e.vacation} j</td><td>${status(e.status)}</td><td><button class="btn small secondary" data-employee="${e.id}">Ouvrir</button></td></tr>`).join("")}</tbody></table></div></article>`},
-time(){if(session.role==="employee")return `<div class="grid g2 section"><article class="card clock">${clockBox()}</article><article class="card"><div class="card-head"><h3>Résumé mensuel</h3></div><div class="mini-grid">${mini("Heures normales","162 h 30")}${mini("Heures supplémentaires","12 h 20")}${mini("Pauses","4 h")}${mini("Chantiers","3")}</div></article></div>${timeTable(false)}`;return `${section("Suivi des heures","Validation et imputation par chantier.",`<button class="btn secondary" data-action="export-time">Exporter</button><button class="btn primary" data-action="approve-time">Valider la semaine</button>`)}<div class="grid g4 section">${kpi("Heures aujourd’hui","103 h","11 actifs","◷")}${kpi("À valider","18 h","3 modifications","!")}${kpi("Heures sup.","36 h","Solde du mois","＋")}${kpi("Coût estimé",money(7930),"Main-d’œuvre","₣")}</div>${timeTable(true)}`},
-planning(){let d=[["Lun. 3","SE-2026-0045 · 08h","Dépôt · 16h30"],["Mar. 4","SE-2026-0045 · 08h","Régie Arc · 14h"],["Mer. 5","SHS-2026-0018 · 07h30",""],["Jeu. 6","ST-2026-0007 · 08h","Réunion · 16h"],["Ven. 7","SE-2026-0045 · 08h","Contrôle · 14h"],["Sam. 8","Astreinte · 08h",""],["Dim. 9","",""]];return `${section("Planning des équipes","Semaine du 3 au 9 août 2026.",`<button class="btn secondary" data-action="export-planning">Exporter</button><button class="btn primary" data-action="new-planning">+ Planifier</button>`)}<article class="card section"><div class="calendar">${["Lundi","Mardi","Mercredi","Jeudi","Vendredi","Samedi","Dimanche"].map(x=>`<div class="cal-head">${x}</div>`).join("")}${d.map((x,i)=>`<div class="day"><span>${x[0]}</span>${x[1]?`<div class="event ${i%3===1?"blue":i%3===2?"yellow":""}">${x[1]}</div>`:""}${x[2]?`<div class="event blue">${x[2]}</div>`:""}</div>`).join("")}</div></article><article class="card"><div class="table"><table><thead><tr><th>Collaborateur</th><th>Lundi</th><th>Mardi</th><th>Mercredi</th><th>Jeudi</th><th>Vendredi</th></tr></thead><tbody>${db.employees.map((e,i)=>`<tr><td><b>${e.name}</b></td>${[1,2,3,4,5].map(j=>`<td>${status(i===4&&j===3?"Congé":"Disponible")}</td>`).join("")}</tr>`).join("")}</tbody></table></div></article>`},
-absences(){let l=session.role==="employee"?db.absences.filter(a=>a.employeeId===profiles.employee.employeeId):db.absences;return `${section(session.role==="employee"?"Mes absences":"Absences et vacances","Demandes, validations et justificatifs.",`<button class="btn primary" data-action="new-absence">+ Demande</button>`)}<div class="grid g4 section">${kpi("Vacances restantes",session.role==="employee"?"12 j":"91 j","Solde","☀")}${kpi("En attente",l.filter(a=>a.status==="En attente").length,"À traiter","…")}${kpi("Absents","1","Aujourd’hui","☂")}${kpi("Congés à venir","2","30 jours","▦")}</div><article class="card"><div class="table"><table><thead><tr><th>Salarié</th><th>Type</th><th>Période</th><th>Jours</th><th>Commentaire</th><th>Statut</th><th></th></tr></thead><tbody>${l.map(a=>`<tr><td>${emp(a.employeeId).name}</td><td>${a.type}</td><td>${date(a.from)} – ${date(a.to)}</td><td>${a.days}</td><td>${a.comment}</td><td>${status(a.status)}</td><td>${session.role!=="employee"?`<button class="btn small secondary" onclick="approveAbsence(${a.id})">Traiter</button>`:""}</td></tr>`).join("")}</tbody></table></div></article>`},
-projects(){let l=db.projects.filter(p=>visible(p.company));if(session.role==="client")l=l.filter(p=>p.clientId===1);if(session.role==="employee")l=l.filter(p=>p.team.includes(4));return `${section(session.role==="client"?"Mes chantiers":"Gestion des chantiers","Heures, matériel, photos, documents, coûts et messages.",session.role==="client"?"":`<button class="btn secondary" data-action="export-projects">Exporter</button><button class="btn primary" data-action="new-project">+ Chantier</button>`)}<div class="tabs"><button class="tab active" data-tab>Tous</button><button class="tab" data-tab>En cours</button><button class="tab" data-tab>Planifiés</button><button class="tab" data-tab>À facturer</button></div><div class="grid g2">${l.map(projectCard).join("")}</div>`},
-clients(){return `${section("Clients & CRM","Contacts, historique, opportunités et chiffre d’affaires.",`<button class="btn secondary" data-action="export-clients">Exporter</button><button class="btn primary" data-action="new-client">+ Client</button>`)}<div class="grid g4 section">${kpi("Clients actifs","3","Portefeuille","◎")}${kpi("Prospects","1","À relancer","↗")}${kpi("CA portefeuille",money(db.clients.reduce((a,b)=>a+b.revenue,0)),"Cumulé","₣")}${kpi("Satisfaction","4,8 / 5","37 avis","★")}</div><article class="card"><div class="table"><table><thead><tr><th>Client</th><th>Type</th><th>Ville</th><th>Coordonnées</th><th>Chantiers</th><th>CA</th><th>Statut</th><th></th></tr></thead><tbody>${db.clients.map(c=>`<tr><td><b>${c.name}</b></td><td>${c.type}</td><td>${c.city}</td><td>${c.email}<br>${c.phone}</td><td>${c.projects}</td><td>${money(c.revenue)}</td><td>${status(c.status)}</td><td><button class="btn small secondary" data-client="${c.id}">Ouvrir</button></td></tr>`).join("")}</tbody></table></div></article>`},
-maintenance(){let l=db.maintenance.filter(m=>visible(m.company));if(session.role==="client")l=l.filter(m=>m.clientId===1);return `${section(session.role==="client"?"Mes contrats":"Maintenance récurrente","Interventions planifiées et renouvellements.",session.role==="client"?"":`<button class="btn primary" data-action="new-maintenance">+ Contrat</button>`)}<div class="grid g3">${l.map(m=>`<article class="card"><div class="card-head"><div><p class="eyebrow">${m.id}</p><h3>${m.title}</h3></div>${status(m.status)}</div><div class="mini-grid">${mini("Client",cli(m.clientId).name)}${mini("Fréquence",m.frequency)}${mini("Prochaine visite",date(m.next))}${mini("Valeur annuelle",money(m.amount))}</div></article>`).join("")}</div>`},
-messages(){return `<article class="card chat"><aside class="chat-list"><div class="card-head"><h3>Conversations</h3><button class="btn small primary">+</button></div><div class="chat-item active"><b>Marie Dupont</b><span>SE-2026-0045 · 12 min</span></div><div class="chat-item"><b>Régie Arc SA</b><span>SE-2026-0042 · hier</span></div><div class="chat-item"><b>Équipe interne</b><span>Hier</span></div><div class="chat-item"><b>Cabinet Nova</b><span>Lundi</span></div></aside><section class="chat-main"><div class="card-head"><div><h3>Marie Dupont</h3><span class="muted">SE-2026-0045</span></div>${status("Client")}</div><div class="messages">${db.messages.map(m=>`<div class="message ${m.kind==="us"?"mine":""}">${m.text}<small>${m.sender} · ${m.time}</small></div>`).join("")}</div><div class="composer"><input id="messageText" placeholder="Écrire un message…"><button class="btn primary" data-action="send-message">Envoyer</button></div></section></article>`},
-documents(){let docs=[["Contrats de travail","18 fichiers","RH"],["Devis et factures","42 fichiers","Finance"],["Rapports de chantier","31 fichiers","Opérations"],["Photos de chantier","126 fichiers","Opérations"],["Certificats","22 fichiers","RH"],["Conditions générales","4 fichiers","Groupe"]];return `${section(session.role==="client"?"Mes documents":"Gestion documentaire","Classement sécurisé, versions et signatures.",`<button class="btn secondary" data-action="backup">Sauvegarder</button><button class="btn primary">+ Document</button>`)}<div class="grid g3">${docs.map(d=>`<article class="card"><div class="card-head"><span style="font-size:1.5rem">▤</span>${status(d[2])}</div><h3>${d[0]}</h3><p class="muted" style="font-size:.7rem;margin:7px 0 15px">${d[1]}</p><button class="btn secondary wide">Ouvrir</button></article>`).join("")}</div>`},
-quotes(){let l=session.role==="client"?db.quotes.filter(q=>q.clientId===1):db.quotes;return `${section(session.role==="client"?"Mes devis":"Gestion des devis","Envoi, acceptation et transformation en chantier.",session.role==="client"?"":`<button class="btn secondary" data-action="export-quotes">Exporter</button><button class="btn primary" data-action="new-quote">+ Devis</button>`)}<article class="card"><div class="table"><table><thead><tr><th>N°</th><th>Client</th><th>Objet</th><th>Date</th><th>Validité</th><th>Montant</th><th>Statut</th><th></th></tr></thead><tbody>${l.map(q=>`<tr><td><b>${q.id}</b></td><td>${cli(q.clientId).name}</td><td>${q.title}</td><td>${date(q.date)}</td><td>${date(q.valid)}</td><td><b>${money(q.amount)}</b></td><td>${status(q.status)}</td><td><button class="btn small secondary" data-doc="${q.id}" data-kind="quote">Ouvrir</button></td></tr>`).join("")}</tbody></table></div></article>`},
-invoices(){let l=session.role==="client"?db.invoices.filter(i=>i.clientId===1):db.invoices;return `${section(session.role==="client"?"Mes factures":"Gestion des factures","Acomptes, paiements, rappels et échéances.",session.role==="client"?"":`<button class="btn secondary" data-action="export-invoices">Exporter</button><button class="btn primary" data-action="new-invoice">+ Facture</button>`)}<div class="grid g4 section">${kpi("À facturer",money(8250),"Chantiers terminés","▥")}${kpi("En retard",money(3480),"À relancer","!")}${kpi("Payé",money(db.invoices.reduce((a,b)=>a+b.paid,0)),"Encaissements","✓")}${kpi("Délai moyen","18 jours","Paiement","◷")}</div><article class="card"><div class="table"><table><thead><tr><th>Facture</th><th>Client</th><th>Chantier</th><th>Échéance</th><th>Montant</th><th>Payé</th><th>Statut</th><th></th></tr></thead><tbody>${l.map(i=>`<tr><td><b>${i.id}</b></td><td>${cli(i.clientId).name}</td><td>${i.project}</td><td>${date(i.due)}</td><td><b>${money(i.amount)}</b></td><td>${money(i.paid)}</td><td>${status(i.status)}</td><td><button class="btn small secondary" data-doc="${i.id}" data-kind="invoice">Ouvrir</button></td></tr>`).join("")}</tbody></table></div></article>`},
-payments(){return `${section("Paiements","Encaissements, acomptes et rapprochement.",`<button class="btn primary" data-action="new-payment">+ Paiement</button>`)}<div class="grid g4 section">${kpi("Encaissé",money(58920),"+14 %","₣")}${kpi("À recevoir",money(11730),"Factures ouvertes","↘")}${kpi("Acomptes",money(12400),"5 chantiers","▥")}${kpi("Taux paiement","92 %","Dans les délais","✓")}</div><article class="card"><div class="table"><table><thead><tr><th>Paiement</th><th>Facture</th><th>Client</th><th>Date</th><th>Mode</th><th>Montant</th><th>Statut</th></tr></thead><tbody>${db.payments.map(p=>`<tr><td><b>${p.id}</b></td><td>${p.invoice}</td><td>${cli(p.clientId).name}</td><td>${date(p.date)}</td><td>${p.method}</td><td><b>${money(p.amount)}</b></td><td>${status(p.status)}</td></tr>`).join("")}</tbody></table></div></article>`},
-expenses(){return `${section("Achats et dépenses","Justificatifs, validation et imputation.",`<button class="btn secondary" data-action="export-expenses">Exporter</button><button class="btn primary" data-action="new-expense">+ Dépense</button>`)}<div class="grid g4 section">${kpi("Dépenses",money(db.expenses.reduce((a,b)=>a+b.amount,0)),"Ce mois","↘")}${kpi("À valider","1","Justificatif","…")}${kpi("Matériel",money(2988),"Coûts directs","▦")}${kpi("Fournisseurs",db.suppliers.length,"Actifs","♧")}</div><article class="card"><div class="table"><table><thead><tr><th>Référence</th><th>Date</th><th>Fournisseur</th><th>Entreprise</th><th>Chantier</th><th>Montant</th><th>Statut</th></tr></thead><tbody>${db.expenses.filter(e=>visible(e.company)).map(e=>`<tr><td><b>${e.id}</b></td><td>${date(e.date)}</td><td>${e.supplier}</td><td>${comp(e.company).name}</td><td>${e.project}</td><td><b>${money(e.amount)}</b></td><td>${status(e.status)}</td></tr>`).join("")}</tbody></table></div></article>`},
-inventory(){let l=db.inventory;return `${section("Stock et matériel","Niveaux, mouvements, alertes et valorisation.",`<button class="btn secondary" data-action="export-stock">Exporter</button><button class="btn primary" data-action="new-stock">+ Article</button>`)}<div class="grid g4 section">${kpi("Références",l.length,"Articles suivis","▦")}${kpi("Valeur stock",money(l.reduce((a,b)=>a+b.stock*b.buy,0)),"Prix d’achat","₣")}${kpi("Stocks faibles",l.filter(x=>x.stock<=x.min).length,"À commander","!")}${kpi("Mouvements","128","Ce mois","↔")}</div><article class="card"><div class="table"><table><thead><tr><th>Référence</th><th>Article</th><th>Catégorie</th><th>Stock</th><th>Minimum</th><th>Achat</th><th>Vente</th><th>Emplacement</th><th>État</th></tr></thead><tbody>${l.map(x=>`<tr><td><b>${x.sku}</b></td><td>${x.name}</td><td>${x.category}</td><td><b>${x.stock} ${x.unit}</b></td><td>${x.min} ${x.unit}</td><td>${money(x.buy)}</td><td>${money(x.sell)}</td><td>${x.location}</td><td>${status(x.stock<=x.min?"Stock faible":"Disponible")}</td></tr>`).join("")}</tbody></table></div></article>`},
-suppliers(){return `${section("Fournisseurs","Contacts, dépenses et performance.",`<button class="btn primary" data-action="new-supplier">+ Fournisseur</button>`)}<div class="grid g3">${db.suppliers.map(s=>`<article class="card"><div class="card-head"><div><p class="eyebrow">${s.category}</p><h3>${s.name}</h3></div><span>${"★".repeat(s.rating)}${"☆".repeat(5-s.rating)}</span></div><div class="mini-grid">${mini("Contact",s.contact)}${mini("Dépenses",money(s.spend))}${mini("E-mail",s.email)}${mini("Téléphone",s.phone)}</div></article>`).join("")}</div>`},
-vehicles(){return `${section("Parc de véhicules","Affectations, kilométrage et entretiens.",`<button class="btn primary" data-action="new-vehicle">+ Véhicule</button>`)}<div class="grid g2">${db.vehicles.filter(v=>visible(v.company)).map(v=>`<article class="card"><div class="card-head"><div><p class="eyebrow">${v.id} · ${v.plate}</p><h3>${v.brand} ${v.model}</h3></div>${status(v.status)}</div><div class="mini-grid">${mini("Entreprise",comp(v.company).name)}${mini("Conducteur",emp(v.driver).name)}${mini("Kilométrage",v.km.toLocaleString("fr-CH")+" km")}${mini("Prochain service",date(v.service))}</div></article>`).join("")}</div>`},
-tools(){return `${section("Outillage","Attribution, contrôles et inventaire.",`<button class="btn primary" data-action="new-tool">+ Outil</button>`)}<article class="card"><div class="table"><table><thead><tr><th>Référence</th><th>Équipement</th><th>Catégorie</th><th>N° série</th><th>Entreprise</th><th>Attribué à</th><th>Contrôle</th><th>Statut</th></tr></thead><tbody>${db.tools.filter(t=>visible(t.company)).map(t=>`<tr><td><b>${t.id}</b></td><td>${t.name}</td><td>${t.category}</td><td>${t.serial}</td><td>${comp(t.company).name}</td><td>${emp(t.assigned).name}</td><td>${date(t.check)}</td><td>${status(t.status)}</td></tr>`).join("")}</tbody></table></div></article>`},
-ai(){return `${section("Assistant IA Sousa","Analyse, rédaction, alertes et rapports.","")}<div class="ai"><article class="card ai-chat"><div class="ai-msgs" id="aiMsgs">${db.ai.map(m=>`<div class="ai-bubble ${m.role==="user"?"user":""}">${m.text}</div>`).join("")}</div><div class="composer"><input id="aiInput" placeholder="Ex. Résume le chantier SE-2026-0045"><button class="btn primary" data-action="ask-ai">Envoyer</button></div></article><aside class="card ai-prompts"><div class="card-head"><h3>Suggestions</h3></div>${["Analyse les stocks faibles","Résume le chantier SE-2026-0045","Factures à relancer","Analyse les heures supplémentaires","Prépare un rapport client"].map(x=>`<button class="btn secondary" onclick="quickAi('${x}')">${x}</button>`).join("")}<p class="muted" style="font-size:.66rem;margin-top:14px">Réponses simulées localement.</p></aside></div>`},
-roadmap(){let phases=[["Version 1 — Personnel",["Connexion et rôles","Fiches salariés","Pointage","Planning","Absences"]],["Version 2 — Opérations",["Clients et CRM","Chantiers","Photos","Matériel","Rentabilité"]],["Version 3 — Finance",["Devis","Factures","Paiements","Messagerie","Portail client"]],["Versions futures",["Stock intelligent","Véhicules","Maintenance","IA","Comptabilité","API"]]];return `${section("Versions actuelles et futures","Tous les modules prévus sont représentés.","")}<div class="roadmap section">${phases.map((p,i)=>`<div class="road-col"><div class="card-head"><h4>${p[0]}</h4>${status(i<3?"Intégré":"Prototype")}</div>${p[1].map(x=>`<div class="road-item">${x}</div>`).join("")}</div>`).join("")}</div><article class="card"><div class="card-head"><h3>Automatisations prévues</h3></div><div class="grid g3">${["Rappels de factures","Chantier après signature","Réapprovisionnement","Entretien véhicules","Rapports automatiques","Synchronisation comptable","Signature électronique","Notifications mobiles","API partenaires"].map(x=>`<div class="list-row"><b>${x}</b>${status("Prévu")}</div>`).join("")}</div></article>`},
-security(){let roles=["Administrateur","Direction","RH","Responsable","Comptabilité","Salarié","Client"];return `${section("Sécurité et accès","Permissions par rôle, entreprise et donnée.","")}<div class="grid g4 section">${kpi("2FA","Activée","Comptes sensibles","◇")}${kpi("Rôles",roles.length,"Configurés","♟")}${kpi("Sessions","6","4 appareils","◉")}${kpi("Sauvegardes","Quotidiennes","Architecture prévue","↻")}</div><article class="card"><div class="table"><table><thead><tr><th>Rôle</th><th>RH</th><th>Finance</th><th>Chantiers</th><th>Stock</th><th>Clients</th><th>Paramètres</th></tr></thead><tbody>${roles.map((r,i)=>`<tr><td><b>${r}</b></td>${[0,1,2,3,4,5].map(j=>`<td>${status(i===0||i===1?"Autorisé":j===2?"Autorisé":"Limité")}</td>`).join("")}</tr>`).join("")}</tbody></table></div></article>`},
-audit(){return `${section("Journal d’activité","Traçabilité des actions.",`<button class="btn secondary" data-action="export-audit">Exporter</button>`)}<article class="card"><div class="table"><table><thead><tr><th>Date</th><th>Utilisateur</th><th>Action</th><th>Objet</th><th>Détail</th></tr></thead><tbody>${db.audit.map(a=>`<tr><td>${a.date}</td><td><b>${a.user}</b></td><td>${status(a.action)}</td><td>${a.object}</td><td>${a.detail}</td></tr>`).join("")}</tbody></table></div></article>`},
-settings(){return `${section("Paramètres","Préférences, sauvegardes et données.","")}<div class="grid g2"><article class="card"><div class="card-head"><h3>Préférences</h3></div><label>Thème<select id="setTheme"><option value="dark">Sombre</option><option value="light">Clair</option></select></label><label>Langue<select><option>Français</option><option>English</option><option>Deutsch</option><option>Italiano</option><option>Português</option><option>Español</option><option>Shqip</option></select></label><label><input type="checkbox" checked style="width:auto"> Géolocalisation facultative</label><label><input type="checkbox" checked style="width:auto"> Rappels automatiques</label><button class="btn primary" data-action="save-settings">Enregistrer</button></article><article class="card"><div class="card-head"><h3>Sauvegarde</h3></div><p class="muted" style="font-size:.72rem">Exportez ou restaurez toutes les données locales.</p><button class="btn secondary wide" data-action="backup">Exporter JSON</button><button class="btn secondary wide" style="margin-top:8px" data-action="import">Importer JSON</button><button class="btn danger wide" style="margin-top:8px" data-action="reset">Réinitialiser</button><div class="mini-grid" style="margin-top:14px">${mini("Version",VERSION)}${mini("Stockage","Navigateur")}${mini("Hors ligne","Activé")}${mini("PWA","Installable")}</div></article></div>`}
+$("companyFilter").onchange = (e) => {
+  company = e.target.value;
+  render();
 };
-function employeeDash(){let e=emp(4),ps=db.projects.filter(p=>p.team.includes(4));return `<div class="grid g4 section">${kpi("Heures semaine",e.hours+" h","Objectif 42 h","◷")}${kpi("Prochain chantier","08h00","SE-2026-0045","▰")}${kpi("Vacances",e.vacation+" j","Disponibles","☀")}${kpi("Heures sup.","+"+e.overtime+" h","Solde","＋")}</div><div class="grid g2 section"><article class="card clock">${clockBox()}</article><article class="card"><div class="card-head"><h3>Planning du jour</h3></div><div class="timeline"><div class="tl"><span class="dot"></span><div><b>08h00–12h00 · Mme Dupont</b><p>SE-2026-0045</p></div></div><div class="tl"><span class="dot"></span><div><b>13h00–16h30 · Régie Arc</b><p>Contrôle final</p></div></div><div class="tl"><span class="dot"></span><div><b>16h30–17h00 · Dépôt</b><p>Retour matériel</p></div></div></div></article></div><div class="grid g2">${ps.map(projectCard).join("")}</div>`}
-function clientDash(){let p=db.projects[0];return `<div class="grid g3 section">${kpi("Chantier",p.id,p.title,"▰")}${kpi("Avancement",p.progress+" %","Aujourd’hui","↗")}${kpi("Prochaine visite","3 août · 08h00","2 techniciens","▦")}</div><div class="grid g2"><article class="card"><div class="card-head"><h3>${p.title}</h3>${status(p.status)}</div><p class="muted">${p.address}</p><div class="progress"><span style="width:${p.progress}%"></span></div><div class="progress-meta"><span>${date(p.start)}</span><span>${date(p.end)}</span></div><div class="timeline" style="margin-top:18px"><div class="tl"><span class="dot"></span><div><b>Tableau remplacé</b><p>Terminé · 6 photos</p></div></div><div class="tl"><span class="dot"></span><div><b>Prises et interrupteurs</b><p>En cours · 70 %</p></div></div><div class="tl"><span class="dot"></span><div><b>Contrôle final</b><p>Prévu le 7 août</p></div></div></div></article><article class="card"><div class="card-head"><h3>Documents récents</h3></div><div class="list">${["Devis signé.pdf","Facture d’acompte.pdf","Rapport d’avancement.pdf","Photos chantier.zip"].map(x=>`<div class="list-row"><div><b>▤ ${x}</b><small>Disponible</small></div><button class="btn small secondary">Ouvrir</button></div>`).join("")}</div></article></div>`}
-
-const actions={
-"new-company":()=>form("company"),"new-employee":()=>form("employee"),"new-project":()=>form("project"),"new-client":()=>form("client"),"new-quote":()=>form("quote"),"new-invoice":()=>form("invoice"),"new-payment":()=>form("payment"),"new-expense":()=>form("expense"),"new-stock":()=>form("stock"),"new-supplier":()=>form("supplier"),"new-vehicle":()=>form("vehicle"),"new-tool":()=>form("tool"),"new-maintenance":()=>form("maintenance"),"new-absence":()=>form("absence"),"new-planning":()=>form("planning"),
-"clock":()=>{db.clock.active=!db.clock.active;db.clock.break=false;db.clock.project=document.getElementById("clockProject")?.value||db.clock.project;save();audit(db.clock.active?"Début":"Fin","Pointage",db.clock.project);render();toast(db.clock.active?"Journée commencée":"Journée enregistrée")},
-"break":()=>{if(!db.clock.active)return toast("Commencez la journée");db.clock.break=!db.clock.break;save();render();toast(db.clock.break?"Pause commencée":"Travail repris")},
-"approve-time":()=>{db.time.forEach(t=>t.status="Validé");save();audit("Validation","Pointages","Semaine validée");render();toast("Heures validées")},
-"send-message":()=>{let i=document.getElementById("messageText");if(!i.value.trim())return;db.messages.push({id:Date.now(),sender:profiles[session.role].name,kind:"us",text:i.value.trim(),time:new Date().toLocaleTimeString("fr-CH",{hour:"2-digit",minute:"2-digit"})});save();render();toast("Message envoyé")},
-"ask-ai":()=>{let i=document.getElementById("aiInput");if(i.value.trim())quickAi(i.value.trim())},
-"export-report":()=>exportRows("rapport",[["Chantier","Budget","Coût","Marge"],...db.projects.map(p=>[p.id,p.budget,p.cost,p.budget-p.cost])]),
-"export-employees":()=>exportRows("salaries",[["Nom","Fonction","Entreprise","Heures","Vacances"],...db.employees.map(e=>[e.name,e.job,comp(e.company).name,e.hours,e.vacation])]),
-"export-time":()=>exportRows("heures",[["Date","Salarié","Chantier","Début","Fin","Total"],...db.time.map(t=>[t.date,emp(t.employeeId).name,t.project,t.start,t.end,t.hours])]),
-"export-planning":()=>toast("Planning exporté"),
-"export-projects":()=>exportRows("chantiers",[["Numéro","Client","Titre","Statut","Budget","Coût"],...db.projects.map(p=>[p.id,cli(p.clientId).name,p.title,p.status,p.budget,p.cost])]),
-"export-clients":()=>exportRows("clients",[["Client","Type","E-mail","Téléphone","Ville","CA"],...db.clients.map(c=>[c.name,c.type,c.email,c.phone,c.city,c.revenue])]),
-"export-quotes":()=>exportRows("devis",[["Numéro","Client","Montant","Statut"],...db.quotes.map(q=>[q.id,cli(q.clientId).name,q.amount,q.status])]),
-"export-invoices":()=>exportRows("factures",[["Numéro","Client","Montant","Payé","Statut"],...db.invoices.map(i=>[i.id,cli(i.clientId).name,i.amount,i.paid,i.status])]),
-"export-expenses":()=>exportRows("depenses",[["Référence","Fournisseur","Chantier","Montant"],...db.expenses.map(e=>[e.id,e.supplier,e.project,e.amount])]),
-"export-stock":()=>exportRows("stock",[["Référence","Article","Stock","Minimum"],...db.inventory.map(i=>[i.sku,i.name,i.stock,i.min])]),
-"export-audit":()=>exportRows("journal",[["Date","Utilisateur","Action","Objet","Détail"],...db.audit.map(a=>[a.date,a.user,a.action,a.object,a.detail])]),
-"backup":backup,"import":()=>document.getElementById("importFile").click(),"reset":()=>{if(confirm("Réinitialiser toutes les données ?")){reset();shell();toast("Données réinitialisées")}},
-"save-settings":()=>{db.settings.theme=document.getElementById("setTheme").value;save();theme();toast("Paramètres enregistrés")}
+function render() {
+  if (!state || !profile) return;
+  if (!menus[page]?.[1].includes(profile.role)) page = "dashboard";
+  $("title").textContent = menus[page][0];
+  $("userName").textContent = profile.name + " · " + roles[profile.role];
+  $("nav").innerHTML = Object.entries(menus)
+    .filter(
+      ([k, [, rs]]) =>
+        rs.includes(profile.role) &&
+        (k !== "users" || profile.company === "group"),
+    )
+    .map(
+      ([k, [label]]) =>
+        `<button class="nav-item ${page === k ? "active" : ""}" data-page="${k}">${esc(label)}</button>`,
+    )
+    .join("");
+  $("companyFilter").innerHTML =
+    '<option value="">Toutes mes données</option>' +
+    state.companies
+      .filter((c) => c.id !== "group")
+      .map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`)
+      .join("");
+  $("companyFilter").value = company;
+  $("content").innerHTML = views[page] ? views[page]() : genericPage(page);
+  if (page === "users") loadUsers();
+  if (page === "audit") loadAudit();
+}
+function projectRows(list) {
+  return table(
+    ["Chantier", "Client", "Statut", "Avancement", "Actions"],
+    list.map((p) => [
+      esc(p.title) + "<br><small>" + esc(p.id) + "</small>",
+      esc(name("clients", p.clientId)),
+      badge(p.status),
+      esc(p.progress || 0) + " %",
+      btn("Ouvrir", "project", p.id),
+    ]),
+  );
+}
+function sum(k, field) {
+  return visible(k).reduce((n, r) => n + (Number(r[field]) || 0), 0);
+}
+function dashboard() {
+  if (profile.role === "client")
+    return (
+      heading("Mes chantiers") +
+      cards([
+        ["Chantiers", visible("projects").length],
+        ["Factures", visible("invoices").length],
+        [
+          "Solde à payer",
+          money(sum("invoices", "amount") - sum("invoices", "paid")),
+        ],
+      ]) +
+      projectRows(visible("projects"))
+    );
+  if (profile.role === "employee") {
+    const e = find("employees", profile.employee_id);
+    return (
+      cards([
+        ["Heures enregistrées", sum("time", "hours").toFixed(2) + " h"],
+        ["Vacances disponibles", (e?.vacation ?? 0) + " jours"],
+        ["Chantiers affectés", visible("projects").length],
+      ]) +
+      clockView() +
+      projectRows(visible("projects"))
+    );
+  }
+  return (
+    cards([
+      ["Salariés visibles", visible("employees").length],
+      [
+        "Chantiers ouverts",
+        visible("projects").filter((p) => p.status !== "Terminé").length,
+      ],
+      ["Encaissements enregistrés", money(sum("payments", "amount"))],
+    ]) +
+    heading("Chantiers") +
+    projectRows(visible("projects"))
+  );
+}
+function clockView() {
+  if (!profile.employee_id) return "";
+  const c = state.clocks[0];
+  return `<article class="card section"><h3>Mon pointage</h3><p>${c ? `Commencé le ${esc(new Date(c.startedAt).toLocaleString("fr-CH"))} · ${c.pauseAt ? "En pause" : "En cours"}` : "Aucun pointage actif"}</p>${c ? btn(c.pauseAt ? "Reprendre" : "Pause", c.pauseAt ? "clock.resume" : "clock.pause") + " " + btn("Terminer", "clock.stop", "", "danger") : `<label for="clockProject">Chantier</label><select id="clockProject">${options("projects")}</select>${btn("Commencer", "clock.start", "", "primary")}`}</article>`;
+}
+function timeView() {
+  return (
+    clockView() +
+    heading("Heures enregistrées", btn("Exporter CSV", "export", "time")) +
+    table(
+      ["Salarié", "Chantier", "Début", "Fin", "Pause", "Heures", "Statut", ""],
+      visible("time").map((t) => [
+        esc(name("employees", t.employeeId)),
+        esc(t.project),
+        esc(
+          t.startedAt ? new Date(t.startedAt).toLocaleString("fr-CH") : t.start,
+        ),
+        esc(t.endedAt ? new Date(t.endedAt).toLocaleString("fr-CH") : t.end),
+        esc(t.break) + " min",
+        Number(t.hours).toFixed(2),
+        badge(t.status),
+        can([...hr, "manager"]) && t.status !== "Validé"
+          ? btn("Valider", "time.approve", t.id)
+          : "",
+      ]),
+    )
+  );
+}
+function planningView() {
+  return (
+    heading(
+      "Affectations",
+      can(ops)
+        ? btn("Planifier", "new", "planning", "primary") +
+            " " +
+            btn("Exporter CSV", "export", "planning")
+        : btn("Exporter CSV", "export", "planning"),
+    ) +
+    table(
+      ["Date", "Début", "Fin", "Salarié", "Chantier", "Lieu", ""],
+      [...visible("planning")]
+        .sort(
+          (a, b) =>
+            a.date.localeCompare(b.date) || a.start.localeCompare(b.start),
+        )
+        .map((p) => [
+          date(p.date),
+          esc(p.start),
+          esc(p.end),
+          esc(name("employees", p.employeeId)),
+          esc(p.project),
+          esc(p.location),
+          can(ops) ? btn("Supprimer", "planning.delete", p.id, "danger") : "",
+        ]),
+    )
+  );
+}
+function absenceView() {
+  return (
+    heading(
+      "Absences",
+      can([...hr, "employee"])
+        ? btn("Demander une absence", "absence-form", "", "primary")
+        : "",
+    ) +
+    table(
+      ["Salarié", "Type", "Du", "Au", "Jours ouvrés", "État", ""],
+      visible("absences").map((a) => [
+        esc(name("employees", a.employeeId)),
+        esc(a.type),
+        date(a.from),
+        date(a.to),
+        esc(a.days),
+        badge(a.status),
+        can(hr) && a.status === "En attente"
+          ? btn("Approuver", "absence.approve", a.id) +
+            " " +
+            btn("Refuser", "absence.reject", a.id)
+          : "",
+      ]),
+    )
+  );
+}
+function financeView(k) {
+  const quote = k === "quotes";
+  return (
+    heading(
+      quote ? "Devis" : "Factures",
+      can(fin)
+        ? btn("Créer", "new", k, "primary") +
+            " " +
+            btn("Exporter CSV", "export", k)
+        : "",
+    ) +
+    table(
+      [
+        "Numéro",
+        "Client",
+        "Objet",
+        "Montant",
+        "Échéance",
+        ...(quote ? [] : ["Payé", "Solde"]),
+        "Statut",
+        "",
+      ],
+      visible(k).map((r) => [
+        esc(r.id),
+        esc(name("clients", r.clientId)),
+        esc(r.title),
+        money(r.amount),
+        date(quote ? r.valid : r.due),
+        ...(quote ? [] : [money(r.paid), money(r.amount - (r.paid || 0))]),
+        badge(
+          !quote &&
+            r.status !== "Brouillon" &&
+            r.status !== "Payée" &&
+            r.due < today()
+            ? "En retard"
+            : r.status,
+        ),
+        btn("Ouvrir", quote ? "quote" : "invoice", r.id),
+      ]),
+    )
+  );
+}
+function documentsView() {
+  return (
+    heading(
+      "Documents",
+      profile.role !== "client"
+        ? btn("Ajouter un fichier", "document-form", "", "primary")
+        : "",
+    ) +
+    table(
+      ["Fichier", "Dossier", "Taille", "Date", ""],
+      visible("documents").map((d) => [
+        esc(d.name),
+        esc(
+          d.project ||
+            name(
+              d.employeeId ? "employees" : "clients",
+              d.employeeId || d.clientId,
+            ),
+        ),
+        Math.ceil(d.size / 1024) + " Ko",
+        date(d.createdAt),
+        btn("Télécharger", "download", d.id),
+      ]),
+    )
+  );
+}
+function messagesView() {
+  if (!contacts.length)
+    return '<article class="card empty">Aucun destinataire disponible. Un administrateur doit créer et activer les comptes des interlocuteurs.</article>';
+  if (!contacts.some((c) => same(c.id, selectedRecipient)))
+    selectedRecipient = String(contacts[0].id);
+  const list = state.messages.filter(
+    (m) =>
+      same(m.senderId, selectedRecipient) ||
+      same(m.recipientId, selectedRecipient),
+  );
+  return `<article class="card"><label for="recipient">Conversation avec</label><select id="recipient">${contacts.map((c) => `<option value="${c.id}" ${same(c.id, selectedRecipient) ? "selected" : ""}>${esc(c.name)} · ${esc(roles[c.role])}</option>`).join("")}</select><div class="messages">${list.map((m) => `<div class="message ${same(m.senderId, profile.id) ? "mine" : ""}"><p class="prewrap">${esc(m.text)}</p><small>${esc(m.sender)} · ${esc(new Date(m.createdAt).toLocaleString("fr-CH"))}</small></div>`).join("") || '<p class="muted">Aucun message.</p>'}</div><form id="messageForm"><label for="messageText">Message</label><textarea id="messageText" name="text" maxlength="5000" required></textarea><p id="formError" class="error" role="alert"></p><button type="submit" class="btn primary">Envoyer</button></form></article>`;
+}
+function reportsView() {
+  const months = new Map();
+  for (const p of visible("payments")) {
+    const m = p.date.slice(0, 7);
+    months.set(m, (months.get(m) || 0) + p.amount);
+  }
+  return (
+    heading(
+      "Rapports sur les données visibles",
+      btn("Exporter CSV", "export", "projects"),
+    ) +
+    cards([
+      ["Heures enregistrées", sum("time", "hours").toFixed(2) + " h"],
+      ["Coûts chantiers", money(sum("projects", "cost"))],
+      [
+        "Budget moins coûts",
+        money(sum("projects", "budget") - sum("projects", "cost")),
+      ],
+    ]) +
+    table(
+      ["Mois", "Encaissements"],
+      [...months].sort().map(([m, n]) => [esc(m), money(n)]),
+    )
+  );
+}
+const views = {
+  dashboard,
+  time: timeView,
+  planning: planningView,
+  absences: absenceView,
+  projects: () =>
+    heading(
+      "Chantiers",
+      can(ops) ? btn("Créer un chantier", "new", "projects", "primary") : "",
+    ) + projectRows(visible("projects")),
+  quotes: () => financeView("quotes"),
+  invoices: () => financeView("invoices"),
+  documents: documentsView,
+  messages: messagesView,
+  reports: reportsView,
+  users: () =>
+    heading(
+      "Comptes utilisateurs",
+      btn("Créer un accès", "user-form", "", "primary"),
+    ) + '<div id="usersList">Chargement…</div>',
+  audit: () =>
+    heading("Journal serveur") + '<div id="auditList">Chargement…</div>',
+  settings: () =>
+    heading("Mon compte") +
+    `<article class="card"><p>${esc(profile.email)}</p><p>Authentification : mot de passe. Double authentification non configurée.</p>${btn("Changer mon mot de passe", "password-form")}<p class="muted">Les sauvegardes de la base et des fichiers doivent être configurées chez l’hébergeur. Aucun statut de sauvegarde automatique n’est présumé.</p></article>`,
 };
-function exportRows(n,r){download(`Sousa_Group_One_${n}.csv`,"\ufeff"+csv(r),"text/csv;charset=utf-8");toast("Export créé")}
-function backup(){download(`Sousa_Group_One_sauvegarde_${new Date().toISOString().slice(0,10)}.json`,JSON.stringify(db,null,2),"application/json");toast("Sauvegarde exportée")}
-function importBackup(e){let f=e.target.files[0];if(!f)return;let r=new FileReader();r.onload=()=>{try{let d=JSON.parse(r.result);if(!d.projects)throw Error();db=d;save();shell();toast("Sauvegarde restaurée")}catch(x){alert("Fichier invalide")}};r.readAsText(f);e.target.value=""}
-function quickAi(prompt){db.ai.push({role:"user",text:prompt});let p=prompt.toLowerCase(),a;if(p.includes("stock")){let l=db.inventory.filter(x=>x.stock<=x.min);a=`${l.length} stocks faibles : ${l.map(x=>`${x.name} (${x.stock} ${x.unit})`).join(", ")}. Une commande fournisseur est recommandée.`}else if(p.includes("se-2026-0045")||p.includes("résume")){let x=db.projects[0];a=`Le chantier ${x.id} est à ${x.progress} %. ${x.hours} heures ont été enregistrées. Budget : ${money(x.budget)}. Coût actuel : ${money(x.cost)}.`}else if(p.includes("facture")){let l=db.invoices.filter(x=>x.status==="En retard");a=`${l.length} facture à relancer : ${l.map(x=>`${x.id}, ${cli(x.clientId).name}, ${money(x.amount)}`).join("; ")}.`}else if(p.includes("heure")){let total=db.employees.reduce((a,b)=>a+b.overtime,0);a=`Le solde d’heures supplémentaires est de ${total.toFixed(2)} h. Joao Sousa et Lucas Moreira ont les soldes les plus élevés.`}else if(p.includes("rapport"))a="Rapport proposé : travaux réalisés, avancement, photos, prochaines étapes, changements validés et date estimée de fin.";else a="J’ai analysé les données locales. La version de production pourra utiliser une véritable IA sécurisée.";db.ai.push({role:"assistant",text:a});save();render()}
-function approveAbsence(id){let a=db.absences.find(x=>x.id===id);modal("Traiter la demande",`<p><b>${emp(a.employeeId).name}</b> demande ${a.days} jour(s) de ${a.type.toLowerCase()}.</p><div class="form-actions"><button class="btn danger" onclick="setAbsence(${id},'Refusée')">Refuser</button><button class="btn primary" onclick="setAbsence(${id},'Approuvée')">Approuver</button></div>`)}
-function setAbsence(id,s){db.absences.find(x=>x.id===id).status=s;save();audit("Validation","Absence",s);closeModal();render();toast("Demande "+s.toLowerCase())}
-function form(type){let co=db.companies.filter(c=>c.id!=="group").map(c=>({value:c.id,label:c.name})),cl=db.clients.map(c=>({value:c.id,label:c.name})),em=db.employees.map(e=>({value:e.id,label:e.name})),t,h;
-if(type==="company"){t="Nouvelle entreprise";h=field("Nom","f_name")+field("Code","f_code")+field("Secteur","f_type")}
-if(type==="employee"){t="Nouveau salarié";h=field("Nom","f_name")+field("Fonction","f_job")+field("Entreprise","f_company","text","",false,co)+field("E-mail","f_email","email")+field("Téléphone","f_phone","tel")+field("Salaire","f_salary","number")+field("Taux d’activité","f_activity","number","100")+field("Date d’entrée","f_entry","date")}
-if(type==="project"){t="Nouveau chantier";h=field("Titre","f_title")+field("Entreprise","f_company","text","",false,co)+field("Client","f_client","text","",false,cl)+field("Adresse","f_address","text","",true)+field("Début","f_start","date")+field("Fin","f_end","date")+field("Budget","f_budget","number")+area("Description","f_desc")}
-if(type==="client"){t="Nouveau client";h=field("Nom","f_name")+field("Type","f_type")+field("E-mail","f_email","email")+field("Téléphone","f_phone","tel")+field("Ville","f_city")}
-if(type==="quote"){t="Nouveau devis";h=field("Client","f_client","text","",false,cl)+field("Objet","f_title")+field("Montant","f_amount","number")+field("Validité","f_valid","date")}
-if(type==="invoice"){t="Nouvelle facture";h=field("Client","f_client","text","",false,cl)+field("Chantier","f_project")+field("Objet","f_title")+field("Montant","f_amount","number")+field("Échéance","f_due","date")}
-if(type==="payment"){t="Nouveau paiement";h=field("Facture","f_invoice")+field("Client","f_client","text","",false,cl)+field("Montant","f_amount","number")+field("Date","f_date","date")+field("Mode","f_method","text","Virement")}
-if(type==="expense"){t="Nouvelle dépense";h=field("Entreprise","f_company","text","",false,co)+field("Fournisseur","f_supplier")+field("Chantier","f_project")+field("Montant","f_amount","number")+field("Date","f_date","date")}
-if(type==="stock"){t="Nouvel article";h=field("Référence","f_sku")+field("Nom","f_name")+field("Catégorie","f_category")+field("Stock","f_stock","number")+field("Minimum","f_min","number")+field("Unité","f_unit","text","pcs")+field("Achat","f_buy","number")+field("Vente","f_sell","number")}
-if(type==="supplier"){t="Nouveau fournisseur";h=field("Nom","f_name")+field("Catégorie","f_category")+field("Contact","f_contact")+field("E-mail","f_email","email")+field("Téléphone","f_phone","tel")}
-if(type==="vehicle"){t="Nouveau véhicule";h=field("Référence","f_id")+field("Plaque","f_plate")+field("Marque","f_brand")+field("Modèle","f_model")+field("Entreprise","f_company","text","",false,co)+field("Conducteur","f_driver","text","",false,em)+field("Kilométrage","f_km","number")}
-if(type==="tool"){t="Nouvel outil";h=field("Référence","f_id")+field("Nom","f_name")+field("Catégorie","f_category")+field("N° série","f_serial")+field("Entreprise","f_company","text","",false,co)+field("Attribué à","f_assigned","text","",false,em)}
-if(type==="maintenance"){t="Nouveau contrat";h=field("Client","f_client","text","",false,cl)+field("Titre","f_title")+field("Entreprise","f_company","text","",false,co)+field("Fréquence","f_frequency","text","Mensuelle")+field("Prochaine visite","f_next","date")+field("Valeur annuelle","f_amount","number")}
-if(type==="absence"){t="Nouvelle demande";h=field("Salarié","f_employee","text","",false,em)+field("Type","f_type","text","Vacances")+field("Du","f_from","date")+field("Au","f_to","date")+area("Commentaire","f_comment")}
-if(type==="planning"){t="Planifier";h=field("Chantier","f_project")+field("Salarié","f_employee","text","",false,em)+field("Date","f_date","date")+field("Début","f_start","time")+field("Fin","f_end","time")+field("Lieu","f_location")}
-modal(t,`<div class="form-grid">${h}</div>${formBtns(`saveEntity('${type}')`)}`)}
-function saveEntity(type){let now=new Date().toISOString().slice(0,10);
-if(type==="company")db.companies.push({id:val("f_code").toLowerCase(),code:val("f_code"),name:val("f_name"),type:val("f_type"),employees:0});
-if(type==="employee")db.employees.push({id:Date.now(),name:val("f_name"),initials:val("f_name").split(" ").map(x=>x[0]).join("").slice(0,2),job:val("f_job"),company:val("f_company"),email:val("f_email"),phone:val("f_phone"),salary:+val("f_salary"),activity:+val("f_activity"),status:"Présent",hours:0,overtime:0,vacation:20,entry:val("f_entry"),vehicle:""});
-if(type==="project"){let c=comp(val("f_company"));db.projects.push({id:`${c.code}-${new Date().getFullYear()}-${String(db.projects.length+1).padStart(4,"0")}`,company:c.id,clientId:+val("f_client"),title:val("f_title"),address:val("f_address"),team:[],status:"Nouveau",progress:0,start:val("f_start"),end:val("f_end"),budget:+val("f_budget"),cost:0,hours:0,materials:0,photos:0,docs:0,description:val("f_desc")})}
-if(type==="client")db.clients.push({id:Date.now(),name:val("f_name"),type:val("f_type"),email:val("f_email"),phone:val("f_phone"),city:val("f_city"),status:"Prospect",projects:0,revenue:0});
-if(type==="quote")db.quotes.push({id:`D-${new Date().getFullYear()}-${String(db.quotes.length+112).padStart(4,"0")}`,clientId:+val("f_client"),title:val("f_title"),amount:+val("f_amount"),status:"Brouillon",date:now,valid:val("f_valid")});
-if(type==="invoice")db.invoices.push({id:`F-${new Date().getFullYear()}-${String(db.invoices.length+89).padStart(4,"0")}`,clientId:+val("f_client"),project:val("f_project"),title:val("f_title"),amount:+val("f_amount"),paid:0,status:"Brouillon",date:now,due:val("f_due")});
-if(type==="payment")db.payments.push({id:`P-${new Date().getFullYear()}-${String(db.payments.length+62).padStart(4,"0")}`,invoice:val("f_invoice"),clientId:+val("f_client"),amount:+val("f_amount"),date:val("f_date"),method:val("f_method"),status:"Confirmé"});
-if(type==="expense")db.expenses.push({id:`A-${new Date().getFullYear()}-${String(db.expenses.length+107).padStart(4,"0")}`,company:val("f_company"),supplier:val("f_supplier"),project:val("f_project"),amount:+val("f_amount"),date:val("f_date"),category:"Matériel",status:"À valider"});
-if(type==="stock")db.inventory.push({id:Date.now(),sku:val("f_sku"),name:val("f_name"),category:val("f_category"),stock:+val("f_stock"),min:+val("f_min"),unit:val("f_unit"),buy:+val("f_buy"),sell:+val("f_sell"),location:"Dépôt"});
-if(type==="supplier")db.suppliers.push({id:Date.now(),name:val("f_name"),category:val("f_category"),contact:val("f_contact"),email:val("f_email"),phone:val("f_phone"),rating:4,spend:0});
-if(type==="vehicle")db.vehicles.push({id:val("f_id"),plate:val("f_plate"),brand:val("f_brand"),model:val("f_model"),company:val("f_company"),driver:+val("f_driver"),km:+val("f_km"),status:"Disponible",service:""});
-if(type==="tool")db.tools.push({id:val("f_id"),name:val("f_name"),category:val("f_category"),serial:val("f_serial"),company:val("f_company"),assigned:+val("f_assigned"),status:"Attribué",check:""});
-if(type==="maintenance")db.maintenance.push({id:`CTR-${String(db.maintenance.length+1).padStart(3,"0")}`,clientId:+val("f_client"),title:val("f_title"),company:val("f_company"),frequency:val("f_frequency"),next:val("f_next"),amount:+val("f_amount"),status:"Proposé"});
-if(type==="absence"){let f=new Date(val("f_from")),t=new Date(val("f_to")),days=Math.max(1,Math.round((t-f)/86400000)+1);db.absences.push({id:Date.now(),employeeId:+val("f_employee"),type:val("f_type"),from:val("f_from"),to:val("f_to"),days,status:"En attente",comment:val("f_comment")})}
-save();audit("Création",type,"Nouvel élément");closeModal();render();toast("Élément créé")}
-function openEmployee(id){let e=emp(id);modal("Fiche salarié · "+e.name,`<div class="detail"><div class="detail-avatar">${e.initials}</div><div><h3>${e.name}</h3><p class="muted">${e.job} · ${comp(e.company).name}</p></div></div><div class="tabs"><button class="tab active">Résumé</button><button class="tab">Contrat</button><button class="tab">Heures</button><button class="tab">Absences</button><button class="tab">Documents</button></div><div class="mini-grid">${mini("E-mail",e.email)}${mini("Téléphone",e.phone)}${mini("Activité",e.activity+" %")}${mini("Salaire",money(e.salary))}${mini("Heures",e.hours+" h")}${mini("Heures sup.",e.overtime+" h")}${mini("Vacances",e.vacation+" j")}${mini("Véhicule",e.vehicle||"Aucun")}</div>`)}
-function openClient(id){let c=cli(id),ps=db.projects.filter(p=>p.clientId===id);modal("Client · "+c.name,`<div class="detail"><div class="detail-avatar">${c.name.split(" ").map(x=>x[0]).join("").slice(0,2)}</div><div><h3>${c.name}</h3><p class="muted">${c.type} · ${c.city}</p></div></div><div class="mini-grid">${mini("E-mail",c.email)}${mini("Téléphone",c.phone)}${mini("Chantiers",ps.length)}${mini("CA",money(c.revenue))}</div><div class="list" style="margin-top:14px">${ps.map(p=>`<div class="list-row"><div><b>${p.id}</b><small>${p.title}</small></div>${status(p.status)}</div>`).join("")}</div>`)}
-function openProject(id){let p=db.projects.find(x=>x.id===id);modal(`${p.id} · ${cli(p.clientId).name}`,`<div class="tabs"><button class="tab active">Résumé</button><button class="tab">Équipe</button><button class="tab">Heures</button><button class="tab">Matériel</button><button class="tab">Photos</button><button class="tab">Documents</button><button class="tab">Finance</button></div><div class="grid g2"><div class="mini-grid">${mini("Entreprise",comp(p.company).name)}${mini("Statut",p.status)}${mini("Début",date(p.start))}${mini("Fin",date(p.end))}${mini("Budget",money(p.budget))}${mini("Coût",money(p.cost))}${mini("Marge",money(p.budget-p.cost))}${mini("Heures",p.hours+" h")}</div><div><h4>Avancement</h4><div class="progress"><span style="width:${p.progress}%"></span></div><p class="muted" style="font-size:.7rem;margin-top:14px">${p.description}</p></div></div><div class="grid g3" style="margin-top:14px">${mini("Matériel",p.materials)}${mini("Photos",p.photos)}${mini("Documents",p.docs)}</div>`)}
-function openDoc(id,kind){let d=kind==="quote"?db.quotes.find(x=>x.id===id):db.invoices.find(x=>x.id===id),c=cli(d.clientId);modal(`${kind==="quote"?"Devis":"Facture"} ${id}`,`<div class="doc-actions"><button class="btn secondary" onclick="window.print()">Imprimer / PDF</button>${kind==="quote"&&session.role==="client"?`<button class="btn primary" onclick="acceptQuote('${id}')">Accepter et signer</button>`:""}</div><div class="document"><div class="document-head"><div><h2>SOUSA GROUP</h2><p>Sousa Électricité · Sousa Home Service · Sousa Tech</p></div><div><b>${kind==="quote"?"DEVIS":"FACTURE"}</b><br>${id}<br>${date(d.date)}</div></div><div style="display:grid;grid-template-columns:1fr 1fr;gap:30px;margin:28px 0"><div><b>Émetteur</b><p>Sousa Group<br>Vaud, Suisse</p></div><div><b>Client</b><p>${c.name}<br>${c.city}<br>${c.email}</p></div></div><table><thead><tr><th>Description</th><th>Qté</th><th>Prix</th><th>Total</th></tr></thead><tbody><tr><td>${d.title}</td><td>1</td><td>${money(d.amount)}</td><td>${money(d.amount)}</td></tr></tbody></table><div class="doc-total"><b>Total TTC : ${money(d.amount)}</b></div></div>`)}
-function acceptQuote(id){db.quotes.find(x=>x.id===id).status="Accepté";save();audit("Signature","Devis "+id,"Accepté");closeModal();render();toast("Devis accepté")}
-window.closeModal=closeModal;window.session=session;window.nav=nav;window.render=render;window.saveEntity=saveEntity;window.approveAbsence=approveAbsence;window.setAbsence=setAbsence;window.quickAi=quickAi;window.acceptQuote=acceptQuote;window.readNotifications=readNotifications;
-window.addEventListener("beforeinstallprompt",e=>{e.preventDefault();installPrompt=e;document.getElementById("installBtn").classList.remove("hidden")});document.getElementById("installBtn").onclick=async()=>{if(installPrompt){installPrompt.prompt();await installPrompt.userChoice;installPrompt=null;document.getElementById("installBtn").classList.add("hidden")}};
-if("serviceWorker"in navigator)navigator.serviceWorker.register("service-worker.js").catch(()=>{});
+const columns = {
+  companies: [
+    ["name", "Entreprise"],
+    ["type", "Secteur"],
+  ],
+  employees: [
+    ["name", "Nom"],
+    ["job", "Fonction"],
+    ["email", "E-mail"],
+    ["company", "Entreprise"],
+    ["vacation", "Vacances"],
+  ],
+  clients: [
+    ["name", "Nom"],
+    ["email", "E-mail"],
+    ["phone", "Téléphone"],
+    ["city", "Ville"],
+  ],
+  payments: [
+    ["invoice", "Facture"],
+    ["amount", "Montant"],
+    ["date", "Date"],
+    ["method", "Mode"],
+  ],
+  expenses: [
+    ["supplier", "Fournisseur"],
+    ["project", "Chantier"],
+    ["amount", "Montant"],
+    ["date", "Date"],
+  ],
+  inventory: [
+    ["sku", "Référence"],
+    ["name", "Article"],
+    ["stock", "Stock"],
+    ["min", "Minimum"],
+    ["unit", "Unité"],
+    ["buy", "Achat"],
+    ["sell", "Vente"],
+  ],
+  suppliers: [
+    ["name", "Nom"],
+    ["contact", "Contact"],
+    ["email", "E-mail"],
+    ["phone", "Téléphone"],
+  ],
+  vehicles: [
+    ["plate", "Plaque"],
+    ["brand", "Marque"],
+    ["model", "Modèle"],
+    ["km", "Kilométrage"],
+    ["service", "Entretien"],
+  ],
+  tools: [
+    ["name", "Nom"],
+    ["serial", "N° série"],
+    ["status", "État"],
+  ],
+  maintenance: [
+    ["title", "Contrat"],
+    ["clientId", "Client"],
+    ["frequency", "Fréquence"],
+    ["next", "Prochaine visite"],
+    ["amount", "Valeur annuelle"],
+  ],
+};
+function genericPage(k) {
+  const cols = columns[k] || [];
+  return (
+    heading(
+      menus[k][0],
+      (createRoles[k] && can(createRoles[k])
+        ? btn("Ajouter", "new", k, "primary") + " "
+        : "") + btn("Exporter CSV", "export", k),
+    ) +
+    table(
+      [
+        ...cols.map((c) => c[1]),
+        ...(["employees", "clients"].includes(k) && profile.role === "admin"
+          ? ["Accès"]
+          : []),
+      ],
+      visible(k).map((r) => [
+        ...cols.map(([f]) =>
+          ["amount", "buy", "sell", "salary"].includes(f)
+            ? money(r[f])
+            : ["date", "next", "service"].includes(f)
+              ? date(r[f])
+              : f === "clientId"
+                ? esc(name("clients", r[f]))
+                : f === "company"
+                  ? esc(name("companies", r[f]))
+                  : esc(r[f] ?? "—"),
+        ),
+        ...(["employees", "clients"].includes(k) && profile.role === "admin"
+          ? [btn("Créer un compte", "linked-user", k + ":" + r.id)]
+          : []),
+      ]),
+    )
+  );
+}
+function options(k, blank = false) {
+  return (
+    (blank ? '<option value="">Aucun</option>' : "") +
+    (state[k] || [])
+      .filter((r) => k !== "companies" || r.id !== "group")
+      .map(
+        (r) =>
+          `<option value="${esc(r.id)}">${esc(r.name || r.title || r.id)}</option>`,
+      )
+      .join("")
+  );
+}
+// Field definitions shared by the creation dialogs; server validation remains authoritative.
+const schemas = {
+  companies: [
+    ["name", "Nom"],
+    ["code", "Code"],
+    ["type", "Secteur"],
+  ],
+  employees: [
+    ["name", "Nom"],
+    ["job", "Fonction"],
+    ["company", "Entreprise", "@companies"],
+    ["email", "E-mail", "email"],
+    ["phone", "Téléphone", "tel?"],
+    ["salary", "Salaire mensuel CHF", "number"],
+    ["activity", "Taux d’activité %", "number", "100"],
+    ["vacation", "Solde de vacances (jours)", "number", "20"],
+    ["entry", "Date d’entrée", "date"],
+  ],
+  clients: [
+    ["name", "Nom"],
+    ["company", "Entreprise", "@companies"],
+    ["email", "E-mail", "email"],
+    ["phone", "Téléphone", "tel?"],
+    ["city", "Ville"],
+    ["type", "Type", "text?"],
+  ],
+  projects: [
+    ["title", "Titre"],
+    ["company", "Entreprise", "@companies"],
+    ["clientId", "Client", "@clients"],
+    ["address", "Adresse"],
+    ["start", "Début", "date"],
+    ["end", "Fin", "date"],
+    ["budget", "Budget CHF", "number"],
+    ["description", "Description", "textarea?"],
+  ],
+  planning: [
+    ["employeeId", "Salarié", "@employees"],
+    ["project", "Chantier", "@projects"],
+    ["date", "Date", "date"],
+    ["start", "Début", "time"],
+    ["end", "Fin", "time"],
+    ["location", "Lieu", "text?"],
+  ],
+  quotes: [
+    ["company", "Entreprise", "@companies"],
+    ["clientId", "Client", "@clients"],
+    ["project", "Chantier", "@projects?"],
+    ["title", "Objet"],
+    ["date", "Date", "date"],
+    ["valid", "Valable jusqu’au", "date"],
+  ],
+  invoices: [
+    ["company", "Entreprise", "@companies"],
+    ["clientId", "Client", "@clients"],
+    ["project", "Chantier", "@projects?"],
+    ["title", "Objet"],
+    ["date", "Date", "date"],
+    ["due", "Échéance", "date"],
+  ],
+  payments: [
+    ["invoice", "Facture", "@invoices"],
+    ["amount", "Montant CHF", "number"],
+    ["date", "Date", "date"],
+    ["method", "Mode", "text", "Virement"],
+  ],
+  expenses: [
+    ["company", "Entreprise", "@companies"],
+    ["supplier", "Fournisseur"],
+    ["project", "Chantier", "@projects?"],
+    ["amount", "Montant CHF", "number"],
+    ["date", "Date", "date"],
+  ],
+  inventory: [
+    ["company", "Entreprise", "@companies"],
+    ["sku", "Référence"],
+    ["name", "Nom"],
+    ["category", "Catégorie", "text?"],
+    ["stock", "Stock", "number", "0"],
+    ["min", "Minimum", "number", "0"],
+    ["unit", "Unité", "text", "pcs"],
+    ["buy", "Achat CHF", "number", "0"],
+    ["sell", "Vente CHF", "number", "0"],
+  ],
+  suppliers: [
+    ["company", "Entreprise", "@companies"],
+    ["name", "Nom"],
+    ["contact", "Contact", "text?"],
+    ["email", "E-mail", "email"],
+    ["phone", "Téléphone", "tel?"],
+  ],
+  vehicles: [
+    ["company", "Entreprise", "@companies"],
+    ["plate", "Plaque"],
+    ["brand", "Marque"],
+    ["model", "Modèle"],
+    ["km", "Kilométrage", "number", "0"],
+    ["service", "Prochain entretien", "date?"],
+  ],
+  tools: [
+    ["company", "Entreprise", "@companies"],
+    ["name", "Nom"],
+    ["serial", "Numéro de série"],
+  ],
+  maintenance: [
+    ["company", "Entreprise", "@companies"],
+    ["clientId", "Client", "@clients"],
+    ["title", "Titre"],
+    ["frequency", "Fréquence", "text", "Mensuelle"],
+    ["next", "Prochaine visite", "date"],
+    ["amount", "Valeur annuelle CHF", "number"],
+  ],
+};
+function field([key, label, type = "text", value = ""]) {
+  const optional = type.endsWith("?");
+  type = type.replace("?", "");
+  const required = optional ? "" : "required",
+    attr = `id="f_${key}" name="${key}" ${required}`;
+  return (
+    `<label for="f_${key}">${esc(label)}${optional ? " (facultatif)" : ""}</label>` +
+    (type.startsWith("@")
+      ? `<select ${attr}>${options(type.slice(1), optional)}</select>`
+      : type === "textarea"
+        ? `<textarea ${attr} maxlength="5000">${esc(value)}</textarea>`
+        : `<input ${attr} type="${type}" value="${esc(value || (type === "date" ? today() : ""))}" ${type === "number" ? 'min="0" step="0.01"' : ""} ${type === "password" ? (key === "currentPassword" ? 'autocomplete="current-password"' : 'minlength="12" autocomplete="new-password"') : ""}>`)
+  );
+}
+function modal(title, html) {
+  lastFocus = document.activeElement;
+  $("modalTitle").textContent = title;
+  $("modalBody").innerHTML = html;
+  $("modalWrap").classList.remove("hidden");
+  $("modalBody").querySelector("input,select,button")?.focus();
+}
+function closeModal(force = false) {
+  if (pending && !force) return;
+  $("modalWrap").classList.add("hidden");
+  $("modalBody").replaceChildren();
+  lastFocus?.focus();
+}
+function formShell(fields, kind, extra = "", title = "Ajouter") {
+  modal(
+    title,
+    `<form id="entityForm" data-kind="${esc(kind)}">${fields.map(field).join("")}${extra}<p id="formError" role="alert" class="error"></p><div class="form-actions">${btn("Annuler", "close-modal")}<button type="submit" class="btn primary">Enregistrer</button></div></form>`,
+  );
+}
+function lineRow() {
+  return (
+    '<div class="invoice-line"><label>Description<input name="lineDescription" required maxlength="500"></label><label>Quantité<input name="lineQuantity" type="number" step="0.001" min="0.001" value="1" required></label><label>Prix unitaire CHF<input name="linePrice" type="number" step="0.01" min="0.01" required></label>' +
+    btn("Retirer", "remove-line") +
+    "</div>"
+  );
+}
+function newForm(k) {
+  if (!schemas[k]) return;
+  formShell(
+    schemas[k],
+    k,
+    ["quotes", "invoices"].includes(k)
+      ? `<h4 class="spaced">Lignes du document</h4><div id="lines">${lineRow()}</div>${btn("Ajouter une ligne", "add-line")}`
+      : "",
+    menus[k][0],
+  );
+  if (company && $("f_company")) $("f_company").value = company;
+}
+function projectModal(id) {
+  const p = find("projects", id);
+  if (!p) return;
+  modal(
+    p.title,
+    `<p>${esc(p.description)}</p><p>${esc(p.address)}</p><p>${date(p.start)} – ${date(p.end)} · ${esc(p.progress)} %</p><p>Équipe : ${(p.team || []).map((id) => esc(name("employees", id))).join(", ") || "Non affectée"}</p>${p.budget !== undefined ? `<p>Budget ${money(p.budget)} · Coûts ${money(p.cost)}</p>` : ""}${can(ops) ? btn("Modifier le suivi", "project-edit", id) : ""}<h4 class="spaced">Documents et photos</h4>${table(
+      ["Fichier", ""],
+      state.documents
+        .filter((x) => same(x.project, id))
+        .map((d) => [esc(d.name), btn("Télécharger", "download", d.id)]),
+    )}`,
+  );
+}
+function documentModal(k, id) {
+  const r = find(k, id);
+  if (!r) return;
+  const c = find("clients", r.clientId),
+    co = find("companies", r.company);
+  const html = `<div class="document"><div class="document-head"><div><h2>${esc(co?.name || "Sousa Group")}</h2></div><div><b>${k === "quotes" ? "DEVIS" : "FACTURE"}</b><p>${esc(r.id)}</p><p>${date(r.date)}</p></div></div><p>Client : ${esc(c?.name)}<br>${esc(c?.city)}<br>${esc(c?.email)}</p><h3>${esc(r.title)}</h3>${table(
+    ["Description", "Quantité", "Prix unitaire", "Total"],
+    (
+      r.lines || [{ description: r.title, quantity: 1, unitPrice: r.amount }]
+    ).map((l) => [
+      esc(l.description),
+      esc(l.quantity),
+      money(l.unitPrice),
+      money(Math.round(l.quantity * Math.round(l.unitPrice * 100)) / 100),
+    ]),
+  )}<div class="doc-total"><b>Total : ${money(r.amount)}</b></div><p>${k === "quotes" ? "Valable jusqu’au" : "Échéance"} : ${date(r.valid || r.due)}</p>${k === "invoices" ? `<p>Payé : ${money(r.paid)} · Solde : ${money(r.amount - (r.paid || 0))}</p>` : ""}${r.acceptedAt ? `<p>Accepté dans le portail le ${esc(new Date(r.acceptedAt).toLocaleString("fr-CH"))}.</p>` : ""}</div>`;
+  $("printArea").innerHTML = html;
+  modal(
+    r.id,
+    btn("Imprimer / PDF", "print") +
+      " " +
+      (can(fin) && r.status === "Brouillon"
+        ? btn(
+            "Émettre",
+            k === "quotes" ? "quote.issue" : "invoice.issue",
+            id,
+            "primary",
+          )
+        : "") +
+      " " +
+      (profile.role === "client" && k === "quotes" && r.status === "Émise"
+        ? btn("Accepter le devis", "quote.accept", id, "primary")
+        : "") +
+      html,
+  );
+}
+async function loadUsers() {
+  try {
+    const out = await api("state/users");
+    userAccounts = out.users;
+    if (!$("usersList")) return;
+    $("usersList").innerHTML = table(
+      ["Nom", "E-mail", "Rôle", "Statut", ""],
+      out.users.map((u) => [
+        esc(u.name),
+        esc(u.email),
+        esc(roles[u.role]),
+        u.disabled ? "Désactivé" : "Actif",
+        btn("Modifier / relier", "edit-user", u.id) +
+          " " +
+          btn("Réinitialiser le mot de passe", "reset-password", u.id) +
+          " " +
+          (!same(u.id, profile.id) && !u.disabled
+            ? btn("Désactiver", "disable-user", u.id, "danger")
+            : ""),
+      ]),
+    );
+  } catch (e) {
+    if ($("usersList")) $("usersList").textContent = e.message;
+  }
+}
+async function loadAudit() {
+  try {
+    const out = await api("state/audit");
+    if ($("auditList"))
+      $("auditList").innerHTML = table(
+        ["Date", "Utilisateur", "Action", "Référence"],
+        out.rows.map((r) => [
+          esc(new Date(r.created_at).toLocaleString("fr-CH")),
+          esc(r.user_email),
+          esc(r.action),
+          esc(r.metadata?.id),
+        ]),
+      );
+  } catch (e) {
+    if ($("auditList")) $("auditList").textContent = e.message;
+  }
+}
+function userForm(link) {
+  formShell(
+    [
+      ["name", "Nom"],
+      ["email", "E-mail", "email"],
+      ["password", "Mot de passe initial (12 caractères minimum)", "password"],
+      ["company", "Entreprise", "@companies"],
+      ["employeeId", "Fiche salarié", "@employees?"],
+      ["clientId", "Fiche client", "@clients?"],
+    ],
+    "user",
+    `<label for="f_role">Rôle</label><select id="f_role" name="role">${Object.entries(
+      roles,
+    )
+      .map(([k, v]) => `<option value="${k}">${v}</option>`)
+      .join(
+        "",
+      )}</select><p class="muted">Transmettez le mot de passe initial à la personne par un canal privé. Elle pourra le changer dans Mon compte.</p>`,
+    "Créer un accès",
+  );
+  $("f_company").insertAdjacentHTML(
+    "afterbegin",
+    '<option value="group">Sousa Group (toutes les entreprises)</option>',
+  );
+  if (link) {
+    const [k, id] = link.split(":"),
+      r = find(k, id);
+    if (r) {
+      $("f_name").value = r.name;
+      $("f_email").value = r.email;
+      $("f_company").value = r.company;
+      $("f_role").value = k === "employees" ? "employee" : "client";
+      $(k === "employees" ? "f_employeeId" : "f_clientId").value = r.id;
+    }
+  }
+}
+function downloadBlob(blob, name) {
+  const a = document.createElement("a"),
+    url = URL.createObjectURL(blob);
+  a.href = url;
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+function csvCell(v) {
+  let s = String(v ?? "");
+  if (/^[=+@\-\t\r]/.test(s)) s = "'" + s;
+  return '"' + s.replaceAll('"', '""') + '"';
+}
+function exportData(k) {
+  const rows = visible(k);
+  if (!rows.length) return toast("Aucune donnée à exporter.");
+  const keys = [...new Set(rows.flatMap(Object.keys))].filter(
+    (k) => !["lines", "team"].includes(k),
+  );
+  const csv = [keys, ...rows.map((r) => keys.map((k) => r[k] ?? ""))]
+    .map((row) => row.map(csvCell).join(";"))
+    .join("\r\n");
+  downloadBlob(
+    new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8" }),
+    "Sousa_" + k + ".csv",
+  );
+}
+document.addEventListener("change", (e) => {
+  if (e.target.id === "recipient") {
+    selectedRecipient = e.target.value;
+    render();
+  }
+});
+document.addEventListener("click", async (e) => {
+  const nav = e.target.closest("[data-page]");
+  if (nav) {
+    page = nav.dataset.page;
+    render();
+    $("sidebar").classList.remove("open");
+    $("backdrop").classList.add("hidden");
+    return;
+  }
+  const b = e.target.closest("[data-action]");
+  if (!b || pending) return;
+  const a = b.dataset.action,
+    id = b.dataset.id;
+  try {
+    if (a === "close-modal") closeModal();
+    else if (a === "open-side") {
+      $("sidebar").classList.add("open");
+      $("backdrop").classList.remove("hidden");
+    } else if (a === "close-side") {
+      $("sidebar").classList.remove("open");
+      $("backdrop").classList.add("hidden");
+    } else if (a === "logout") {
+      await api("auth/logout", {});
+      clearSession();
+    } else if (a === "theme") {
+      document.body.classList.toggle("light");
+      localStorage.setItem(
+        "sgo_theme",
+        document.body.classList.contains("light") ? "light" : "dark",
+      );
+    } else if (a === "refresh") {
+      await refresh();
+      notice("");
+      toast("Données actualisées.");
+    } else if (a === "new") newForm(id);
+    else if (a === "project") projectModal(id);
+    else if (a === "quote" || a === "invoice")
+      documentModal(a === "quote" ? "quotes" : "invoices", id);
+    else if (a === "print") window.print();
+    else if (a === "add-line")
+      $("lines").insertAdjacentHTML("beforeend", lineRow());
+    else if (a === "remove-line") {
+      if (document.querySelectorAll(".invoice-line").length > 1)
+        b.closest(".invoice-line").remove();
+    } else if (a === "project-edit") {
+      const p = find("projects", id);
+      formShell(
+        [
+          ["progress", "Avancement %", "number", p.progress],
+          ["description", "Description", "textarea?", p.description],
+        ],
+        "project.update",
+        `<input type="hidden" name="id" value="${esc(id)}"><label>Statut<select name="status">${["Planifié", "En cours", "Terminé", "À facturer"].map((s) => `<option ${s === p.status ? "selected" : ""}>${s}</option>`).join("")}</select></label><label>Équipe<select name="team" multiple>${state.employees
+          .filter((e) => e.company === p.company)
+          .map(
+            (e) =>
+              `<option value="${esc(e.id)}" ${(p.team || []).some((x) => same(x, e.id)) ? "selected" : ""}>${esc(e.name)}</option>`,
+          )
+          .join("")}</select></label>`,
+        "Modifier le chantier",
+      );
+    } else if (
+      ["clock.start", "clock.pause", "clock.resume", "clock.stop"].includes(a)
+    )
+      await mutate(
+        a,
+        a === "clock.start" ? { project: $("clockProject").value } : {},
+      );
+    else if (["time.approve", "quote.issue", "invoice.issue"].includes(a))
+      await mutate(a, { id });
+    else if (a === "quote.accept") {
+      if (confirm("Confirmer l’acceptation de ce devis ?"))
+        await mutate(a, { id });
+    } else if (a === "planning.delete") {
+      if (confirm("Supprimer cette affectation ?")) await mutate(a, { id });
+    } else if (a === "absence.approve" || a === "absence.reject")
+      await mutate("absence.decide", {
+        id,
+        status: a === "absence.approve" ? "Approuvée" : "Refusée",
+      });
+    else if (a === "absence-form")
+      formShell(
+        [
+          ...(profile.role === "employee"
+            ? []
+            : [["employeeId", "Salarié", "@employees"]]),
+          ["from", "Du", "date"],
+          ["to", "Au", "date"],
+          ["comment", "Commentaire", "textarea?"],
+        ],
+        "absence.request",
+        '<label>Type<select name="type"><option>Vacances</option><option>Maladie</option><option>Autre</option></select></label><p class="muted">Le décompte exclut les samedis et dimanches. Vérifiez les jours fériés et les horaires particuliers avant validation.</p>',
+        "Demande d’absence",
+      );
+    else if (a === "export") exportData(id);
+    else if (a === "user-form") userForm();
+    else if (a === "linked-user") userForm(id);
+    else if (a === "edit-user") {
+      const u = userAccounts.find((x) => same(x.id, id));
+      userForm();
+      $("f_name").value = u.name;
+      $("f_email").value = u.email;
+      $("f_company").value = u.company;
+      $("f_employeeId").value = u.employee_id || "";
+      $("f_clientId").value = u.client_id || "";
+      $("f_role").value = u.role;
+      $("entityForm").insertAdjacentHTML(
+        "beforeend",
+        `<input type="hidden" name="id" value="${esc(u.id)}">`,
+      );
+    } else if (a === "disable-user") {
+      if (confirm("Désactiver ce compte et ses sessions ?"))
+        await mutate("disable", { id }, null, "state/users/disable");
+    } else if (a === "reset-password")
+      formShell(
+        [["password", "Nouveau mot de passe", "password"]],
+        "reset-password",
+        `<input type="hidden" name="id" value="${esc(id)}">`,
+        "Réinitialiser le mot de passe",
+      );
+    else if (a === "password-form")
+      formShell(
+        [
+          ["currentPassword", "Mot de passe actuel", "password"],
+          ["password", "Nouveau mot de passe", "password"],
+        ],
+        "password",
+        "",
+        "Changer mon mot de passe",
+      );
+    else if (a === "document-form")
+      formShell(
+        [
+          ["company", "Entreprise", "@companies"],
+          ["project", "Chantier", "@projects?"],
+          ["employeeId", "Salarié", "@employees?"],
+          ["clientId", "Client", "@clients?"],
+        ],
+        "document",
+        '<label>Visibilité<select name="visibility"><option value="team">Équipe uniquement</option>' +
+          (can(ops)
+            ? '<option value="client">Partager avec le client</option>'
+            : "") +
+          '</select></label><p>Choisissez un seul dossier. PDF, image ou texte, 5 Mo maximum.</p><label>Fichier<input type="file" name="file" accept="application/pdf,image/jpeg,image/png,image/webp,text/plain" required></label>',
+        "Ajouter un fichier",
+      );
+    else if (a === "download") {
+      const doc = find("documents", id),
+        r = await fetch("/api/state/documents/" + encodeURIComponent(id), {
+          headers: { Authorization: "Bearer " + token },
+        });
+      if (!r.ok) throw new Error("Téléchargement impossible ou accès expiré.");
+      downloadBlob(await r.blob(), doc.name);
+    }
+  } catch (err) {
+    notice(err.message);
+  }
+});
+document.addEventListener("submit", async (e) => {
+  const f = e.target;
+  if (!["entityForm", "messageForm"].includes(f.id)) return;
+  e.preventDefault();
+  if (pending) return;
+  const data = new FormData(f),
+    p = Object.fromEntries(data);
+  const k = f.dataset.kind;
+  try {
+    if (f.id === "messageForm")
+      return await mutate(
+        "message",
+        { text: p.text, recipientId: selectedRecipient },
+        null,
+        "state/messages",
+        f,
+      );
+    if (k === "password") {
+      await api("auth/password", p);
+      clearSession();
+      toast("Mot de passe changé. Reconnectez-vous.");
+      return;
+    }
+    if (k === "document") {
+      const file = data.get("file");
+      if (!file.size || file.size > 5 * 1024 * 1024)
+        throw new Error("Choisissez un fichier de 5 Mo maximum.");
+      const content = await new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(r.result.split(",")[1]);
+        r.onerror = reject;
+        r.readAsDataURL(file);
+      });
+      delete p.file;
+      return await mutate(
+        "document",
+        { ...p, name: file.name, mime: file.type, content },
+        null,
+        "state/documents",
+        f,
+      );
+    }
+    if (k === "user" || k === "reset-password")
+      return await mutate(
+        k,
+        p,
+        null,
+        k === "user" ? "state/users" : "state/users/password",
+        f,
+      );
+    if (k === "project.update") p.team = data.getAll("team");
+    if (["quotes", "invoices"].includes(k))
+      p.lines = [...f.querySelectorAll(".invoice-line")].map((row) => ({
+        description: row.querySelector("[name=lineDescription]").value,
+        quantity: row.querySelector("[name=lineQuantity]").value,
+        unitPrice: row.querySelector("[name=linePrice]").value,
+      }));
+    await mutate(
+      k.includes(".") ? k : "create",
+      p,
+      k.includes(".") ? undefined : k,
+      "state/command",
+      f,
+    );
+  } catch (err) {
+    const target = $("formError");
+    if (target) target.textContent = err.message;
+    else notice(err.message);
+  }
+});
+document.addEventListener("keydown", (e) => {
+  if ($("modalWrap").classList.contains("hidden")) return;
+  if (e.key === "Escape") closeModal();
+  if (e.key === "Tab") {
+    const els = [
+        ...$("modalWrap").querySelectorAll("button,input,select,textarea"),
+      ].filter((x) => !x.disabled && x.type !== "hidden"),
+      first = els[0],
+      last = els.at(-1);
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  }
+});
+document.body.classList.toggle(
+  "light",
+  localStorage.getItem("sgo_theme") === "light",
+);
+if (token)
+  refresh(false)
+    .then(() => {
+      $("login").classList.add("hidden");
+      $("app").classList.remove("hidden");
+      render();
+    })
+    .catch((e) => {
+      clearSession();
+      $("loginError").textContent = e.message;
+    });
+setInterval(() => {
+  if (
+    token &&
+    !pending &&
+    $("modalWrap").classList.contains("hidden") &&
+    document.visibilityState === "visible" &&
+    !$("messageText")?.value
+  )
+    refresh().catch((e) => notice(e.message));
+}, 30000);
+// Remove legacy offline caches. Sensitive application data is never cached by this version.
+if ("serviceWorker" in navigator)
+  navigator.serviceWorker
+    .getRegistrations()
+    .then((rs) => Promise.all(rs.map((r) => r.unregister())))
+    .catch(() => {});
+if ("caches" in window)
+  caches
+    .keys()
+    .then((keys) =>
+      Promise.all(
+        keys
+          .filter((k) => k.startsWith("sgo") || k.startsWith("sousa"))
+          .map((k) => caches.delete(k)),
+      ),
+    )
+    .catch(() => {});

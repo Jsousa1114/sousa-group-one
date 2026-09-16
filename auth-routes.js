@@ -1,63 +1,91 @@
-const express = require("express");
-const bcrypt = require("bcryptjs");
-const jwt = require("jsonwebtoken");
-const { pool } = require("./db");
-const { requireAuth } = require("./auth-middleware");
-
-const router = express.Router();
-
-router.post("/login", async (req, res) => {
-  const { email, password } = req.body || {};
-  if (!email || !password) {
-    return res.status(400).json({ error: "Email et mot de passe requis." });
-  }
-  try {
-    const { rows } = await pool.query(
-      "SELECT * FROM users WHERE email = $1",
-      [String(email).toLowerCase().trim()]
-    );
-    const user = rows[0];
-    if (!user) return res.status(401).json({ error: "Email ou mot de passe incorrect." });
-
-    const ok = await bcrypt.compare(password, user.password_hash);
-    if (!ok) return res.status(401).json({ error: "Email ou mot de passe incorrect." });
-
-    const token = jwt.sign(
-      { sub: user.id, email: user.email, role: user.role },
-      process.env.JWT_SECRET,
-      { expiresIn: "30d" }
-    );
-
-    await pool.query(
-      `INSERT INTO audit_logs (user_email, action, metadata) VALUES ($1,$2,$3)`,
-      [user.email, "Connexion", JSON.stringify({ role: user.role })]
-    );
-
-    res.json({
-      token,
-      profile: {
-        email: user.email,
-        role: user.role,
-        name: user.name,
-        avatar: user.avatar,
-        company: user.company
+"use strict";
+const express = require("express"),
+  bcrypt = require("bcryptjs"),
+  jwt = require("jsonwebtoken");
+const { auth, profile } = require("./auth-middleware");
+const { AppError, text } = require("./domain");
+const wrap = (fn) => (req, res, next) =>
+  Promise.resolve(fn(req, res, next)).catch(next);
+function routes(db) {
+  const router = express.Router(),
+    attempts = new Map();
+  router.post(
+    "/login",
+    wrap(async (req, res) => {
+      const email = text(req.body.email, "E-mail", 255).toLowerCase(),
+        password = text(req.body.password, "Mot de passe", 200);
+      const key = req.ip + ":" + email,
+        now = Date.now();
+      if (attempts.size > 10000)
+        for (const [k, v] of attempts) if (v.until < now) attempts.delete(k);
+      let a = attempts.get(key);
+      if (!a || a.until < now) {
+        a = { count: 0, until: now + 15 * 60000 };
+        attempts.set(key, a);
       }
-    });
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: "Erreur serveur." });
-  }
-});
-
-router.get("/me", requireAuth, async (req, res) => {
-  try {
-    const { rows } = await pool.query("SELECT email, role, name, avatar, company FROM users WHERE id = $1", [req.user.sub]);
-    if (!rows[0]) return res.status(404).json({ error: "Utilisateur introuvable." });
-    res.json({ profile: rows[0] });
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: "Erreur serveur." });
-  }
-});
-
-module.exports = router;
+      if (++a.count > 20)
+        throw new AppError(
+          "Trop de tentatives. Réessayez dans 15 minutes.",
+          429,
+        );
+      const u = (await db.query("SELECT * FROM users WHERE email=$1", [email]))
+        .rows[0];
+      if (
+        !u ||
+        u.disabled ||
+        !(await bcrypt.compare(password, u.password_hash))
+      )
+        throw new AppError("E-mail ou mot de passe incorrect.", 401);
+      attempts.delete(key);
+      const token = jwt.sign(
+        { sv: u.session_version },
+        process.env.JWT_SECRET,
+        {
+          subject: String(u.id),
+          expiresIn: "8h",
+          issuer: "sousa-group-one",
+          audience: "sgo-web",
+          algorithm: "HS256",
+        },
+      );
+      await db.query(
+        "INSERT INTO audit_logs(user_email,action,metadata) VALUES($1,$2,$3)",
+        [u.email, "Connexion", "{}"],
+      );
+      res.json({ token, profile: profile(u) });
+    }),
+  );
+  router.use(auth(db));
+  router.get("/me", (req, res) => res.json({ profile: profile(req.user) }));
+  router.post(
+    "/logout",
+    wrap(async (req, res) => {
+      await db.query(
+        "UPDATE users SET session_version=session_version+1 WHERE id=$1",
+        [req.user.id],
+      );
+      res.json({ ok: true });
+    }),
+  );
+  router.post(
+    "/password",
+    wrap(async (req, res) => {
+      const p = text(req.body.password, "Nouveau mot de passe", 200);
+      if (p.length < 12) throw new AppError("12 caractères minimum.");
+      if (
+        !(await bcrypt.compare(
+          String(req.body.currentPassword || ""),
+          req.user.password_hash,
+        ))
+      )
+        throw new AppError("Mot de passe actuel incorrect.", 403);
+      await db.query(
+        "UPDATE users SET password_hash=$1,session_version=session_version+1 WHERE id=$2",
+        [await bcrypt.hash(p, 12), req.user.id],
+      );
+      res.json({ ok: true });
+    }),
+  );
+  return router;
+}
+module.exports = { routes, wrap };
