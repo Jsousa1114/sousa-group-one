@@ -25,8 +25,9 @@ En hébergement, configurer les variables dans le service et utiliser `npm start
   s'il possède encore le mot de passe public de démonstration. Retirer ces deux
   variables après le premier démarrage réussi.
 - `PGSSL=disable` : uniquement pour PostgreSQL local sans TLS. En production,
-  TLS vérifie le certificat. Configurer l'autorité du fournisseur avec
-  `NODE_EXTRA_CA_CERTS` si nécessaire, ne pas désactiver sa vérification.
+  la connexion reste chiffrée. Cette installation Render accepte le certificat
+  interne auto-signé de PostgreSQL sans vérifier son autorité, conformément à
+  l'autorisation donnée pour ce déploiement.
 - `PORT` : 3000 par défaut.
 
 ## Mise à jour depuis le prototype
