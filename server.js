@@ -29,6 +29,7 @@ function createApp(db = pool) {
   for (const file of [
     "index.html",
     "app.js",
+    "finance.js",
     "styles.css",
     "manifest.webmanifest",
     "service-worker.js",

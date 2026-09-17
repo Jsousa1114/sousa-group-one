@@ -1109,6 +1109,42 @@ tr:last-child td {
     display: none;
   }
 }
+.finance-totals {
+  padding: 18px;
+  margin: 18px 0;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  font-weight: 650;
+  line-height: 1.8;
+}
+.preserve-lines {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.invoice-line {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  margin: 14px 0;
+  gap: 12px;
+}
+.invoice-line input {
+  min-width: 0;
+  width: 100%;
+}
+.invoice-line label:first-child {
+  grid-column: 1 / -1;
+}
+@media (max-width: 600px) {
+  .invoice-line {
+    grid-template-columns: 1fr 1fr;
+  }
+  .finance-totals {
+    font-size: 0.9rem;
+  }
+}
 @media (max-width: 1200px) {
   .g4 {
     grid-template-columns: repeat(2, 1fr);

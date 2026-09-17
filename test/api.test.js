@@ -40,7 +40,9 @@ test.before(async () => {
       [email, hash, role, role, "", role === "admin" ? "group" : "home", e, c],
     );
   const d = emptyState();
-  d.clients = [{ id: "c1", name: "Client", company: "home" }];
+  d.clients = [
+    { id: "c1", name: "Client", company: "home", email: "test@example.com" },
+  ];
   d.employees = [
     { id: "e1", name: "Employee", salary: 5000, vacation: 20, company: "home" },
   ];
@@ -81,6 +83,77 @@ test.before(async () => {
 test.after(async () => {
   await new Promise((r) => server.close(r));
   await db.end();
+});
+test("finance PDF and email draft exports require authentication and document access", async () => {
+  const created = await call(
+    "state/command",
+    admin,
+    payload(await rev(), {
+      action: "create",
+      collection: "quotes",
+      payload: {
+        company: "home",
+        clientId: "c1",
+        title: "PDF test",
+        date: "2026-09-17",
+        valid: "2026-10-17",
+        lines: [
+          { description: "Service", quantity: 1, unitPrice: 100, vatRate: 8.1 },
+        ],
+      },
+    }),
+  );
+  assert.equal(created.status, 200);
+  const id = created.data.result.id,
+    path = url + `/api/state/finance/quotes/${id}.pdf`;
+  assert.equal((await fetch(path)).status, 401);
+  assert.equal(
+    (await fetch(path, { headers: { Authorization: "Bearer " + client } }))
+      .status,
+    404,
+  );
+  const response = await fetch(path, {
+    headers: { Authorization: "Bearer " + admin },
+  });
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get("content-type"), /application\/pdf/);
+  assert.equal(
+    Buffer.from(await response.arrayBuffer())
+      .subarray(0, 4)
+      .toString(),
+    "%PDF",
+  );
+  assert.equal(
+    (
+      await fetch(path.replace(".pdf", ".eml"), {
+        headers: { Authorization: "Bearer " + admin },
+      })
+    ).status,
+    403,
+  );
+  await call(
+    "state/command",
+    admin,
+    payload(await rev(), { action: "quote.issue", payload: { id } }),
+  );
+  assert.equal(
+    (await fetch(path, { headers: { Authorization: "Bearer " + client } }))
+      .status,
+    200,
+  );
+  const eml = await fetch(path.replace(".pdf", ".eml"), {
+    headers: { Authorization: "Bearer " + admin },
+  });
+  assert.equal(eml.status, 200);
+  const draft = await eml.text();
+  assert.match(draft, /X-Unsent: 1/);
+  assert.match(draft, /To: test@example.com/);
+  assert.match(draft, /Content-Type: application\/pdf/);
+  assert.equal(
+    (await fetch(path, { headers: { Authorization: "Bearer " + employee } }))
+      .status,
+    404,
+  );
 });
 test("API authentication, filtered state and disabled snapshot overwrite", async () => {
   assert.equal((await call("state")).status, 401);

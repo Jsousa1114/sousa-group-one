@@ -62,7 +62,10 @@ async function setup(role = "admin", empty = false) {
         const out = D.applyCommand(d, profile, body);
         d = out.data;
         revision++;
-        return { ok: true, json: async () => ({ ok: true, revision }) };
+        return {
+          ok: true,
+          json: async () => ({ ok: true, revision, result: out.result }),
+        };
       }
       return { ok: true, json: async () => ({ ok: true }) };
     }
@@ -80,6 +83,7 @@ async function setup(role = "admin", empty = false) {
       }),
     };
   };
+  w.eval(fs.readFileSync(require.resolve("../finance.js"), "utf8"));
   w.eval(script);
   await flush();
   h.close = () => w.close();
@@ -91,7 +95,7 @@ function click(h, selector) {
   e.click();
 }
 function fill(h, name, value) {
-  const e = h.w.document.querySelector(`[name="${name}"]`);
+  const e = h.w.document.querySelector(`#entityForm [name="${name}"]`);
   assert.ok(e, "Missing input " + name);
   e.value = value;
 }
@@ -102,6 +106,103 @@ function submit(h) {
       new h.w.Event("submit", { bubbles: true, cancelable: true }),
     );
 }
+test("quote UI preview edit issue acceptance conversion and invoice payment work together", async () => {
+  const h = await setup();
+  const settle = async () => {
+    await flush();
+    await flush();
+  };
+  try {
+    click(h, '[data-page="quotes"]');
+    click(h, '[data-action="new"]');
+    fill(h, "title", "Entretien");
+    fill(h, "valid", "2099-10-17");
+    fill(h, "lineDescription", "Service");
+    fill(h, "linePrice", "100");
+    fill(h, "lineVat", "8.1");
+    fill(h, "lineDiscount", "10");
+    h.w.document
+      .querySelector('[name="linePrice"]')
+      .dispatchEvent(new h.w.Event("input", { bubbles: true }));
+    assert.match(
+      h.w.document.getElementById("financeTotals").textContent,
+      /97[.,]29/,
+    );
+    submit(h);
+    await settle();
+    click(h, '[data-action="quote"]');
+    click(h, '[data-action="finance-edit"]');
+    assert.equal(h.w.document.querySelector('[name="lineVat"]').value, "8.1");
+    fill(h, "title", "Entretien corrigé");
+    submit(h);
+    await settle();
+    click(h, '[data-action="quote"]');
+    click(h, '[data-action="quote.issue"]');
+    await settle();
+    click(h, '[data-action="quote"]');
+    click(h, '[data-action="quote-decision"]');
+    fill(h, "note", "Accord fictif");
+    submit(h);
+    await settle();
+    click(h, '[data-action="quote"]');
+    click(h, '[data-action="quote-convert"]');
+    submit(h);
+    await settle();
+    click(h, '[data-page="invoices"]');
+    click(h, '[data-action="invoice"]');
+    assert.match(
+      h.w.document.getElementById("modalBody").textContent,
+      /97[.,]29/,
+    );
+    click(h, '[data-action="invoice.issue"]');
+    await settle();
+    click(h, '[data-action="invoice"]');
+    click(h, '[data-action="invoice-payment"]');
+    fill(h, "amount", "50");
+    submit(h);
+    await settle();
+    assert.match(
+      h.w.document.getElementById("content").textContent,
+      /47[.,]29/,
+    );
+  } finally {
+    h.close();
+  }
+});
+test("creating a client inside a quote returns to the unsaved lines", async () => {
+  const h = await setup();
+  try {
+    click(h, '[data-page="quotes"]');
+    click(h, '[data-action="new"]');
+    fill(h, "title", "Brouillon conservé");
+    fill(h, "lineDescription", "Nettoyage");
+    fill(h, "linePrice", "150");
+    click(h, '[data-action="finance-client"]');
+    fill(h, "name", "Nouveau client");
+    fill(h, "city", "Lausanne");
+    fill(h, "email", "new@example.com");
+    submit(h);
+    await flush();
+    await flush();
+    assert.ok(
+      h.w.document.querySelector('[name="linePrice"]'),
+      h.w.document.getElementById("formError")?.textContent ||
+        h.w.document.getElementById("notice").textContent,
+    );
+    assert.equal(h.w.document.querySelector('[name="linePrice"]').value, "150");
+    assert.equal(
+      h.w.document.querySelector('[name="title"]').value,
+      "Brouillon conservé",
+    );
+    assert.equal(
+      h.w.document.querySelector('[name="clientId"]').selectedOptions[0]
+        .textContent,
+      "Nouveau client",
+    );
+  } finally {
+    h.close();
+  }
+});
 test("all role navigation and empty dashboards render without errors", async () => {
   for (const role of D.ROLES) {
     const h = await setup(role, true);

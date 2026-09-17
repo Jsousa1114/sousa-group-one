@@ -67,8 +67,9 @@ utilisateurs doivent se reconnecter. Aucun mode hors ligne n'est annoncé.
 - Finance : documents à plusieurs lignes, calcul au centime, émission,
   acceptation du devis par son client, paiement partiel/complet et solde recalculé.
   L'acceptation en portail est horodatée ; aucune signature électronique qualifiée
-  n'est revendiquée. Les documents n'appliquent pas automatiquement de TVA, de
-  QR-facture bancaire ni de règles comptables propres à chaque entreprise.
+  n'est revendiquée. TVA et remises sont calculées ligne par ligne au centime,
+  avec taux choisi explicitement (0 % par défaut). Voir `FINANCE.md` pour le
+  nouveau parcours devis → facture, les PDF et le QR bancaire.
 - Documents : dépôt réel dans PostgreSQL, PDF/JPEG/PNG/WebP/TXT, 5 Mo par fichier,
   accès contrôlé au téléchargement. Documents de chantier privés par défaut ;
   partage client explicite par un responsable. Les fichiers sont téléchargés en

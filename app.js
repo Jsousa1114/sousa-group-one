@@ -1,5 +1,6 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
+let financeClientDraft = null;
 const esc = (v) =>
   String(v ?? "").replace(
     /[&<>"']/g,
@@ -191,13 +192,20 @@ async function mutate(
   const requestId = form?.dataset.requestId || crypto.randomUUID();
   if (form) form.dataset.requestId = requestId;
   try {
-    await api(endpoint, { action, payload, collection, revision, requestId });
+    const out = await api(endpoint, {
+      action,
+      payload,
+      collection,
+      revision,
+      requestId,
+    });
     saved = true;
     if (form) delete form.dataset.requestId;
     await refresh();
     closeModal(true);
     notice("");
     toast("Modification enregistrée.");
+    return out.result;
   } catch (e) {
     if (e.status === 409) {
       if (form) delete form.dataset.requestId;
@@ -419,7 +427,9 @@ function financeView(k) {
       can(fin)
         ? btn("Créer", "new", k, "primary") +
             " " +
-            btn("Exporter CSV", "export", k)
+            btn("Exporter CSV", "export", k) +
+            " " +
+            btn("Paramètres de facturation", "billing-settings")
         : "",
     ) +
     table(
@@ -677,7 +687,11 @@ const schemas = {
     ["company", "Entreprise", "@companies"],
     ["email", "E-mail", "email"],
     ["phone", "Téléphone", "tel?"],
+    ["street", "Rue", "text?"],
+    ["buildingNumber", "Numéro", "text?"],
+    ["zip", "Code postal", "text?"],
     ["city", "Ville"],
+    ["country", "Pays (code ISO)", "text", "CH"],
     ["type", "Type", "text?"],
   ],
   projects: [
@@ -800,15 +814,175 @@ function formShell(fields, kind, extra = "", title = "Ajouter") {
     `<form id="entityForm" data-kind="${esc(kind)}">${fields.map(field).join("")}${extra}<p id="formError" role="alert" class="error"></p><div class="form-actions">${btn("Annuler", "close-modal")}<button type="submit" class="btn primary">Enregistrer</button></div></form>`,
   );
 }
-function lineRow() {
-  return (
-    '<div class="invoice-line"><label>Description<input name="lineDescription" required maxlength="500"></label><label>Quantité<input name="lineQuantity" type="number" step="0.001" min="0.001" value="1" required></label><label>Prix unitaire CHF<input name="linePrice" type="number" step="0.01" min="0.01" required></label>' +
-    btn("Retirer", "remove-line") +
-    "</div>"
+function lineRow(l = {}) {
+  return `<div class="invoice-line"><label>Description<input name="lineDescription" required maxlength="500" value="${esc(l.description || "")}"></label><label>Quantité<input name="lineQuantity" type="number" step="0.001" min="0.001" value="${esc(l.quantity ?? 1)}" required></label><label>Unité<input name="lineUnit" maxlength="30" value="${esc(l.unit || "pcs")}"></label><label>Prix HT CHF<input name="linePrice" type="number" step="0.01" min="0" value="${esc(l.unitPrice ?? "")}" required></label><label>Remise %<input name="lineDiscount" type="number" step="0.01" min="0" max="100" value="${esc(l.discount ?? 0)}" required></label><label>TVA %<input name="lineVat" type="number" step="0.01" min="0" max="100" list="vatRates" value="${esc(l.vatRate ?? 0)}" required></label>${btn("Retirer", "remove-line")}</div>`;
+}
+function financeLines(f = $("entityForm")) {
+  return [...f.querySelectorAll(".invoice-line")].map((row) =>
+    Object.fromEntries(
+      [
+        ["description", "lineDescription"],
+        ["quantity", "lineQuantity"],
+        ["unit", "lineUnit"],
+        ["unitPrice", "linePrice"],
+        ["discount", "lineDiscount"],
+        ["vatRate", "lineVat"],
+      ].map(([key, name]) => [key, row.querySelector(`[name=${name}]`).value]),
+    ),
   );
+}
+function financeTotals() {
+  if (!$("financeTotals")) return;
+  try {
+    const t = SousaFinance.calculate(financeLines());
+    $("financeTotals").textContent =
+      `Brut HT ${money(t.subtotal)} · Remise ${money(t.discountAmount)} · Net HT ${money(t.net)} · TVA ${money(t.tax)} · Total TTC ${money(t.amount)}`;
+  } catch (e) {
+    $("financeTotals").textContent = e.message;
+  }
+}
+function afterDays(dateValue, days = 30) {
+  const d = new Date(dateValue + "T12:00:00Z");
+  d.setUTCDate(d.getUTCDate() + Number(days));
+  return d.toISOString().slice(0, 10);
+}
+function financeForm(k, r, initial) {
+  const co =
+    r?.company ||
+    initial?.company ||
+    company ||
+    visible("clients")[0]?.company ||
+    visible("companies").find((c) => c.id !== "group")?.id;
+  const settings = find("companies", co)?.billing || {};
+  const value = r ||
+    initial || {
+      company: co,
+      date: today(),
+      valid: afterDays(today()),
+      due: afterDays(today(), settings.paymentDays ?? 30),
+      message: settings.defaultMessage,
+      terms: settings.defaultTerms,
+      language: "fr",
+    };
+  formShell(
+    schemas[k],
+    r ? "finance.update" : k,
+    `<p class="muted">1. Client et dates · 2. Prestations · 3. Vérification puis émission</p><p>${btn("Créer un client", "finance-client", k)}</p><h4>Prestations</h4><p class="muted">Prix hors taxe. Choisissez le taux applicable à chaque prestation ; 0 % par défaut.</p><datalist id="vatRates"><option value="0"><option value="2.6"><option value="3.8"><option value="8.1"></datalist><div id="lines">${(value.lines || [{}]).map(lineRow).join("")}</div>${btn("Ajouter une ligne", "add-line")}<div id="financeTotals" class="finance-totals" role="status" aria-live="polite"></div><label>Langue du document<select name="language">${[
+      ["fr", "Français"],
+      ["de", "Deutsch"],
+      ["it", "Italiano"],
+      ["en", "English"],
+    ]
+      .map(([v, t]) => `<option value="${v}">${t}</option>`)
+      .join(
+        "",
+      )}</select></label>${field(["message", "Message au client", "textarea?"])}${field(["terms", "Conditions", "textarea?"])}${field(["paymentReference", "Référence bancaire structurée (facultatif)", "text?"])}${k === "quotes" ? '<label>Zone de signature<select name="signature"><option value="true">Oui</option><option value="false">Non</option></select></label>' : ""}${r ? `<input type="hidden" name="id" value="${esc(r.id)}"><input type="hidden" name="kind" value="${k}">` : ""}`,
+    r
+      ? "Modifier le brouillon"
+      : k === "quotes"
+        ? "Nouveau devis"
+        : "Nouvelle facture",
+  );
+  for (const [key, v] of Object.entries(value)) {
+    const input = $("entityForm").elements.namedItem(key);
+    if (input && v != null && !["lines", "kind", "id"].includes(key))
+      input.value = String(v);
+  }
+  filterFinanceClient();
+  financeTotals();
+  const previous = [...state.quotes, ...state.invoices]
+    .filter((x) => x.company === co)
+    .flatMap((x) => x.lines || []);
+  const unique = [
+    ...new Map(previous.map((l) => [l.description, l])).values(),
+  ].slice(0, 100);
+  if (unique.length) {
+    $("lines").insertAdjacentHTML(
+      "beforebegin",
+      `<label>Réutiliser une prestation<select id="reuseLine"><option value="">Choisir dans les documents précédents…</option>${unique.map((l, i) => `<option value="${i}">${esc(l.description)}</option>`).join("")}</select></label>`,
+    );
+    $("reuseLine").addEventListener("change", (e) => {
+      if (e.target.value !== "") {
+        $("lines").insertAdjacentHTML(
+          "beforeend",
+          lineRow(unique[Number(e.target.value)]),
+        );
+        financeTotals();
+        e.target.value = "";
+      }
+    });
+  }
+}
+function filterFinanceClient() {
+  if (!$("lines")) return;
+  const co = $("f_company").value;
+  for (const option of $("f_clientId").options)
+    option.disabled = find("clients", option.value)?.company !== co;
+  if ($("f_clientId").selectedOptions[0]?.disabled)
+    $("f_clientId").value =
+      [...$("f_clientId").options].find((o) => !o.disabled)?.value || "";
+  const clientId = $("f_clientId").value;
+  for (const option of $("f_project").options) {
+    const project = find("projects", option.value);
+    option.disabled =
+      !!option.value &&
+      (project?.company !== co || !same(project?.clientId, clientId));
+  }
+  if ($("f_project").selectedOptions[0]?.disabled) $("f_project").value = "";
+}
+function billingSettings() {
+  formShell(
+    [
+      ["company", "Entreprise", "@companies"],
+      ...[
+        "street",
+        "buildingNumber",
+        "zip",
+        "city",
+        "country",
+        "vatNumber",
+        "iban",
+        "email",
+      ].map((k, i) => [
+        k,
+        [
+          "Rue",
+          "Numéro",
+          "Code postal",
+          "Ville",
+          "Pays (CH/LI)",
+          "Numéro TVA",
+          "IBAN",
+          "E-mail",
+        ][i],
+        "text?",
+      ]),
+      ["paymentDays", "Délai de paiement (jours)", "number", "30"],
+      ["defaultMessage", "Message par défaut", "textarea?"],
+      ["defaultTerms", "Conditions par défaut", "textarea?"],
+    ],
+    "finance.settings",
+    '<p class="muted">Ces coordonnées seront conservées sur les documents lors de leur émission.</p>',
+    "Paramètres de facturation",
+  );
+  if (company) $("f_company").value = company;
+  loadBillingSettings();
+}
+function loadBillingSettings() {
+  const s = find("companies", $("f_company").value)?.billing || {};
+  for (const input of $("entityForm").elements)
+    if (input.name && input.name !== "company")
+      input.value =
+        s[input.name] ??
+        (input.name === "country"
+          ? "CH"
+          : input.name === "paymentDays"
+            ? 30
+            : "");
 }
 function newForm(k) {
   if (!schemas[k]) return;
+  if (["quotes", "invoices"].includes(k)) return financeForm(k);
   formShell(
     schemas[k],
     k,
@@ -835,19 +1009,29 @@ function projectModal(id) {
 function documentModal(k, id) {
   const r = find(k, id);
   if (!r) return;
-  const c = find("clients", r.clientId),
-    co = find("companies", r.company);
-  const html = `<div class="document"><div class="document-head"><div><h2>${esc(co?.name || "Sousa Group")}</h2></div><div><b>${k === "quotes" ? "DEVIS" : "FACTURE"}</b><p>${esc(r.id)}</p><p>${date(r.date)}</p></div></div><p>Client : ${esc(c?.name)}<br>${esc(c?.city)}<br>${esc(c?.email)}</p><h3>${esc(r.title)}</h3>${table(
-    ["Description", "Quantité", "Prix unitaire", "Total"],
+  const c = r.customer || find("clients", r.clientId),
+    co = r.issuer || find("companies", r.company);
+  const address = (a) =>
+    esc(
+      [a?.street, a?.buildingNumber, a?.zip, a?.city, a?.country]
+        .filter(Boolean)
+        .join(" "),
+    );
+  const html = `<div class="document"><div class="document-head"><div><h2>${esc(co?.name || "Sousa Group")}</h2><p>${address(co?.billing)}</p><p>${esc(co?.billing?.vatNumber)}</p></div><div><b>${k === "quotes" ? "DEVIS" : "FACTURE"}</b><p>${esc(r.id)}</p><p>${date(r.date)}</p>${r.status === "Brouillon" ? "<b>BROUILLON — NON ÉMIS</b>" : ""}</div></div><p>Client : ${esc(c?.name)}<br>${address(c)}<br>${esc(c?.email)}</p><h3>${esc(r.title)}</h3>${table(
+    ["Description", "Quantité", "Prix HT", "Remise", "TVA", "Total TTC"],
     (
       r.lines || [{ description: r.title, quantity: 1, unitPrice: r.amount }]
     ).map((l) => [
       esc(l.description),
-      esc(l.quantity),
+      esc(l.quantity) + " " + esc(l.unit),
       money(l.unitPrice),
-      money(Math.round(l.quantity * Math.round(l.unitPrice * 100)) / 100),
+      esc(l.discount || 0) + " %",
+      esc(l.vatRate || 0) + " %",
+      money(
+        l.total ?? Math.round(l.quantity * Math.round(l.unitPrice * 100)) / 100,
+      ),
     ]),
-  )}<div class="doc-total"><b>Total : ${money(r.amount)}</b></div><p>${k === "quotes" ? "Valable jusqu’au" : "Échéance"} : ${date(r.valid || r.due)}</p>${k === "invoices" ? `<p>Payé : ${money(r.paid)} · Solde : ${money(r.amount - (r.paid || 0))}</p>` : ""}${r.acceptedAt ? `<p>Accepté dans le portail le ${esc(new Date(r.acceptedAt).toLocaleString("fr-CH"))}.</p>` : ""}</div>`;
+  )}${r.net !== undefined ? `<p>Remise : ${money(r.discountAmount)} · Net HT : ${money(r.net)}</p>${(r.taxGroups || []).map((g) => `<p>TVA ${esc(g.rate)} % sur ${money(g.base)} : ${money(g.tax)}</p>`).join("")}` : ""}<div class="doc-total"><b>Total TTC : ${money(r.amount)}</b></div><p>${k === "quotes" ? "Valable jusqu’au" : "Échéance"} : ${date(r.valid || r.due)}</p>${k === "invoices" ? `<p>Payé : ${money(r.paid)} · Solde : ${money(r.amount - (r.paid || 0))}</p>` : ""}<p>IBAN : ${esc(co?.billing?.iban || "Non renseigné")}</p><p class="preserve-lines">${esc(r.message)}</p><p class="preserve-lines">${esc(r.terms)}</p>${r.acceptedAt ? `<p>Acceptation enregistrée le ${esc(new Date(r.acceptedAt).toLocaleString("fr-CH"))}.</p>` : ""}${k === "quotes" && r.signature !== false ? '<p class="spaced">Date et signature : ______________________________</p>' : ""}${r.invoiceId ? `<p>Facture liée : ${esc(r.invoiceId)}</p>` : ""}${r.quoteId ? `<p>Devis d’origine : ${esc(r.quoteId)}</p>` : ""}</div>`;
   $("printArea").innerHTML = html;
   modal(
     r.id,
@@ -864,6 +1048,13 @@ function documentModal(k, id) {
       " " +
       (profile.role === "client" && k === "quotes" && r.status === "Émise"
         ? btn("Accepter le devis", "quote.accept", id, "primary")
+        : "") +
+      (can(fin)
+        ? `<div class="actions spaced">${r.status === "Brouillon" ? btn("Modifier", "finance-edit", k + ":" + id) : ""} ${btn("Dupliquer", "finance-copy", k + ":" + id)} ${k === "quotes" && r.status === "Émise" ? btn("Enregistrer la réponse", "quote-decision", id) : ""} ${k === "quotes" && r.status === "Accepté" && !r.invoiceId ? btn("Convertir en facture", "quote-convert", id, "primary") : ""} ${k === "invoices" && r.status !== "Brouillon" && r.status !== "Payée" ? btn("Enregistrer un paiement", "invoice-payment", id) : ""}</div>`
+        : "") +
+      ` <p>${btn("Télécharger PDF", "finance-pdf", k + ":" + id)} ${k === "invoices" && r.status !== "Brouillon" && r.status !== "Payée" ? btn("PDF avec QR de paiement", "finance-qr", k + ":" + id) : ""} ${can(fin) && r.status !== "Brouillon" ? btn("Préparer e-mail avec PDF (.eml)", "finance-email", k + ":" + id) : ""}</p>` +
+      (r.status === "Brouillon"
+        ? '<p class="notice">Brouillon — non émis</p>'
         : "") +
       html,
   );
@@ -1018,11 +1209,89 @@ document.addEventListener("click", async (e) => {
     else if (a === "quote" || a === "invoice")
       documentModal(a === "quote" ? "quotes" : "invoices", id);
     else if (a === "print") window.print();
-    else if (a === "add-line")
+    else if (a === "billing-settings") billingSettings();
+    else if (a === "finance-edit") {
+      const [k, rid] = id.split(":");
+      financeForm(k, find(k, rid));
+    } else if (a === "finance-client") {
+      financeClientDraft = {
+        kind: id,
+        value: {
+          ...Object.fromEntries(new FormData($("entityForm"))),
+          lines: financeLines(),
+        },
+      };
+      newForm("clients");
+      $("f_company").value = financeClientDraft.value.company;
+      $("entityForm").dataset.returnFinance = "true";
+    } else if (a === "finance-copy") {
+      const [k, rid] = id.split(":");
+      await mutate("finance.duplicate", {
+        kind: k,
+        id: rid,
+        date: today(),
+        valid: afterDays(today()),
+        due: afterDays(today()),
+      });
+    } else if (a === "quote-convert") {
+      formShell(
+        [
+          ["date", "Date de facture", "date", today()],
+          ["due", "Échéance", "date", afterDays(today())],
+        ],
+        "quote.convert",
+        `<input type="hidden" name="id" value="${esc(id)}"><p>Les prestations, remises, TVA et coordonnées du devis seront reprises.</p>`,
+        "Convertir en facture",
+      );
+    } else if (a === "quote-decision") {
+      formShell(
+        [["note", "Référence de la réponse du client", "textarea"]],
+        "quote.decide",
+        `<input type="hidden" name="id" value="${esc(id)}"><label>Réponse<select name="status"><option>Accepté</option><option>Refusé</option></select></label>`,
+        "Enregistrer la réponse reçue",
+      );
+    } else if (a === "invoice-payment") {
+      newForm("payments");
+      $("f_invoice").value = id;
+      const invoice = find("invoices", id);
+      $("f_amount").value = (
+        (invoice.amount * 100 - (invoice.paid || 0) * 100) /
+        100
+      ).toFixed(2);
+    } else if (["finance-pdf", "finance-qr", "finance-email"].includes(a)) {
+      const [k, rid] = id.split(":");
+      const extension = a === "finance-email" ? "eml" : "pdf";
+      const includeQR =
+        a === "finance-qr" ||
+        (a === "finance-email" &&
+          k === "invoices" &&
+          confirm(
+            "Inclure le QR bancaire ? Choisissez Annuler pour préparer le PDF sans QR.",
+          ));
+      const response = await fetch(
+        `/api/state/finance/${k}/${encodeURIComponent(rid)}.${extension}${includeQR ? "?qr=1" : ""}`,
+        { headers: { Authorization: "Bearer " + token } },
+      );
+      if (!response.ok)
+        throw new Error(
+          (await response.json()).error || "Téléchargement impossible.",
+        );
+      const url = URL.createObjectURL(await response.blob()),
+        link = document.createElement("a");
+      link.href = url;
+      link.download = rid + "." + extension;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 30000);
+      if (extension === "eml")
+        toast(
+          "Brouillon téléchargé : ouvrez-le dans votre messagerie pour l’envoyer. Aucun e-mail envoyé par l’application.",
+        );
+    } else if (a === "add-line")
       $("lines").insertAdjacentHTML("beforeend", lineRow());
     else if (a === "remove-line") {
       if (document.querySelectorAll(".invoice-line").length > 1)
         b.closest(".invoice-line").remove();
+      financeTotals();
     } else if (a === "project-edit") {
       const p = find("projects", id);
       formShell(
@@ -1188,24 +1457,48 @@ document.addEventListener("submit", async (e) => {
         f,
       );
     if (k === "project.update") p.team = data.getAll("team");
-    if (["quotes", "invoices"].includes(k))
-      p.lines = [...f.querySelectorAll(".invoice-line")].map((row) => ({
-        description: row.querySelector("[name=lineDescription]").value,
-        quantity: row.querySelector("[name=lineQuantity]").value,
-        unitPrice: row.querySelector("[name=linePrice]").value,
-      }));
-    await mutate(
+    if (["quotes", "invoices", "finance.update"].includes(k))
+      p.lines = financeLines(f);
+    const result = await mutate(
       k.includes(".") ? k : "create",
       p,
       k.includes(".") ? undefined : k,
       "state/command",
       f,
     );
+    if (
+      result &&
+      k === "clients" &&
+      f.dataset.returnFinance &&
+      financeClientDraft
+    ) {
+      const draft = financeClientDraft;
+      financeClientDraft = null;
+      const value = {
+        ...draft.value,
+        clientId: result.id,
+        company: result.company,
+        project: "",
+      };
+      if (value.id) financeForm(draft.kind, value);
+      else financeForm(draft.kind, null, value);
+    }
   } catch (err) {
     const target = $("formError");
     if (target) target.textContent = err.message;
     else notice(err.message);
   }
+});
+document.addEventListener("input", (e) => {
+  if (e.target.closest(".invoice-line")) financeTotals();
+});
+document.addEventListener("change", (e) => {
+  if (["f_company", "f_clientId"].includes(e.target.id)) filterFinanceClient();
+  if (
+    e.target.id === "f_company" &&
+    $("entityForm")?.dataset.kind === "finance.settings"
+  )
+    loadBillingSettings();
 });
 document.addEventListener("keydown", (e) => {
   if ($("modalWrap").classList.contains("hidden")) return;

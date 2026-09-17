@@ -1,5 +1,6 @@
 "use strict";
 const { randomUUID } = require("node:crypto");
+const Finance = require("./finance");
 class AppError extends Error {
   constructor(message, status = 400) {
     super(message);
@@ -176,6 +177,7 @@ function canFinance(d, u, r) {
   return (
     (privileged(u, FIN) && (c ? inCompany(u, c) : u.company === "group")) ||
     (u.role === "client" &&
+      r.status !== "Brouillon" &&
       same(r.clientId, u.client_id) &&
       (c ? inCompany(u, c) : u.company === "group"))
   );
@@ -357,6 +359,10 @@ function applyCommand(data, u, cmd, now = new Date().toISOString()) {
         email: text(p.email, "E-mail"),
         phone: text(p.phone, "Téléphone", 40, true),
         city: text(p.city, "Ville"),
+        street: text(p.street, "Rue", 200, true),
+        buildingNumber: text(p.buildingNumber, "Numéro", 20, true),
+        zip: text(p.zip, "Code postal", 20, true),
+        country: text(p.country || "CH", "Pays", 2),
         type: text(p.type, "Type", 80, true),
         status: "Actif",
       };
@@ -435,18 +441,12 @@ function applyCommand(data, u, cmd, now = new Date().toISOString()) {
       const proj = p.project ? ref(d, "projects", p.project) : null;
       if (proj && (proj.company !== c || !same(proj.clientId, client.id)))
         fail("Chantier incompatible.");
-      if (!Array.isArray(p.lines) || !p.lines.length || p.lines.length > 100)
-        fail("Au moins une ligne est requise.");
-      const lines = p.lines.map((l) => ({
-        description: text(l.description, "Description", 500),
-        quantity: num(l.quantity, "Quantité", 0.001, 100000),
-        unitPrice: fromCents(cents(l.unitPrice)),
-      }));
-      const total = lines.reduce(
-        (n, l) => n + Math.round(l.quantity * Math.round(l.unitPrice * 100)),
-        0,
-      );
-      if (total <= 0 || total > 1e10) fail("Total invalide.");
+      let totals;
+      try {
+        totals = Finance.calculate(p.lines);
+      } catch (e) {
+        fail(e.message);
+      }
       r = {
         ...r,
         id: identifier(d, k, k === "quotes" ? "D" : "F", now),
@@ -454,8 +454,20 @@ function applyCommand(data, u, cmd, now = new Date().toISOString()) {
         clientId: client.id,
         project: proj?.id || "",
         title: text(p.title, "Objet"),
-        lines,
-        amount: fromCents(total),
+        ...totals,
+        currency: "CHF",
+        language: ["fr", "de", "it", "en"].includes(p.language)
+          ? p.language
+          : "fr",
+        message: text(p.message, "Message", 5000, true),
+        terms: text(p.terms, "Conditions", 5000, true),
+        paymentReference: text(
+          p.paymentReference,
+          "Référence de paiement",
+          140,
+          true,
+        ),
+        signature: p.signature !== false && p.signature !== "false",
         paid: 0,
         date: iso(p.date),
         [k === "quotes" ? "valid" : "due"]: iso(
@@ -578,11 +590,114 @@ function applyCommand(data, u, cmd, now = new Date().toISOString()) {
         fail("Salarié d’une autre entreprise.");
     r.team = p.team;
     result = r;
+  } else if (action === "finance.settings") {
+    const co = ref(d, "companies", company(d, u, p.company));
+    if (!privileged(u, FIN)) fail("Accès refusé.", 403);
+    const settings = {};
+    for (const key of [
+      "street",
+      "buildingNumber",
+      "zip",
+      "city",
+      "vatNumber",
+      "iban",
+      "email",
+    ])
+      settings[key] = text(p[key], key, 200, true);
+    settings.country = text(p.country || "CH", "Pays", 2).toUpperCase();
+    settings.iban = settings.iban.replace(/\s/g, "").toUpperCase();
+    if (settings.iban && !/^(CH|LI)\d{2}[A-Z0-9]{17}$/.test(settings.iban))
+      fail("IBAN suisse ou liechtensteinois attendu.");
+    if (
+      settings.iban &&
+      !require("swissqrbill/utils").isIBANValid(settings.iban)
+    )
+      fail("Clé de contrôle IBAN invalide.");
+    settings.defaultMessage = text(p.defaultMessage, "Message", 5000, true);
+    settings.defaultTerms = text(p.defaultTerms, "Conditions", 5000, true);
+    settings.paymentDays = num(p.paymentDays, "Délai", 0, 365);
+    co.billing = settings;
+    result = co;
+  } else if (action === "finance.update" || action === "finance.duplicate") {
+    const k = p.kind;
+    if (!["quotes", "invoices"].includes(k)) fail("Document invalide.");
+    const r = ref(d, k, p.id);
+    if (!privileged(u, FIN) || !canFinance(d, u, r)) fail("Accès refusé.", 403);
+    if (action === "finance.update" && r.status !== "Brouillon")
+      fail("Seul un brouillon peut être modifié.");
+    const out = applyCommand(
+      d,
+      u,
+      {
+        action: "create",
+        collection: k,
+        payload:
+          action === "finance.update"
+            ? p
+            : { ...r, date: iso(p.date), valid: p.valid, due: p.due },
+      },
+      now,
+    ).result;
+    if (action === "finance.update") {
+      d[k].pop();
+      if (r.quoteId && (p.clientId !== r.clientId || p.company !== r.company))
+        fail(
+          "La facture liée doit conserver le client et l’entreprise du devis.",
+        );
+      Object.assign(r, out, {
+        id: r.id,
+        createdAt: r.createdAt,
+        updatedAt: now,
+      });
+      result = r;
+    } else result = out;
+  } else if (action === "quote.convert") {
+    const q = ref(d, "quotes", p.id);
+    if (!privileged(u, FIN) || !canFinance(d, u, q)) fail("Accès refusé.", 403);
+    if (q.status !== "Accepté")
+      fail("Acceptez le devis avant de le convertir.");
+    if (q.invoiceId || d.invoices.some((i) => i.quoteId === q.id))
+      fail("Ce devis a déjà une facture.");
+    result = applyCommand(
+      d,
+      u,
+      {
+        action: "create",
+        collection: "invoices",
+        payload: { ...q, date: p.date, due: p.due },
+      },
+      now,
+    ).result;
+    result.quoteId = q.id;
+    result.issuer = structuredClone(q.issuer || ref(d, "companies", q.company));
+    result.customer = structuredClone(
+      q.customer || ref(d, "clients", q.clientId),
+    );
+    q.invoiceId = result.id;
+  } else if (action === "quote.decide") {
+    const q = ref(d, "quotes", p.id);
+    if (!privileged(u, FIN) || !canFinance(d, u, q)) fail("Accès refusé.", 403);
+    if (q.status !== "Émise" || q.valid < now.slice(0, 10))
+      fail("Devis non émis ou expiré.");
+    if (!["Accepté", "Refusé"].includes(p.status)) fail("Décision invalide.");
+    const note = text(p.note, "Justificatif de la décision", 1000);
+    q.status = p.status;
+    q.decisionNote = note;
+    q.decidedAt = now;
+    q.decidedBy = u.id;
+    if (p.status === "Accepté") {
+      q.acceptedAt = now;
+      q.acceptedBy = u.id;
+    }
+    result = q;
   } else if (action === "invoice.issue" || action === "quote.issue") {
     const k = action.startsWith("invoice") ? "invoices" : "quotes",
       r = ref(d, k, p.id);
     if (!privileged(u, FIN) || !canFinance(d, u, r)) fail("Accès refusé.", 403);
     if (r.status !== "Brouillon") fail("Document déjà émis.");
+    r.issuer ||= structuredClone(ref(d, "companies", r.company));
+    r.customer ||= structuredClone(ref(d, "clients", r.clientId));
+    r.issuedAt = now;
     r.status = "Émise";
     result = r;
   } else if (action === "quote.accept") {
