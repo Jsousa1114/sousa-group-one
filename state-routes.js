@@ -10,6 +10,83 @@ function routes(db) {
   const r = express.Router();
   r.use(auth(db));
   r.get(
+    ["/finance/:kind/:id.pdf", "/finance/:kind/:id.eml"],
+    wrap(async (req, res) => {
+      const { kind, id } = req.params;
+      if (!["quotes", "invoices"].includes(kind))
+        D.fail("Document introuvable.", 404);
+      const row = (
+        await db.query("SELECT data,revision FROM app_state WHERE id=1")
+      ).rows[0];
+      const state = D.viewState(row.data, req.user);
+      const document = state[kind].find((r) => D.same(r.id, id));
+      if (!document) D.fail("Document introuvable.", 404);
+      const issuer =
+        document.issuer || D.ref(state, "companies", document.company);
+      const customer =
+        document.customer || D.ref(state, "clients", document.clientId);
+      const buffer = await require("./finance-pdf").renderPDF(
+        document,
+        kind,
+        issuer,
+        customer,
+        req.query.qr === "1",
+      );
+      if (req.path.endsWith(".eml")) {
+        if (!D.privileged(req.user, D.FIN) || document.status === "Brouillon")
+          D.fail("Émettez le document avant de préparer son envoi.", 403);
+        if (!/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(customer.email || ""))
+          D.fail("E-mail client invalide.");
+        const boundary = "sousa-" + randomUUID();
+        const subject = Buffer.from(
+          `${kind === "quotes" ? "Devis" : "Facture"} ${document.id} — ${issuer.name}`,
+        ).toString("base64");
+        const body = Buffer.from(
+          document.message ||
+            "Bonjour,\n\nVous trouverez votre document en pièce jointe.\n\n" +
+              issuer.name,
+        ).toString("base64");
+        const base64 = buffer
+          .toString("base64")
+          .match(/.{1,76}/g)
+          .join("\r\n");
+        const eml = [
+          `To: ${customer.email}`,
+          `Subject: =?UTF-8?B?${subject}?=`,
+          "X-Unsent: 1",
+          "MIME-Version: 1.0",
+          `Content-Type: multipart/mixed; boundary="${boundary}"`,
+          "",
+          `--${boundary}`,
+          'Content-Type: text/plain; charset="UTF-8"',
+          "Content-Transfer-Encoding: base64",
+          "",
+          body,
+          `--${boundary}`,
+          "Content-Type: application/pdf",
+          `Content-Disposition: attachment; filename="${encodeURIComponent(document.id)}.pdf"`,
+          "Content-Transfer-Encoding: base64",
+          "",
+          base64,
+          `--${boundary}--`,
+          "",
+        ].join("\r\n");
+        return res
+          .set({
+            "Content-Type": "message/rfc822",
+            "Content-Disposition": `attachment; filename="${encodeURIComponent(document.id)}.eml"`,
+          })
+          .send(eml);
+      }
+      res
+        .set({
+          "Content-Type": "application/pdf",
+          "Content-Disposition": `attachment; filename="${encodeURIComponent(document.id)}.pdf"`,
+        })
+        .send(buffer);
+    }),
+  );
+  r.get(
     "/",
     wrap(async (req, res) => {
       const row = (
@@ -20,27 +97,23 @@ function routes(db) {
           "SELECT id,email,name,role,company,employee_id,client_id,disabled FROM users",
         )
       ).rows;
-      res
-        .set("Cache-Control", "no-store")
-        .json({
-          data: D.viewState(row.data, req.user),
-          revision: row.revision,
-          contacts: users
-            .filter(
-              (u) => !D.same(u.id, req.user.id) && D.canContact(req.user, u),
-            )
-            .map((u) => ({ id: u.id, name: u.name, role: u.role })),
-          profile: profile(req.user),
-        });
+      res.set("Cache-Control", "no-store").json({
+        data: D.viewState(row.data, req.user),
+        revision: row.revision,
+        contacts: users
+          .filter(
+            (u) => !D.same(u.id, req.user.id) && D.canContact(req.user, u),
+          )
+          .map((u) => ({ id: u.id, name: u.name, role: u.role })),
+        profile: profile(req.user),
+      });
     }),
   );
   r.post("/", (req, res) =>
-    res
-      .status(405)
-      .json({
-        error:
-          "La sauvegarde complète est désactivée. Utilisez une opération métier.",
-      }),
+    res.status(405).json({
+      error:
+        "La sauvegarde complète est désactivée. Utilisez une opération métier.",
+    }),
   );
   r.post(
     "/command",
