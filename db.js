@@ -5,7 +5,7 @@ const { createHash } = require("node:crypto");
 const { emptyState, normalize, AppError } = require("./domain");
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: process.env.PGSSL === "disable" ? false : { rejectUnauthorized: true },
+  ssl: process.env.PGSSL === "disable" ? false : { rejectUnauthorized: false },
 });
 async function migrate(db = pool) {
   await db.query(
