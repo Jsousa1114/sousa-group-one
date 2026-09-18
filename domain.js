@@ -461,6 +461,13 @@ function applyCommand(data, u, cmd, now = new Date().toISOString()) {
           : "fr",
         message: text(p.message, "Message", 5000, true),
         terms: text(p.terms, "Conditions", 5000, true),
+        scope: text(p.scope, "Objet détaillé", 5000, true),
+        exclusions: text(p.exclusions, "Non compris / options", 5000, true),
+        paymentNote: text(p.paymentNote, "Consigne de paiement", 1000, true),
+        depositPercent:
+          p.depositPercent === "" || p.depositPercent == null
+            ? 0
+            : num(p.depositPercent, "Acompte", 0, 100),
         paymentReference: text(
           p.paymentReference,
           "Référence de paiement",
@@ -477,6 +484,11 @@ function applyCommand(data, u, cmd, now = new Date().toISOString()) {
       };
       if ((r.valid || r.due) < r.date)
         fail("Échéance antérieure à la date du document.");
+      try {
+        Finance.paymentSummary(r);
+      } catch (e) {
+        fail(e.message);
+      }
     } else if (k === "payments") {
       const inv = ref(d, "invoices", p.invoice);
       if (!canFinance(d, u, inv) || inv.status === "Brouillon")

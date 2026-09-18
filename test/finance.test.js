@@ -82,6 +82,72 @@ test("VAT, fractional quantities, per-line discounts and rounding reconcile", ()
   ])
     assert.throws(() => F.calculate([{ ...payload().lines[0], ...patch }]));
 });
+test("reference layout deposit follows quote conversion and payments without changing invoice total", async () => {
+  const d = fixture(),
+    p = {
+      ...payload(),
+      depositPercent: 30,
+      exclusions: "Hors débarras",
+      scope: "Objet détaillé",
+      paymentNote: "Avant travaux",
+      lines: [
+        {
+          description: "Nettoyage",
+          details: "Prestations détaillées\nDeuxième ligne",
+          quantity: 1,
+          unitPrice: 1090,
+        },
+      ],
+    };
+  const q = cmd(d, "create", p, "quotes");
+  cmd(d, "quote.issue", { id: q.id });
+  cmd(d, "quote.decide", { id: q.id, status: "Accepté", note: "Test" });
+  const inv = cmd(d, "quote.convert", { id: q.id, date: p.date, due: p.due });
+  cmd(d, "invoice.issue", { id: inv.id });
+  assert.equal(inv.lines[0].details, p.lines[0].details);
+  assert.equal(inv.exclusions, p.exclusions);
+  assert.equal(F.paymentSummary(inv).depositAmount, 327);
+  assert.equal(qrData(inv, inv.issuer, inv.customer).amount, 327);
+  cmd(
+    d,
+    "create",
+    { invoice: inv.id, amount: 100, date: p.date, method: "Virement" },
+    "payments",
+  );
+  assert.equal(qrData(inv, inv.issuer, inv.customer).amount, 227);
+  cmd(
+    d,
+    "create",
+    { invoice: inv.id, amount: 227, date: p.date, method: "Virement" },
+    "payments",
+  );
+  assert.equal(qrData(inv, inv.issuer, inv.customer).amount, 763);
+  assert.equal(inv.amount, 1090);
+  assert.equal(inv.status, "Partiellement payée");
+  for (const depositPercent of [-1, 101, 30.001])
+    assert.throws(() =>
+      cmd(fixture(), "create", { ...p, depositPercent }, "quotes"),
+    );
+  const pdf = await renderPDF(
+    {
+      ...inv,
+      message: "",
+      terms: "",
+      scope: "",
+      exclusions: "",
+      paymentNote: "",
+    },
+    "invoices",
+    inv.issuer,
+    inv.customer,
+    true,
+  );
+  assert.equal(
+    (pdf.toString("latin1").match(/\/Type \/Page\b/g) || []).length,
+    2,
+    "Footer must not create extra pages",
+  );
+});
 test("draft editing preserves numbering; issue locks content and snapshots parties", () => {
   const d = fixture(),
     q = cmd(d, "create", payload(), "quotes");
