@@ -1,5 +1,21 @@
 # Devis et factures
 
+## Modèle de présentation
+
+Le modèle reprend la facture de référence fournie : logo Home Service,
+titre en haut à droite, coordonnées, dates, objet détaillé, tableau à quatre
+colonnes, détails de prestation, exclusions/options, conditions, totaux et
+pagination. Les données de démonstration Magic Heidi et son compte bancaire
+ne sont jamais repris. Les autres entreprises conservent leur nom d'émetteur.
+
+L'acompte est facultatif (0 % par défaut) et paramétrable sur chaque devis ou
+facture. Il est conservé à la conversion : 30 % de 1’090 CHF = 327 CHF.
+Le QR demande l'acompte restant tant qu'il n'est pas encaissé, puis le solde
+global. Les paiements réduisent le solde sans modifier le total du document.
+Le PDF indique le montant demandé ; régénérer le QR après un paiement partiel.
+Les devis comportent une zone de signature et les factures émises peuvent
+comporter une page QR séparée.
+
 ## Parcours
 
 1. Ouvrir Devis ou Factures puis **Paramètres de facturation**. Renseigner les

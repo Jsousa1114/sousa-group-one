@@ -815,13 +815,14 @@ function formShell(fields, kind, extra = "", title = "Ajouter") {
   );
 }
 function lineRow(l = {}) {
-  return `<div class="invoice-line"><label>Description<input name="lineDescription" required maxlength="500" value="${esc(l.description || "")}"></label><label>Quantité<input name="lineQuantity" type="number" step="0.001" min="0.001" value="${esc(l.quantity ?? 1)}" required></label><label>Unité<input name="lineUnit" maxlength="30" value="${esc(l.unit || "pcs")}"></label><label>Prix HT CHF<input name="linePrice" type="number" step="0.01" min="0" value="${esc(l.unitPrice ?? "")}" required></label><label>Remise %<input name="lineDiscount" type="number" step="0.01" min="0" max="100" value="${esc(l.discount ?? 0)}" required></label><label>TVA %<input name="lineVat" type="number" step="0.01" min="0" max="100" list="vatRates" value="${esc(l.vatRate ?? 0)}" required></label>${btn("Retirer", "remove-line")}</div>`;
+  return `<div class="invoice-line"><label>Description<input name="lineDescription" required maxlength="500" value="${esc(l.description || "")}"></label><label class="line-details">Détails de la prestation<textarea name="lineDetails" maxlength="5000" rows="3">${esc(l.details || "")}</textarea></label><label>Quantité<input name="lineQuantity" type="number" step="0.001" min="0.001" value="${esc(l.quantity ?? 1)}" required></label><label>Unité<input name="lineUnit" maxlength="30" value="${esc(l.unit || "pcs")}"></label><label>Prix HT CHF<input name="linePrice" type="number" step="0.01" min="0" value="${esc(l.unitPrice ?? "")}" required></label><label>Remise %<input name="lineDiscount" type="number" step="0.01" min="0" max="100" value="${esc(l.discount ?? 0)}" required></label><label>TVA %<input name="lineVat" type="number" step="0.01" min="0" max="100" list="vatRates" value="${esc(l.vatRate ?? 0)}" required></label>${btn("Retirer", "remove-line")}</div>`;
 }
 function financeLines(f = $("entityForm")) {
   return [...f.querySelectorAll(".invoice-line")].map((row) =>
     Object.fromEntries(
       [
         ["description", "lineDescription"],
+        ["details", "lineDetails"],
         ["quantity", "lineQuantity"],
         ["unit", "lineUnit"],
         ["unitPrice", "linePrice"],
@@ -837,6 +838,13 @@ function financeTotals() {
     const t = SousaFinance.calculate(financeLines());
     $("financeTotals").textContent =
       `Brut HT ${money(t.subtotal)} · Remise ${money(t.discountAmount)} · Net HT ${money(t.net)} · TVA ${money(t.tax)} · Total TTC ${money(t.amount)}`;
+    const deposit = SousaFinance.paymentSummary({
+      ...t,
+      depositPercent: $("entityForm").elements.depositPercent?.value || 0,
+    });
+    if (deposit.depositPercent)
+      $("financeTotals").textContent +=
+        ` · Acompte ${deposit.depositPercent} % : ${money(deposit.depositAmount)}`;
   } catch (e) {
     $("financeTotals").textContent = e.message;
   }
@@ -876,7 +884,7 @@ function financeForm(k, r, initial) {
       .map(([v, t]) => `<option value="${v}">${t}</option>`)
       .join(
         "",
-      )}</select></label>${field(["message", "Message au client", "textarea?"])}${field(["terms", "Conditions", "textarea?"])}${field(["paymentReference", "Référence bancaire structurée (facultatif)", "text?"])}${k === "quotes" ? '<label>Zone de signature<select name="signature"><option value="true">Oui</option><option value="false">Non</option></select></label>' : ""}${r ? `<input type="hidden" name="id" value="${esc(r.id)}"><input type="hidden" name="kind" value="${k}">` : ""}`,
+      )}</select></label>${field(["message", "Introduction / message au client", "textarea?"])}${field(["scope", "Objet détaillé des travaux", "textarea?"])}${field(["exclusions", "Non compris / options", "textarea?"])}${field(["terms", "Conditions", "textarea?"])}<label>Acompte demandé (%)<input name="depositPercent" type="number" min="0" max="100" step="0.01" value="0" required></label><p class="muted">0 = sans acompte. Le QR demandera l’acompte restant, puis le solde une fois l’acompte encaissé.</p>${field(["paymentNote", "Consigne de paiement", "textarea?"])}${field(["paymentReference", "Référence bancaire structurée (facultatif)", "text?"])}${k === "quotes" ? '<label>Zone de signature<select name="signature"><option value="true">Oui</option><option value="false">Non</option></select></label>' : ""}${r ? `<input type="hidden" name="id" value="${esc(r.id)}"><input type="hidden" name="kind" value="${k}">` : ""}`,
     r
       ? "Modifier le brouillon"
       : k === "quotes"
@@ -1009,6 +1017,7 @@ function projectModal(id) {
 function documentModal(k, id) {
   const r = find(k, id);
   if (!r) return;
+  const payment = SousaFinance.paymentSummary(r);
   const c = r.customer || find("clients", r.clientId),
     co = r.issuer || find("companies", r.company);
   const address = (a) =>
@@ -1022,7 +1031,7 @@ function documentModal(k, id) {
     (
       r.lines || [{ description: r.title, quantity: 1, unitPrice: r.amount }]
     ).map((l) => [
-      esc(l.description),
+      `<b>${esc(l.description)}</b><p class="preserve-lines">${esc(l.details)}</p>`,
       esc(l.quantity) + " " + esc(l.unit),
       money(l.unitPrice),
       esc(l.discount || 0) + " %",
@@ -1033,9 +1042,10 @@ function documentModal(k, id) {
     ]),
   )}${r.net !== undefined ? `<p>Remise : ${money(r.discountAmount)} · Net HT : ${money(r.net)}</p>${(r.taxGroups || []).map((g) => `<p>TVA ${esc(g.rate)} % sur ${money(g.base)} : ${money(g.tax)}</p>`).join("")}` : ""}<div class="doc-total"><b>Total TTC : ${money(r.amount)}</b></div><p>${k === "quotes" ? "Valable jusqu’au" : "Échéance"} : ${date(r.valid || r.due)}</p>${k === "invoices" ? `<p>Payé : ${money(r.paid)} · Solde : ${money(r.amount - (r.paid || 0))}</p>` : ""}<p>IBAN : ${esc(co?.billing?.iban || "Non renseigné")}</p><p class="preserve-lines">${esc(r.message)}</p><p class="preserve-lines">${esc(r.terms)}</p>${r.acceptedAt ? `<p>Acceptation enregistrée le ${esc(new Date(r.acceptedAt).toLocaleString("fr-CH"))}.</p>` : ""}${k === "quotes" && r.signature !== false ? '<p class="spaced">Date et signature : ______________________________</p>' : ""}${r.invoiceId ? `<p>Facture liée : ${esc(r.invoiceId)}</p>` : ""}${r.quoteId ? `<p>Devis d’origine : ${esc(r.quoteId)}</p>` : ""}</div>`;
   $("printArea").innerHTML = html;
+  const appendix = `<div class="document"><p class="preserve-lines">${esc(r.scope)}</p>${r.exclusions ? `<h4>Non compris / options</h4><p class="preserve-lines">${esc(r.exclusions)}</p>` : ""}<p class="preserve-lines">${esc(r.paymentNote)}</p>${payment.depositPercent ? `<p>Acompte : ${payment.depositPercent} % · Montant : ${money(payment.depositAmount)}</p><p>Acompte restant : ${money(payment.depositRemaining)} · Solde total : ${money(payment.balance)}</p>` : ""}</div>`;
   modal(
     r.id,
-    btn("Imprimer / PDF", "print") +
+    btn("Imprimer / PDF", "finance-pdf", k + ":" + id) +
       " " +
       (can(fin) && r.status === "Brouillon"
         ? btn(
@@ -1056,7 +1066,8 @@ function documentModal(k, id) {
       (r.status === "Brouillon"
         ? '<p class="notice">Brouillon — non émis</p>'
         : "") +
-      html,
+      html +
+      appendix,
   );
 }
 async function loadUsers() {
@@ -1254,10 +1265,8 @@ document.addEventListener("click", async (e) => {
       newForm("payments");
       $("f_invoice").value = id;
       const invoice = find("invoices", id);
-      $("f_amount").value = (
-        (invoice.amount * 100 - (invoice.paid || 0) * 100) /
-        100
-      ).toFixed(2);
+      $("f_amount").value =
+        SousaFinance.paymentSummary(invoice).requested.toFixed(2);
     } else if (["finance-pdf", "finance-qr", "finance-email"].includes(a)) {
       const [k, rid] = id.split(":");
       const extension = a === "finance-email" ? "eml" : "pdf";
@@ -1490,7 +1499,8 @@ document.addEventListener("submit", async (e) => {
   }
 });
 document.addEventListener("input", (e) => {
-  if (e.target.closest(".invoice-line")) financeTotals();
+  if (e.target.closest(".invoice-line") || e.target.name === "depositPercent")
+    financeTotals();
 });
 document.addEventListener("change", (e) => {
   if (["f_company", "f_clientId"].includes(e.target.id)) filterFinanceClient();

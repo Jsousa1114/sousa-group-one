@@ -1137,6 +1137,9 @@ tr:last-child td {
 .invoice-line label:first-child {
   grid-column: 1 / -1;
 }
+.invoice-line .line-details {
+  grid-column: 1 / -1;
+}
 @media (max-width: 600px) {
   .invoice-line {
     grid-template-columns: 1fr 1fr;

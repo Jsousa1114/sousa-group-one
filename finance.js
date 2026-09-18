@@ -47,8 +47,12 @@
       group.tax += vat;
       const unit = String(l.unit || "pcs").trim();
       if (unit.length > 30) throw new Error("Unité invalide.");
+      const details = l.details == null ? "" : l.details;
+      if (typeof details !== "string" || details.length > 5000)
+        throw new Error("Détails de prestation invalides.");
       return {
         description: l.description.trim(),
+        details: details.trim(),
         quantity: q / 1000,
         unitPrice: price / 100,
         unit,
@@ -74,7 +78,26 @@
       })),
     };
   }
-  const api = { calculate };
+  function paymentSummary(r, target = "auto") {
+    if (!["auto", "balance"].includes(target))
+      throw new Error("Type de paiement invalide.");
+    const percent = decimal(r.depositPercent ?? 0, "Acompte", 0, 100, 2);
+    const total = Math.round(r.amount * 100),
+      paid = Math.round((r.paid || 0) * 100);
+    const deposit = Math.round((total * percent) / 10000);
+    const depositRemaining = Math.max(0, deposit - paid),
+      balance = Math.max(0, total - paid);
+    const isDeposit = target === "auto" && depositRemaining > 0;
+    return {
+      depositPercent: percent / 100,
+      depositAmount: deposit / 100,
+      depositRemaining: depositRemaining / 100,
+      balance: balance / 100,
+      requested: (isDeposit ? depositRemaining : balance) / 100,
+      isDeposit,
+    };
+  }
+  const api = { calculate, paymentSummary };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.SousaFinance = api;
 })(typeof window === "undefined" ? {} : window);
