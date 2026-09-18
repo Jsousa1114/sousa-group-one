@@ -225,7 +225,7 @@ async function renderPDF(r, kind, issuer, customer, includeQR = false) {
       moving: "#B83E46",
       solar: "#9C7516",
       events: "#7656A4",
-    }[r.company] || "#525D68";
+    }[require("./finance").companyBrand(r.company, issuer)] || "#525D68";
   const ink = "#202A31",
     muted = "#64717A",
     pale = "#F3F6F7";
@@ -343,17 +343,7 @@ async function renderPDF(r, kind, issuer, customer, includeQR = false) {
       .stroke()
       .restore();
   }
-  const logoId = [
-    "group",
-    "home",
-    "electricite",
-    "tech",
-    "moving",
-    "solar",
-    "events",
-  ].includes(r.company)
-    ? r.company
-    : "group";
+  const logoId = require("./finance").companyBrand(r.company, issuer);
   const logo = path.join(__dirname, `assets/logos/${logoId}.png`);
   pdf
     .save()

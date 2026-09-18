@@ -97,7 +97,38 @@
       isDeposit,
     };
   }
-  const api = { calculate, paymentSummary };
+  function companyBrand(id, company = {}) {
+    const brands = [
+      "group",
+      "home",
+      "electricite",
+      "tech",
+      "moving",
+      "solar",
+      "events",
+    ];
+    if (brands.includes(id)) return id;
+    const normalize = (s) =>
+      String(s || "")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, "");
+    const names = {
+      sousagroup: "group",
+      sousahomeservice: "home",
+      sousaelectricite: "electricite",
+      sousatech: "tech",
+      sousatechnologie: "tech",
+      sousamoving: "moving",
+      sousasolar: "solar",
+      sousaevents: "events",
+      sousaevent: "events",
+    };
+    const brand = names[normalize(company.name)];
+    return brands.includes(brand) ? brand : "group";
+  }
+  const api = { calculate, paymentSummary, companyBrand };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.SousaFinance = api;
 })(typeof window === "undefined" ? {} : window);

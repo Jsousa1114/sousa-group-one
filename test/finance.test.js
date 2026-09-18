@@ -288,3 +288,19 @@ test("PDF and QR PDF render in four languages and reject incomplete payment data
     /émise/,
   );
 });
+test("company branding accepts generated IDs and issuer names with safe fallback", () => {
+  const { companyBrand } = require("../finance");
+  for (const [name, brand] of [
+    ["Sousa Events", "events"],
+    ["Sousa Moving", "moving"],
+    ["Sousa Solar", "solar"],
+    ["Sousa Électricité", "electricite"],
+  ]) {
+    assert.equal(companyBrand("company-generated-123", { name }), brand);
+  }
+  assert.equal(
+    companyBrand("../../etc/passwd", { name: "constructor" }),
+    "group",
+  );
+  assert.equal(companyBrand("home", { name: "Sousa Events" }), "home");
+});
