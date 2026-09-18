@@ -6,7 +6,11 @@ const { JSDOM } = require("jsdom"),
 const html = fs.readFileSync(require.resolve("../index.html"), "utf8"),
   script = fs.readFileSync(require.resolve("../app.js"), "utf8");
 const flush = () => new Promise((r) => setTimeout(r, 0));
-async function setup(role = "admin", empty = false) {
+async function setup(
+  role = "admin",
+  empty = false,
+  generatedCompanyIds = false,
+) {
   const dom = new JSDOM(html, {
       url: "http://localhost",
       runScripts: "outside-only",
@@ -14,6 +18,12 @@ async function setup(role = "admin", empty = false) {
     w = dom.window;
   let d = D.emptyState(),
     revision = 0;
+  if (generatedCompanyIds) {
+    for (const c of d.companies) {
+      if (["events", "moving", "solar"].includes(c.id))
+        c.id = "company-" + c.id + "-123";
+    }
+  }
   const profile = {
     id: 1,
     role,
@@ -106,8 +116,8 @@ function submit(h) {
       new h.w.Event("submit", { bubbles: true, cancelable: true }),
     );
 }
-test("company logos appear in navigation and company rows with safe fallback", async () => {
-  const h = await setup();
+test("company logos resolve generated IDs in navigation and company rows", async () => {
+  const h = await setup("admin", false, true);
   try {
     const d = h.w.document;
     assert.ok(d.querySelector('.login-logo[src="/assets/logos/group.png"]'));
@@ -124,7 +134,13 @@ test("company logos appear in navigation and company rows with safe fallback", a
         d.querySelector(`.company-row-logo[src="/assets/logos/${id}.png"]`),
         id,
       );
-      d.getElementById("companyFilter").value = id;
+      d.getElementById("companyFilter").value = [
+        "events",
+        "moving",
+        "solar",
+      ].includes(id)
+        ? "company-" + id + "-123"
+        : id;
       d.getElementById("companyFilter").dispatchEvent(new h.w.Event("change"));
       assert.ok(
         d
