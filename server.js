@@ -34,6 +34,15 @@ function createApp(db = pool) {
     "manifest.webmanifest",
     "service-worker.js",
     "icon.svg",
+    ...[
+      "group",
+      "home",
+      "electricite",
+      "tech",
+      "moving",
+      "solar",
+      "events",
+    ].map((id) => `assets/logos/${id}.png`),
   ])
     app.get("/" + file, (req, res) => {
       res.set("Cache-Control", "no-cache");
@@ -46,14 +55,12 @@ function createApp(db = pool) {
       return res.status(409).json({ error: "Cet élément existe déjà." });
     const status = err.status || 500;
     if (status >= 500) console.error(err);
-    res
-      .status(status)
-      .json({
-        error:
-          status >= 500
-            ? "Erreur serveur. Aucune modification confirmée."
-            : err.message,
-      });
+    res.status(status).json({
+      error:
+        status >= 500
+          ? "Erreur serveur. Aucune modification confirmée."
+          : err.message,
+    });
   });
   return app;
 }

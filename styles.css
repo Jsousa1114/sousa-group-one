@@ -98,6 +98,46 @@ h3 {
   align-items: center;
   gap: 12px;
 }
+.brand-logo,
+.login-logo,
+.active-company-logo,
+.company-row-logo,
+.document-logo {
+  object-fit: contain;
+  background: #000;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+.brand-logo {
+  width: 76px;
+  height: 76px;
+}
+.login-logo {
+  display: block;
+  width: 140px;
+  height: 140px;
+  margin: 0 auto 18px;
+}
+.active-company-logo {
+  display: block;
+  width: 112px;
+  height: 112px;
+  margin: 0 auto 12px;
+}
+.company-row-logo {
+  width: 76px;
+  height: 76px;
+}
+.company-identity {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.document-logo {
+  width: 125px;
+  height: 125px;
+  margin-bottom: 16px;
+}
 .brand .logo {
   width: 48px;
   height: 48px;

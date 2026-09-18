@@ -106,6 +106,42 @@ function submit(h) {
       new h.w.Event("submit", { bubbles: true, cancelable: true }),
     );
 }
+test("company logos appear in navigation and company rows with safe fallback", async () => {
+  const h = await setup();
+  try {
+    const d = h.w.document;
+    assert.ok(d.querySelector('.login-logo[src="/assets/logos/group.png"]'));
+    click(h, '[data-page="companies"]');
+    for (const id of [
+      "home",
+      "electricite",
+      "tech",
+      "moving",
+      "solar",
+      "events",
+    ]) {
+      assert.ok(
+        d.querySelector(`.company-row-logo[src="/assets/logos/${id}.png"]`),
+        id,
+      );
+      d.getElementById("companyFilter").value = id;
+      d.getElementById("companyFilter").dispatchEvent(new h.w.Event("change"));
+      assert.ok(
+        d
+          .getElementById("activeCompanyLogo")
+          .src.endsWith(`/assets/logos/${id}.png`),
+      );
+      d.getElementById("companyFilter").value = "";
+      d.getElementById("companyFilter").dispatchEvent(new h.w.Event("change"));
+    }
+    assert.equal(
+      d.getElementById("activeCompanyLogo").getAttribute("src"),
+      "/assets/logos/group.png",
+    );
+  } finally {
+    h.close();
+  }
+});
 test("quote UI preview edit issue acceptance conversion and invoice payment work together", async () => {
   const h = await setup();
   const settle = async () => {
@@ -301,7 +337,21 @@ test("invoice displays cents and escapes user text in document", async () => {
     await flush();
     await flush();
     click(h, '[data-action="invoice"]');
-    assert.equal(h.w.document.querySelectorAll("#modalBody img").length, 0);
+    assert.equal(
+      h.w.document.querySelectorAll("#modalBody img:not(.document-logo)")
+        .length,
+      0,
+    );
+    assert.equal(
+      h.w.document
+        .querySelector("#modalBody .document-logo")
+        .getAttribute("src"),
+      "/assets/logos/home.png",
+    );
+    assert.equal(
+      h.w.document.querySelectorAll("#modalBody [onerror]").length,
+      0,
+    );
     assert.ok(
       h.w.document
         .getElementById("modalBody")
