@@ -343,10 +343,18 @@ async function renderPDF(r, kind, issuer, customer, includeQR = false) {
       .stroke()
       .restore();
   }
-  const logo =
-    issuer.id === "home" || r.company === "home"
-      ? path.join(__dirname, "assets/logos/home.png")
-      : null;
+  const logoId = [
+    "group",
+    "home",
+    "electricite",
+    "tech",
+    "moving",
+    "solar",
+    "events",
+  ].includes(r.company)
+    ? r.company
+    : "group";
+  const logo = path.join(__dirname, `assets/logos/${logoId}.png`);
   pdf
     .save()
     .rect(0, 0, 595.28, 118)
@@ -354,8 +362,11 @@ async function renderPDF(r, kind, issuer, customer, includeQR = false) {
     .rect(0, 118, 595.28, 4)
     .fill(accent)
     .restore();
-  if (logo) pdf.image(logo, 40, 24, { width: 70, height: 70 });
-  else draw("SOUSA", 40, 44, 230, 25, true, "left", "#FFFFFF");
+  pdf.image(logo, 40, 4, {
+    fit: [110, 110],
+    align: "center",
+    valign: "center",
+  });
   draw(t[quote ? 0 : 1], 300, 35, 255, 25, true, "right", "#FFFFFF");
   draw(r.id, 280, 70, 275, 10, false, "right", "#CFD8DE");
   if (r.status === "Brouillon")

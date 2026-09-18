@@ -1,5 +1,7 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
+const companyLogoPath = (id) =>
+  `/assets/logos/${["group", "home", "electricite", "tech", "moving", "solar", "events"].includes(id) ? id : "group"}.png`;
 let financeClientDraft = null;
 const esc = (v) =>
   String(v ?? "").replace(
@@ -278,6 +280,9 @@ function render() {
       .map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`)
       .join("");
   $("companyFilter").value = company;
+  $("activeCompanyLogo").src = companyLogoPath(company || profile.company);
+  $("activeCompanyLogo").alt =
+    name("companies", company || profile.company) || "Sousa Group";
   $("content").innerHTML = views[page] ? views[page]() : genericPage(page);
   if (page === "users") loadUsers();
   if (page === "audit") loadAudit();
@@ -643,7 +648,9 @@ function genericPage(k) {
                 ? esc(name("clients", r[f]))
                 : f === "company"
                   ? esc(name("companies", r[f]))
-                  : esc(r[f] ?? "—"),
+                  : k === "companies" && f === "name"
+                    ? `<span class="company-identity"><img class="company-row-logo" src="${companyLogoPath(r.id)}" alt="" />${esc(r[f])}</span>`
+                    : esc(r[f] ?? "—"),
         ),
         ...(["employees", "clients"].includes(k) && profile.role === "admin"
           ? [btn("Créer un compte", "linked-user", k + ":" + r.id)]
@@ -1041,7 +1048,11 @@ function documentModal(k, id) {
       ),
     ]),
   )}${r.net !== undefined ? `<p>Remise : ${money(r.discountAmount)} · Net HT : ${money(r.net)}</p>${(r.taxGroups || []).map((g) => `<p>TVA ${esc(g.rate)} % sur ${money(g.base)} : ${money(g.tax)}</p>`).join("")}` : ""}<div class="doc-total"><b>Total TTC : ${money(r.amount)}</b></div><p>${k === "quotes" ? "Valable jusqu’au" : "Échéance"} : ${date(r.valid || r.due)}</p>${k === "invoices" ? `<p>Payé : ${money(r.paid)} · Solde : ${money(r.amount - (r.paid || 0))}</p>` : ""}<p>IBAN : ${esc(co?.billing?.iban || "Non renseigné")}</p><p class="preserve-lines">${esc(r.message)}</p><p class="preserve-lines">${esc(r.terms)}</p>${r.acceptedAt ? `<p>Acceptation enregistrée le ${esc(new Date(r.acceptedAt).toLocaleString("fr-CH"))}.</p>` : ""}${k === "quotes" && r.signature !== false ? '<p class="spaced">Date et signature : ______________________________</p>' : ""}${r.invoiceId ? `<p>Facture liée : ${esc(r.invoiceId)}</p>` : ""}${r.quoteId ? `<p>Devis d’origine : ${esc(r.quoteId)}</p>` : ""}</div>`;
-  $("printArea").innerHTML = html;
+  const brandedHtml = html.replace(
+    '<div class="document-head">',
+    `<img class="document-logo" src="${companyLogoPath(r.company)}" alt="${esc(co?.name || "Sousa Group")}" /><div class="document-head">`,
+  );
+  $("printArea").innerHTML = brandedHtml;
   const appendix = `<div class="document"><p class="preserve-lines">${esc(r.scope)}</p>${r.exclusions ? `<h4>Non compris / options</h4><p class="preserve-lines">${esc(r.exclusions)}</p>` : ""}<p class="preserve-lines">${esc(r.paymentNote)}</p>${payment.depositPercent ? `<p>Acompte : ${payment.depositPercent} % · Montant : ${money(payment.depositAmount)}</p><p>Acompte restant : ${money(payment.depositRemaining)} · Solde total : ${money(payment.balance)}</p>` : ""}</div>`;
   modal(
     r.id,
@@ -1066,7 +1077,7 @@ function documentModal(k, id) {
       (r.status === "Brouillon"
         ? '<p class="notice">Brouillon — non émis</p>'
         : "") +
-      html +
+      brandedHtml +
       appendix,
   );
 }

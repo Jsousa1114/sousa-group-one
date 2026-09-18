@@ -26,6 +26,27 @@ const payload = (revision, rest) => ({
 async function rev() {
   return (await call("state", admin)).data.revision;
 }
+test("only the seven explicit logo assets are publicly served", async () => {
+  for (const id of [
+    "group",
+    "home",
+    "electricite",
+    "tech",
+    "moving",
+    "solar",
+    "events",
+  ]) {
+    const response = await fetch(url + `/assets/logos/${id}.png`);
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get("content-type"), /image\/png/);
+    const bytes = Buffer.from(await response.arrayBuffer());
+    assert.equal(bytes.subarray(1, 4).toString(), "PNG");
+  }
+  assert.equal(
+    (await fetch(url + "/assets/fonts/LiberationSans-Regular.ttf")).status,
+    404,
+  );
+});
 test.before(async () => {
   db = await database();
   await migrate(db);
