@@ -217,6 +217,18 @@ async function renderPDF(r, kind, issuer, customer, includeQR = false) {
   const left = 40,
     right = 555,
     bottom = 775;
+  const accent =
+    {
+      home: "#147D64",
+      electricite: "#C2631C",
+      tech: "#2476A2",
+      moving: "#B83E46",
+      solar: "#9C7516",
+      events: "#7656A4",
+    }[r.company] || "#525D68";
+  const ink = "#202A31",
+    muted = "#64717A",
+    pale = "#F3F6F7";
   let y = 40;
   const money = (n) =>
     Number(n || 0)
@@ -227,7 +239,7 @@ async function renderPDF(r, kind, issuer, customer, includeQR = false) {
     pdf
       .font(heavy ? bold : regular)
       .fontSize(size)
-      .fillColor("#111111");
+      .fillColor(ink);
   }
   function wrap(value, width, size = 10.5, heavy = false) {
     font(size, heavy);
@@ -264,13 +276,18 @@ async function renderPDF(r, kind, issuer, customer, includeQR = false) {
     size = 10.5,
     heavy = false,
     align = "left",
+    color = ink,
   ) {
     font(size, heavy);
+    pdf.fillColor(color);
     pdf.text(String(value || ""), x, yy, { width, align, lineBreak: false });
   }
   function newPage(table = false) {
     pdf.addPage();
-    y = 40;
+    pdf.save().rect(40, 28, 515, 2).fill(accent).restore();
+    draw(r.id, 40, 40, 240, 8.5, false, "left", muted);
+    draw(t[quote ? 0 : 1], 315, 40, 240, 8.5, true, "right", muted);
+    y = 68;
     if (table) tableHeader();
   }
   function ensure(height, table = false) {
@@ -291,12 +308,18 @@ async function renderPDF(r, kind, issuer, customer, includeQR = false) {
   function section(title, value) {
     if (!value) return;
     ensure(48);
-    paragraph(title, { size: 12, heavy: true, gap: 4 });
+    pdf.save().rect(30, y, 3, 13).fill(accent).restore();
+    paragraph(title, { size: 11, heavy: true, gap: 4 });
     paragraph(value, { gap: 20 });
   }
   function tableHeader() {
-    draw(t[6], 40, y, 295, 10.5, true);
-    draw(extra[7], 350, y, 42, 9.5, true);
+    pdf
+      .save()
+      .roundedRect(30, y - 9, 535, 32, 4)
+      .fill(ink)
+      .restore();
+    draw(t[6], 40, y, 295, 10, true, "left", "#FFFFFF");
+    draw(extra[7], 350, y, 42, 9.5, true, "left", "#FFFFFF");
     draw(
       r.tax > 0 ? t[8] : r.language === "fr" ? "Prix" : t[8],
       404,
@@ -304,18 +327,17 @@ async function renderPDF(r, kind, issuer, customer, includeQR = false) {
       65,
       10,
       true,
+      "left",
+      "#FFFFFF",
     );
-    draw(extra[8], 482, y, 73, 10.5, true, "right");
-    y += 22;
-    rule();
-    y += 9;
+    draw(extra[8], 482, y, 73, 10, true, "right", "#FFFFFF");
+    y += 36;
   }
   function rule(x = 40) {
     pdf
       .save()
-      .strokeColor("#cccccc")
+      .strokeColor("#E0E6E9")
       .lineWidth(0.5)
-      .dash(1, { space: 2 })
       .moveTo(x, y)
       .lineTo(right, y)
       .stroke()
@@ -325,10 +347,19 @@ async function renderPDF(r, kind, issuer, customer, includeQR = false) {
     issuer.id === "home" || r.company === "home"
       ? path.join(__dirname, "assets/logos/home.png")
       : null;
-  if (logo) pdf.image(logo, 40, 40, { width: 68, height: 68 });
-  else draw("SOUSA", 40, 50, 230, 25, true);
-  draw(t[quote ? 0 : 1], 300, 44, 255, 22, true, "right");
-  if (r.status === "Brouillon") draw(t[2], 270, 76, 285, 9, true, "right");
+  pdf
+    .save()
+    .rect(0, 0, 595.28, 118)
+    .fill("#151D23")
+    .rect(0, 118, 595.28, 4)
+    .fill(accent)
+    .restore();
+  if (logo) pdf.image(logo, 40, 24, { width: 70, height: 70 });
+  else draw("SOUSA", 40, 44, 230, 25, true, "left", "#FFFFFF");
+  draw(t[quote ? 0 : 1], 300, 35, 255, 25, true, "right", "#FFFFFF");
+  draw(r.id, 280, 70, 275, 10, false, "right", "#CFD8DE");
+  if (r.status === "Brouillon")
+    draw(t[2], 270, 93, 285, 8, true, "right", "#F2CC80");
   const billing = issuer.billing || {};
   const issuerLines = [
     issuer.name,
@@ -338,27 +369,36 @@ async function renderPDF(r, kind, issuer, customer, includeQR = false) {
     billing.vatNumber,
     billing.email,
   ].filter(Boolean);
-  let sy = 124;
+  let sy = 151;
   issuerLines.forEach((v, i) => {
     for (const line of wrap(v, 250, 10.5, i === 0)) {
       draw(line, 40, sy, 250, 10.5, i === 0);
       sy += 15;
     }
   });
-  let cy = 169;
+  let cy = 151;
   const customerLines = [
     customer.name,
     [customer.street, customer.buildingNumber].filter(Boolean).join(" "),
     [customer.zip, customer.city].filter(Boolean).join(" "),
     customer.country === "CH" ? "" : customer.country,
   ].filter(Boolean);
+  const customerHeight = customerLines.reduce(
+    (sum, v, i) => sum + wrap(v, 197, 10.5, i === 0).length * 15,
+    0,
+  );
+  pdf
+    .save()
+    .roundedRect(323, 137, 242, customerHeight + 30, 5)
+    .fill(pale)
+    .restore();
   customerLines.forEach((v, i) => {
-    for (const line of wrap(v, 210, 10.5, i === 0)) {
-      draw(line, 338, cy, 217, 10.5, i === 0);
+    for (const line of wrap(v, 197, 10.5, i === 0)) {
+      draw(line, 338, cy, 197, 10.5, i === 0);
       cy += 15;
     }
   });
-  y = Math.max(sy, cy) + 20;
+  y = Math.max(sy, cy) + 30;
   for (const [key, value] of [
     [t[quote ? 0 : 1] + " N°", r.id],
     [t[3], date(r.date)],
@@ -368,7 +408,9 @@ async function renderPDF(r, kind, issuer, customer, includeQR = false) {
     const a = wrap(key, 100, 10),
       b = wrap(value, 300, 10.5);
     ensure(Math.max(a.length, b.length) * 16);
-    a.forEach((v, i) => draw(v, 40, y + i * 16, 100, 10));
+    a.forEach((v, i) =>
+      draw(v, 40, y + i * 16, 100, 9.5, false, "left", muted),
+    );
     b.forEach((v, i) => draw(v, 145, y + i * 16, 300, 10.5));
     y += Math.max(a.length, b.length) * 16 + 3;
   }
@@ -376,7 +418,11 @@ async function renderPDF(r, kind, issuer, customer, includeQR = false) {
   if (r.message) paragraph(r.message);
   if (payment.depositPercent)
     paragraph(extra[1] + " : " + payment.depositPercent + " %", { gap: 12 });
-  paragraph(extra[9] + " : " + r.title, { gap: r.scope ? 4 : 22 });
+  paragraph(extra[9] + " : " + r.title, {
+    size: 12,
+    heavy: true,
+    gap: r.scope ? 6 : 24,
+  });
   if (r.scope) paragraph(r.scope, { gap: 24 });
   ensure(65);
   tableHeader();
@@ -425,7 +471,16 @@ async function renderPDF(r, kind, issuer, customer, includeQR = false) {
         );
         first = false;
       }
-      draw(line.value, 40, y, 295, line.size || 10.5, line.heavy);
+      draw(
+        line.value,
+        40,
+        y,
+        295,
+        line.size || 10.5,
+        line.heavy,
+        "left",
+        line.heavy ? ink : muted,
+      );
       y += 15;
     }
     y += 3;
@@ -458,11 +513,22 @@ async function renderPDF(r, kind, issuer, customer, includeQR = false) {
       money(payment.requested),
     ]);
   ensure(totals.length * 22 + 30);
-  rule(350);
+  pdf
+    .save()
+    .roundedRect(332, y, 233, totals.length * 22 + 22, 5)
+    .fill(pale)
+    .restore();
   y += 12;
   totals.forEach(([key, value], i) => {
-    draw(key, 350, y, 137, 10, i === totals.length - 1);
-    draw(value, 490, y, 65, 10.5, i === totals.length - 1, "right");
+    const last = i === totals.length - 1;
+    if (last)
+      pdf
+        .save()
+        .rect(332, y - 6, 233, 30)
+        .fill(accent)
+        .restore();
+    draw(key, 344, y, 141, 9.5, last, "left", last ? "#FFFFFF" : ink);
+    draw(value, 486, y, 69, 11, last, "right", last ? "#FFFFFF" : ink);
     y += 22;
   });
   if (!qr && billing.iban) {
@@ -478,14 +544,24 @@ async function renderPDF(r, kind, issuer, customer, includeQR = false) {
   }
   if (qr) {
     newPage();
-    pdf.y = 40;
-    qr.attachTo(pdf, 0, 40);
+    pdf.y = 85;
+    pdf.fillColor("#000000");
+    qr.attachTo(pdf, 0, 85);
   }
   const range = pdf.bufferedPageRange();
   for (let i = 0; i < range.count; i++) {
     pdf.switchToPage(range.start + i);
     const savedBottom = pdf.page.margins.bottom;
     pdf.page.margins.bottom = 0;
+    pdf
+      .save()
+      .undash()
+      .lineWidth(0.5)
+      .strokeColor("#E0E6E9")
+      .moveTo(40, 799)
+      .lineTo(555, 799)
+      .stroke()
+      .restore();
     draw(
       extra[5] + " " + (i + 1) + " " + extra[6] + " " + range.count,
       40,
