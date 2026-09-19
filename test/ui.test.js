@@ -142,6 +142,9 @@ test("company logos resolve generated IDs in navigation and company rows", async
         ? "company-" + id + "-123"
         : id;
       d.getElementById("companyFilter").dispatchEvent(new h.w.Event("change"));
+      assert.equal(d.body.dataset.brand, id);
+      click(h, '[data-action="theme"]');
+      assert.equal(d.body.dataset.brand, id);
       assert.ok(
         d
           .getElementById("activeCompanyLogo")
@@ -149,6 +152,7 @@ test("company logos resolve generated IDs in navigation and company rows", async
       );
       d.getElementById("companyFilter").value = "";
       d.getElementById("companyFilter").dispatchEvent(new h.w.Event("change"));
+      assert.equal(d.body.dataset.brand, "group");
     }
     assert.equal(
       d.getElementById("activeCompanyLogo").getAttribute("src"),

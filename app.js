@@ -154,6 +154,7 @@ async function api(path, body) {
   return data;
 }
 function clearSession() {
+  document.body.dataset.brand = "group";
   token = null;
   state = null;
   profile = null;
@@ -259,6 +260,11 @@ $("companyFilter").onchange = (e) => {
 };
 function render() {
   if (!state || !profile) return;
+  const activeCompanyId = company || profile.company;
+  document.body.dataset.brand = SousaFinance.companyBrand(
+    activeCompanyId,
+    state.companies.find((c) => c.id === activeCompanyId),
+  );
   if (!menus[page]?.[1].includes(profile.role)) page = "dashboard";
   $("title").textContent = menus[page][0];
   $("userName").textContent = profile.name + " · " + roles[profile.role];
