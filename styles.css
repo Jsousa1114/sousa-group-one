@@ -18,6 +18,105 @@
   --shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
   --radius: 18px;
 }
+.planning-controls {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: end;
+  margin: 16px 0;
+}
+.planning-controls label {
+  margin: 0;
+  min-width: 150px;
+}
+.planning-scroll {
+  overflow: auto;
+  max-height: 70vh;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+}
+.planning-calendar {
+  border-collapse: separate;
+  border-spacing: 0;
+  table-layout: fixed;
+  width: 100%;
+  min-width: 1160px;
+}
+.planning-calendar caption {
+  text-align: left;
+  padding: 14px;
+  font-weight: 700;
+}
+.planning-calendar th,
+.planning-calendar td {
+  width: 140px;
+  vertical-align: top;
+  padding: 10px;
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  white-space: normal;
+}
+.planning-calendar th:first-child {
+  width: 170px;
+  position: sticky;
+  left: 0;
+  background: var(--panel);
+  z-index: 2;
+}
+.planning-calendar thead th {
+  position: sticky;
+  top: 0;
+  background: var(--panel);
+  z-index: 3;
+}
+.planning-calendar thead th:first-child {
+  z-index: 4;
+}
+.planning-calendar small {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+}
+.planning-today {
+  background: color-mix(in srgb, var(--green) 7%, var(--bg));
+}
+.planning-shift {
+  width: 100%;
+  display: block;
+  padding: 10px;
+  margin: 0 0 8px;
+  text-align: left;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--green);
+  border-radius: 8px;
+  background: var(--panel2);
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.planning-shift span {
+  display: block;
+  margin-top: 5px;
+}
+.planning-add {
+  width: 100%;
+  margin-top: 10px;
+  padding: 9px 4px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  color: var(--green);
+  background: transparent;
+}
+.planning-absence {
+  background: color-mix(in srgb, var(--red) 12%, var(--panel));
+  border: 1px solid var(--red);
+  padding: 8px;
+  border-radius: 8px;
+}
+.planning-empty {
+  display: block;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
 body[data-brand="home"] {
   --brand-hue: 43;
   --brand-saturation: 82%;

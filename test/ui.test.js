@@ -10,6 +10,7 @@ async function setup(
   role = "admin",
   empty = false,
   generatedCompanyIds = false,
+  configure = () => {},
 ) {
   const dom = new JSDOM(html, {
       url: "http://localhost",
@@ -54,6 +55,7 @@ async function setup(
       },
     ];
   }
+  configure(d);
   const h = { dom, w, requests: [], failure: null };
   w.sessionStorage.setItem("sgo_session", "unit-test-session");
   w.setInterval = () => 0;
@@ -291,6 +293,10 @@ test("planning creation through form renders saved appointment and closes dialog
   const h = await setup();
   try {
     click(h, '[data-page="planning"]');
+    h.w.document.getElementById("planningDate").value = "2026-09-20";
+    h.w.document
+      .getElementById("planningDate")
+      .dispatchEvent(new h.w.Event("change"));
     click(h, '[data-action="new"]');
     fill(h, "date", "2026-09-20");
     fill(h, "start", "08:00");
@@ -307,6 +313,106 @@ test("planning creation through form renders saved appointment and closes dialog
     assert.equal(
       h.w.document.getElementById("modalWrap").classList.contains("hidden"),
       true,
+    );
+  } finally {
+    h.close();
+  }
+});
+test("weekly calendar handles year boundaries, slot creation, copy and employee read-only access", async () => {
+  const h = await setup();
+  try {
+    click(h, '[data-page="planning"]');
+    const d = h.w.document;
+    d.getElementById("planningDate").value = "2027-01-01";
+    d.getElementById("planningDate").dispatchEvent(
+      new h.w.Event("change", { bubbles: true }),
+    );
+    assert.match(
+      d.querySelector(".planning-calendar caption").textContent,
+      /28.12.2026.*03.01.2027/,
+    );
+    click(h, '[data-action="planning-slot"][data-date="2027-01-01"]');
+    assert.equal(d.getElementById("f_employeeId").value, "e1");
+    assert.equal(d.getElementById("f_date").value, "2027-01-01");
+    submit(h);
+    await flush();
+    await flush();
+    assert.equal(d.querySelectorAll(".planning-shift").length, 1);
+    assert.match(
+      d.querySelector(".planning-shift").textContent,
+      /08:00–12:00.*Project/,
+    );
+    assert.match(
+      d.querySelector(".planning-calendar tbody th").textContent,
+      /4 h/,
+    );
+    click(h, '[data-action="planning-detail"]');
+    click(h, '[data-action="planning-copy"]');
+    assert.equal(d.getElementById("f_date").value, "2027-01-02");
+    submit(h);
+    await flush();
+    await flush();
+    assert.equal(d.querySelectorAll(".planning-shift").length, 2);
+    click(h, '[data-action="planning-mode"][data-id="list"]');
+    assert.match(d.getElementById("content").textContent, /02.01.2027/);
+    click(h, '[data-action="planning-nav"][data-id="7"]');
+    assert.equal(
+      d.querySelectorAll('[data-action="planning-detail"]').length,
+      0,
+    );
+  } finally {
+    h.close();
+  }
+  const employee = await setup("employee");
+  try {
+    click(employee, '[data-page="planning"]');
+    assert.equal(
+      employee.w.document.querySelectorAll('[data-action="planning-slot"]')
+        .length,
+      0,
+    );
+    assert.equal(
+      employee.w.document.querySelectorAll(".planning-calendar tbody tr")
+        .length,
+      1,
+    );
+  } finally {
+    employee.close();
+  }
+});
+test("calendar separates employees and blocks approved absence slots", async () => {
+  const h = await setup("admin", false, false, (d) => {
+    d.employees.push({ id: "e2", name: "Second employee", company: "home" });
+    d.absences.push({
+      id: "a1",
+      employeeId: "e2",
+      from: "2027-01-01",
+      to: "2027-01-01",
+      status: "Approuvée",
+      company: "home",
+    });
+  });
+  try {
+    click(h, '[data-page="planning"]');
+    const d = h.w.document;
+    d.getElementById("planningDate").value = "2027-01-01";
+    d.getElementById("planningDate").dispatchEvent(
+      new h.w.Event("change", { bubbles: true }),
+    );
+    assert.equal(d.querySelectorAll(".planning-calendar tbody tr").length, 2);
+    assert.equal(d.querySelectorAll(".planning-absence").length, 1);
+    assert.equal(
+      d.querySelectorAll('[data-employee="e2"][data-date="2027-01-01"]').length,
+      0,
+    );
+    d.getElementById("planningEmployee").value = "e2";
+    d.getElementById("planningEmployee").dispatchEvent(
+      new h.w.Event("change", { bubbles: true }),
+    );
+    assert.equal(d.querySelectorAll(".planning-calendar tbody tr").length, 1);
+    assert.match(
+      d.querySelector(".planning-calendar tbody th").textContent,
+      /Second employee/,
     );
   } finally {
     h.close();

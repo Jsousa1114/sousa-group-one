@@ -375,33 +375,117 @@ function timeView() {
     )
   );
 }
+let planningDate = today(),
+  planningMode = "week",
+  planningEmployee = "";
+function planningDay(value, offset = 0) {
+  const d = new Date(value + "T12:00:00Z");
+  d.setUTCDate(d.getUTCDate() + offset);
+  return d.toISOString().slice(0, 10);
+}
+function planningWeek() {
+  const day = new Date(planningDate + "T12:00:00Z").getUTCDay();
+  const start = planningDay(planningDate, -((day + 6) % 7));
+  return Array.from({ length: 7 }, (_, i) => planningDay(start, i));
+}
+function planningForm(employeeId = "", day = planningDate, copy = null) {
+  newForm("planning");
+  if (employeeId) $("f_employeeId").value = employeeId;
+  planningProjects();
+  $("f_date").value = day;
+  $("f_start").value = copy?.start || "08:00";
+  $("f_end").value = copy?.end || "12:00";
+  if (copy) {
+    $("f_project").value = copy.project;
+    $("f_location").value = copy.location || "";
+  }
+}
+function planningProjects() {
+  const employee = find("employees", $("f_employeeId").value);
+  const previous = $("f_project").value;
+  const projects = visible("projects").filter(
+    (p) => p.company === employee?.company,
+  );
+  $("f_project").innerHTML = projects.length
+    ? projects
+        .map((p) => `<option value="${esc(p.id)}">${esc(p.title)}</option>`)
+        .join("")
+    : '<option value="">Aucun chantier pour cette entreprise</option>';
+  if (projects.some((p) => same(p.id, previous)))
+    $("f_project").value = previous;
+}
 function planningView() {
+  const days = planningWeek();
+  const staff = visible("employees").filter(
+    (e) => profile.role !== "employee" || same(e.id, profile.employee_id),
+  );
+  if (!staff.some((e) => same(e.id, planningEmployee))) planningEmployee = "";
+  const selected = staff.filter(
+    (e) => !planningEmployee || same(e.id, planningEmployee),
+  );
+  const entries = visible("planning")
+    .filter(
+      (p) =>
+        p.date >= days[0] &&
+        p.date <= days[6] &&
+        selected.some((e) => same(e.id, p.employeeId)),
+    )
+    .sort(
+      (a, b) => a.date.localeCompare(b.date) || a.start.localeCompare(b.start),
+    );
+  const hours = (rows) =>
+    rows
+      .reduce((sum, p) => {
+        const minutes = (t) =>
+          Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
+        return sum + (minutes(p.end) - minutes(p.start)) / 60;
+      }, 0)
+      .toLocaleString("fr-CH", { maximumFractionDigits: 2 });
+  const controls = `<div class="planning-controls">${btn("‹ Semaine précédente", "planning-nav", "-7")}${btn("Aujourd’hui", "planning-nav", "today")}${btn("Semaine suivante ›", "planning-nav", "7")}<label>Date<input id="planningDate" type="date" value="${planningDate}"></label><label>Salarié<select id="planningEmployee"><option value="">Toute l’équipe</option>${staff.map((e) => `<option value="${esc(e.id)}" ${same(e.id, planningEmployee) ? "selected" : ""}>${esc(e.name)}</option>`).join("")}</select></label>${btn("Semaine par salarié", "planning-mode", "week", planningMode === "week" ? "primary" : "")}${btn("Liste de la semaine", "planning-mode", "list", planningMode === "list" ? "primary" : "")}</div><p class="muted">Du ${date(days[0])} au ${date(days[6])} · ${selected.length} salarié(s) · ${hours(entries)} h planifiées, pauses non déduites.</p>`;
+  const calendar = `<div class="planning-scroll" role="region" aria-label="Calendrier hebdomadaire par salarié" tabindex="0"><table class="planning-calendar"><caption>Planning du ${date(days[0])} au ${date(days[6])}</caption><thead><tr><th scope="col">Salarié / heures</th>${days.map((d, i) => `<th scope="col" class="${d === today() ? "planning-today" : ""}">${["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"][i]} ${date(d)}</th>`).join("")}</tr></thead><tbody>${selected
+    .map(
+      (e) =>
+        `<tr><th scope="row">${esc(e.name)}<small>${hours(entries.filter((p) => same(p.employeeId, e.id)))} h planifiées</small></th>${days
+          .map((d) => {
+            const shifts = entries.filter(
+              (p) => same(p.employeeId, e.id) && p.date === d,
+            );
+            const absent = state.absences.some(
+              (a) =>
+                same(a.employeeId, e.id) &&
+                a.status === "Approuvée" &&
+                a.from <= d &&
+                a.to >= d,
+            );
+            return `<td class="${d === today() ? "planning-today" : ""}">${absent ? '<div class="planning-absence">Absent · validé</div>' : ""}${shifts.map((p) => `<button class="planning-shift" data-action="planning-detail" data-id="${esc(p.id)}"><b>${esc(p.start)}–${esc(p.end)}</b><span>${esc(name("projects", p.project))}</span>${p.location ? `<small>${esc(p.location)}</small>` : ""}</button>`).join("")}${!shifts.length && !absent ? '<span class="planning-empty">Sans affectation</span>' : ""}${can(ops) && !absent ? `<button class="planning-add" data-action="planning-slot" data-employee="${esc(e.id)}" data-date="${d}" aria-label="Planifier ${esc(e.name)} le ${date(d)}">+ Planifier</button>` : ""}</td>`;
+          })
+          .join("")}</tr>`,
+    )
+    .join("")}</tbody></table></div>`;
   return (
     heading(
-      "Affectations",
-      can(ops)
-        ? btn("Planifier", "new", "planning", "primary") +
-            " " +
-            btn("Exporter CSV", "export", "planning")
-        : btn("Exporter CSV", "export", "planning"),
+      "Planning de l’équipe",
+      (can(ops) ? btn("Planifier", "new", "planning", "primary") + " " : "") +
+        btn("Exporter CSV", "export", "planning"),
     ) +
-    table(
-      ["Date", "Début", "Fin", "Salarié", "Chantier", "Lieu", ""],
-      [...visible("planning")]
-        .sort(
-          (a, b) =>
-            a.date.localeCompare(b.date) || a.start.localeCompare(b.start),
-        )
-        .map((p) => [
-          date(p.date),
-          esc(p.start),
-          esc(p.end),
-          esc(name("employees", p.employeeId)),
-          esc(p.project),
-          esc(p.location),
-          can(ops) ? btn("Supprimer", "planning.delete", p.id, "danger") : "",
-        ]),
-    )
+    controls +
+    (selected.length
+      ? planningMode === "week"
+        ? calendar
+        : table(
+            ["Date", "Début", "Fin", "Salarié", "Chantier", "Lieu", ""],
+            entries.map((p) => [
+              date(p.date),
+              esc(p.start),
+              esc(p.end),
+              esc(name("employees", p.employeeId)),
+              esc(name("projects", p.project)),
+              esc(p.location),
+              btn("Détails", "planning-detail", p.id),
+            ]),
+          )
+      : '<p class="empty">Aucun salarié dans cette vue.</p>') +
+    '<p class="muted">Une ligne par salarié. Cliquez sur un créneau pour ses détails ou sur + Planifier pour ajouter une affectation. Sur téléphone, faites défiler le calendrier horizontalement ou utilisez la liste. Les absences validées et les chevauchements sont bloqués à l’enregistrement.</p>'
   );
 }
 function absenceView() {
@@ -1193,6 +1277,22 @@ function exportData(k) {
   );
 }
 document.addEventListener("change", (e) => {
+  if (
+    e.target.id === "f_employeeId" &&
+    $("entityForm")?.dataset.kind === "planning"
+  )
+    planningProjects();
+  if (
+    e.target.id === "planningDate" &&
+    /^\d{4}-\d{2}-\d{2}$/.test(e.target.value)
+  ) {
+    planningDate = e.target.value;
+    render();
+  }
+  if (e.target.id === "planningEmployee") {
+    planningEmployee = e.target.value;
+    render();
+  }
   if (e.target.id === "recipient") {
     selectedRecipient = e.target.value;
     render();
@@ -1232,8 +1332,29 @@ document.addEventListener("click", async (e) => {
       await refresh();
       notice("");
       toast("Données actualisées.");
-    } else if (a === "new") newForm(id);
-    else if (a === "project") projectModal(id);
+    } else if (a === "planning-nav") {
+      planningDate =
+        id === "today" ? today() : planningDay(planningDate, Number(id));
+      render();
+    } else if (a === "planning-mode") {
+      planningMode = id === "list" ? "list" : "week";
+      render();
+    } else if (a === "planning-slot") {
+      planningForm(b.dataset.employee, b.dataset.date);
+    } else if (a === "planning-detail") {
+      const p = find("planning", id);
+      if (p)
+        modal(
+          "Affectation",
+          `<p><b>${esc(name("employees", p.employeeId))}</b></p><p>${date(p.date)} · ${esc(p.start)}–${esc(p.end)}</p><p>${esc(name("projects", p.project))}</p><p>${esc(p.location)}</p>${can(ops) ? btn("Copier vers un autre créneau", "planning-copy", p.id) + " " + btn("Supprimer", "planning.delete", p.id, "danger") : ""}`,
+        );
+    } else if (a === "planning-copy") {
+      const p = find("planning", id);
+      if (p) planningForm(p.employeeId, planningDay(p.date, 1), p);
+    } else if (a === "new") {
+      if (id === "planning") planningForm(planningEmployee);
+      else newForm(id);
+    } else if (a === "project") projectModal(id);
     else if (a === "quote" || a === "invoice")
       documentModal(a === "quote" ? "quotes" : "invoices", id);
     else if (a === "print") window.print();
@@ -1492,6 +1613,10 @@ document.addEventListener("submit", async (e) => {
       "state/command",
       f,
     );
+    if (result && k === "planning") {
+      planningDate = p.date;
+      render();
+    }
     if (
       result &&
       k === "clients" &&
