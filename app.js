@@ -102,9 +102,25 @@ const createRoles = {
 };
 const can = (rs) => rs.includes(profile?.role);
 const visible = (k) =>
-  (state?.[k] || []).filter(
-    (x) => !company || !x.company || x.company === company,
-  );
+  (state?.[k] || []).filter((x) => {
+    if (k === "employees" && x.deletedAt) return false;
+    if (!company) return true;
+    const employee =
+      k === "employees"
+        ? x
+        : state.employees.find((e) => same(e.id, x.employeeId));
+    if (k === "employees" || k === "absences")
+      return (
+        !employee ||
+        [employee.company, ...(employee.companies || [])].includes(company)
+      );
+    const scope =
+      x.company ||
+      (x.project &&
+        state.projects.find((p) => same(p.id, x.project))?.company) ||
+      employee?.company;
+    return !scope || scope === company;
+  });
 const find = (k, id) => state[k]?.find((x) => same(x.id, id));
 const name = (k, id) => {
   const r = find(k, id);
@@ -403,8 +419,8 @@ function planningForm(employeeId = "", day = planningDate, copy = null) {
 function planningProjects() {
   const employee = find("employees", $("f_employeeId").value);
   const previous = $("f_project").value;
-  const projects = visible("projects").filter(
-    (p) => p.company === employee?.company,
+  const projects = visible("projects").filter((p) =>
+    [employee?.company, ...(employee?.companies || [])].includes(p.company),
   );
   $("f_project").innerHTML = projects.length
     ? projects
@@ -724,6 +740,7 @@ function genericPage(k) {
     table(
       [
         ...cols.map((c) => c[1]),
+        ...(k === "employees" && can(hr) ? ["Gestion"] : []),
         ...(["employees", "clients"].includes(k) && profile.role === "admin"
           ? ["Accès"]
           : []),
@@ -737,11 +754,22 @@ function genericPage(k) {
               : f === "clientId"
                 ? esc(name("clients", r[f]))
                 : f === "company"
-                  ? esc(name("companies", r[f]))
+                  ? k === "employees"
+                    ? [...new Set([r.company, ...(r.companies || [])])]
+                        .map((c) => esc(name("companies", c)))
+                        .join(" · ")
+                    : esc(name("companies", r[f]))
                   : k === "companies" && f === "name"
                     ? `<span class="company-identity"><img class="company-row-logo" src="${companyLogoPath(r.id)}" alt="" />${esc(r[f])}</span>`
                     : esc(r[f] ?? "—"),
         ),
+        ...(k === "employees" && can(hr)
+          ? [
+              btn("Entreprises / accès", "employee-companies", r.id) +
+                " " +
+                btn("Supprimer", "employee-delete", r.id, "danger"),
+            ]
+          : []),
         ...(["employees", "clients"].includes(k) && profile.role === "admin"
           ? [btn("Créer un compte", "linked-user", k + ":" + r.id)]
           : []),
@@ -753,6 +781,7 @@ function options(k, blank = false) {
   return (
     (blank ? '<option value="">Aucun</option>' : "") +
     (state[k] || [])
+      .filter((r) => k !== "employees" || !r.deletedAt)
       .filter((r) => k !== "companies" || r.id !== "group")
       .map(
         (r) =>
@@ -1448,7 +1477,11 @@ document.addEventListener("click", async (e) => {
         ],
         "project.update",
         `<input type="hidden" name="id" value="${esc(id)}"><label>Statut<select name="status">${["Planifié", "En cours", "Terminé", "À facturer"].map((s) => `<option ${s === p.status ? "selected" : ""}>${s}</option>`).join("")}</select></label><label>Équipe<select name="team" multiple>${state.employees
-          .filter((e) => e.company === p.company)
+          .filter(
+            (e) =>
+              !e.deletedAt &&
+              [e.company, ...(e.companies || [])].includes(p.company),
+          )
           .map(
             (e) =>
               `<option value="${esc(e.id)}" ${(p.team || []).some((x) => same(x, e.id)) ? "selected" : ""}>${esc(e.name)}</option>`,
@@ -1491,7 +1524,30 @@ document.addEventListener("click", async (e) => {
       );
     else if (a === "export") exportData(id);
     else if (a === "user-form") userForm();
-    else if (a === "linked-user") userForm(id);
+    else if (a === "employee-companies") {
+      const employee = find("employees", id);
+      const memberships = [employee.company, ...(employee.companies || [])];
+      formShell(
+        [],
+        "employee.companies",
+        `<input type="hidden" name="id" value="${esc(id)}"><p>Un seul compte pour les entreprises cochées. L’entreprise principale doit rester sélectionnée. Le salarié voit uniquement les chantiers auxquels il est affecté.</p><fieldset><legend>Entreprises de ${esc(employee.name)}</legend>${state.companies
+          .filter((c) => c.id !== "group")
+          .map(
+            (c) =>
+              `<label><input type="checkbox" name="companies" value="${esc(c.id)}" ${memberships.includes(c.id) ? "checked" : ""}> ${esc(c.name)}${c.id === employee.company ? " (principale)" : ""}</label>`,
+          )
+          .join("")}</fieldset>`,
+        "Entreprises et accès",
+      );
+    } else if (a === "employee-delete") {
+      const employee = find("employees", id);
+      if (
+        confirm(
+          `Supprimer ${employee.name} des salariés actifs ? Son compte sera désactivé et ses affectations à partir d’aujourd’hui annulées. L’historique des heures et documents sera conservé.`,
+        )
+      )
+        await mutate("employee.delete", { id });
+    } else if (a === "linked-user") userForm(id);
     else if (a === "edit-user") {
       const u = userAccounts.find((x) => same(x.id, id));
       userForm();
@@ -1604,6 +1660,7 @@ document.addEventListener("submit", async (e) => {
         f,
       );
     if (k === "project.update") p.team = data.getAll("team");
+    if (k === "employee.companies") p.companies = data.getAll("companies");
     if (["quotes", "invoices", "finance.update"].includes(k))
       p.lines = financeLines(f);
     const result = await mutate(

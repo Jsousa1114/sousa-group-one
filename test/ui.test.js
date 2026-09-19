@@ -418,6 +418,45 @@ test("calendar separates employees and blocks approved absence slots", async () 
     h.close();
   }
 });
+test("HR can select multiple companies and remove employee from active screens", async () => {
+  const h = await setup();
+  try {
+    click(h, '[data-page="employees"]');
+    click(h, '[data-action="employee-companies"]');
+    h.w.document.querySelector(
+      'input[name="companies"][value="moving"]',
+    ).checked = true;
+    submit(h);
+    await flush();
+    await flush();
+    assert.match(
+      h.w.document.getElementById("content").textContent,
+      /Sousa Moving/,
+    );
+    h.w.document.getElementById("companyFilter").value = "moving";
+    h.w.document
+      .getElementById("companyFilter")
+      .dispatchEvent(new h.w.Event("change"));
+    assert.match(
+      h.w.document.getElementById("content").textContent,
+      /Employee/,
+    );
+    click(h, '[data-action="employee-delete"]');
+    await flush();
+    await flush();
+    assert.equal(
+      h.w.document.querySelectorAll('[data-action="employee-delete"]').length,
+      0,
+    );
+    click(h, '[data-page="planning"]');
+    assert.equal(
+      h.w.document.querySelectorAll(".planning-calendar tbody tr").length,
+      0,
+    );
+  } finally {
+    h.close();
+  }
+});
 test("HTTP errors retain form and never claim saved", async () => {
   const h = await setup();
   try {

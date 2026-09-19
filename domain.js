@@ -61,7 +61,22 @@ const access = {
   maintenance: OPS,
 };
 const same = (a, b) => a != null && b != null && String(a) === String(b);
-const inCompany = (u, c) => u.company === "group" || u.company === c;
+const employeeCompanies = (e) =>
+  [
+    ...new Set([e.company, ...(Array.isArray(e.companies) ? e.companies : [])]),
+  ].filter((c) => c && c !== "group");
+const inCompany = (u, c) =>
+  u.role === "employee"
+    ? (u.companies || [u.company]).includes(c) && c !== "group"
+    : u.company === "group" || u.company === c;
+function effectiveUser(data, u) {
+  if (u.role !== "employee") return u;
+  const e = data.employees?.find((e) => same(e.id, u.employee_id));
+  if (!e || e.deletedAt) fail("Compte salarié désactivé.", 401);
+  return { ...u, company: e.company, companies: employeeCompanies(e) };
+}
+const employeeInCompany = (e, c) =>
+  !e.deletedAt && employeeCompanies(e).includes(c);
 const privileged = (u, roles) => roles.includes(u.role);
 function emptyState() {
   return Object.fromEntries(
@@ -163,7 +178,7 @@ function canProject(d, u, p) {
 }
 function canEmployee(u, e) {
   return (
-    inCompany(u, e.company) &&
+    employeeCompanies(e).some((c) => inCompany(u, c)) &&
     (privileged(u, [...HR, "manager"]) || same(e.id, u.employee_id))
   );
 }
@@ -206,11 +221,10 @@ function canDocument(d, u, r) {
   );
 }
 function viewState(data, u) {
+  u = effectiveUser(data, u);
   const d = normalize(data),
     v = emptyState();
-  v.companies = d.companies.filter(
-    (c) => c.id === u.company || u.company === "group",
-  );
+  v.companies = d.companies.filter((c) => inCompany(u, c.id));
   v.employees = d.employees
     .filter((e) => canEmployee(u, e))
     .map((e) =>
@@ -244,17 +258,27 @@ function viewState(data, u) {
   for (const k of ["time", "planning", "absences"])
     v[k] = d[k].filter((r) =>
       u.role === "employee"
-        ? same(r.employeeId, u.employee_id)
+        ? same(r.employeeId, u.employee_id) &&
+          inCompany(
+            u,
+            recordCompany(d, k, r) ||
+              d.employees.find((e) => same(e.id, r.employeeId))?.company,
+          )
         : privileged(
             u,
             k === "time"
               ? [...HR, "manager", "accounting"]
               : [...HR, "manager"],
           ) &&
-          inCompany(
-            u,
-            d.employees.find((e) => same(e.id, r.employeeId))?.company,
-          ),
+          (k === "absences"
+            ? employeeCompanies(
+                d.employees.find((e) => same(e.id, r.employeeId)) || {},
+              ).some((c) => inCompany(u, c))
+            : inCompany(
+                u,
+                recordCompany(d, k, r) ||
+                  d.employees.find((e) => same(e.id, r.employeeId))?.company,
+              )),
     );
   for (const k of ["quotes", "invoices"])
     v[k] = d[k].filter((r) => canFinance(d, u, r));
@@ -287,10 +311,18 @@ function viewState(data, u) {
   v.clocks = d.clocks.filter((r) => same(r.userId, u.id));
   return v;
 }
-function canContact(u, v) {
+function canContact(u, v, data) {
+  if (data && v.role === "employee") {
+    const e = data.employees?.find((e) => same(e.id, v.employee_id));
+    if (!e || e.deletedAt) return false;
+    v = effectiveUser(data, v);
+  }
   return (
     !v.disabled &&
-    ((!["client", "employee"].includes(u.role) && inCompany(u, v.company)) ||
+    ((!["client", "employee"].includes(u.role) &&
+      (inCompany(u, v.company) ||
+        (v.role === "employee" &&
+          (v.companies || []).some((c) => inCompany(u, c))))) ||
       (["client", "employee"].includes(u.role) &&
         privileged(v, [...STAFF, "manager"]) &&
         (v.company === "group" || inCompany(u, v.company))))
@@ -316,6 +348,7 @@ function identifier(d, k, prefix, now) {
   return stem + String(n).padStart(4, "0");
 }
 function applyCommand(data, u, cmd, now = new Date().toISOString()) {
+  u = effectiveUser(data, u);
   const d = normalize(data),
     p = cmd.payload || {},
     action = cmd.action;
@@ -374,7 +407,8 @@ function applyCommand(data, u, cmd, now = new Date().toISOString()) {
         fail("Le client appartient à une autre entreprise.");
       const team = Array.isArray(p.team) ? p.team : [];
       for (const id of team)
-        if (ref(d, "employees", id).company !== c) fail("Équipe incompatible.");
+        if (!employeeInCompany(ref(d, "employees", id), c))
+          fail("Équipe incompatible.");
       r = {
         ...r,
         id: identifier(d, k, ref(d, "companies", c).code, now),
@@ -398,13 +432,14 @@ function applyCommand(data, u, cmd, now = new Date().toISOString()) {
         proj = ref(d, "projects", p.project);
       if (
         !canProject(d, u, proj) ||
-        !inCompany(u, e.company) ||
-        e.company !== proj.company
+        !inCompany(u, proj.company) ||
+        !employeeInCompany(e, proj.company)
       )
         fail("Affectation non autorisée.", 403);
       r = {
         ...r,
         employeeId: e.id,
+        company: proj.company,
         project: proj.id,
         date: iso(p.date),
         start: time(p.start),
@@ -598,10 +633,46 @@ function applyCommand(data, u, cmd, now = new Date().toISOString()) {
     r.description = text(p.description, "Description", 5000, true);
     if (!Array.isArray(p.team)) fail("Équipe invalide.");
     for (const id of p.team)
-      if (ref(d, "employees", id).company !== r.company)
+      if (!employeeInCompany(ref(d, "employees", id), r.company))
         fail("Salarié d’une autre entreprise.");
     r.team = p.team;
     result = r;
+  } else if (action === "employee.companies" || action === "employee.delete") {
+    const e = ref(d, "employees", p.id);
+    if (
+      !privileged(u, HR) ||
+      !employeeCompanies(e).every((c) => inCompany(u, c))
+    )
+      fail("Accès RH à toutes les entreprises du salarié requis.", 403);
+    if (e.deletedAt) fail("Salarié déjà supprimé.");
+    if (d.clocks.some((c) => same(c.employeeId, e.id)))
+      fail("Terminez le pointage du salarié avant cette modification.");
+    if (action === "employee.companies") {
+      if (!Array.isArray(p.companies) || !p.companies.length)
+        fail("Sélectionnez au moins une entreprise.");
+      const companies = [...new Set(p.companies.map((c) => company(d, u, c)))];
+      if (!companies.includes(e.company))
+        fail("Conservez l’entreprise principale du salarié.");
+      if (
+        d.planning.some(
+          (r) =>
+            same(r.employeeId, e.id) &&
+            r.date >= now.slice(0, 10) &&
+            !companies.includes(recordCompany(d, "planning", r)),
+        )
+      )
+        fail(
+          "Retirez les affectations futures des entreprises à supprimer avant de modifier les accès.",
+        );
+      e.companies = companies;
+    } else {
+      e.deletedAt = now;
+      e.status = "Supprimé";
+      d.planning = d.planning.filter(
+        (r) => !same(r.employeeId, e.id) || r.date < now.slice(0, 10),
+      );
+    }
+    result = e;
   } else if (action === "finance.settings") {
     const co = ref(d, "companies", company(d, u, p.company));
     if (!privileged(u, FIN)) fail("Accès refusé.", 403);
@@ -782,7 +853,13 @@ function applyCommand(data, u, cmd, now = new Date().toISOString()) {
   } else if (action === "time.approve") {
     if (!privileged(u, [...HR, "manager"])) fail("Accès refusé.", 403);
     const r = ref(d, "time", p.id);
-    if (!inCompany(u, ref(d, "employees", r.employeeId).company))
+    if (
+      !inCompany(
+        u,
+        recordCompany(d, "time", r) ||
+          ref(d, "employees", r.employeeId).company,
+      )
+    )
       fail("Accès refusé.", 403);
     r.status = "Validé";
     result = r;
@@ -792,6 +869,7 @@ function applyCommand(data, u, cmd, now = new Date().toISOString()) {
       "employees",
       u.role === "employee" ? u.employee_id : p.employeeId,
     );
+    if (e.deletedAt) fail("Salarié supprimé.");
     if (!(
       (privileged(u, HR) && inCompany(u, e.company)) ||
       (u.role === "employee" && same(e.id, u.employee_id))
@@ -861,6 +939,9 @@ function applyCommand(data, u, cmd, now = new Date().toISOString()) {
   return { data: d, result };
 }
 module.exports = {
+  employeeCompanies,
+  employeeInCompany,
+  effectiveUser,
   AppError,
   fail,
   ROLES,
