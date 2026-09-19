@@ -44,6 +44,154 @@ function fixture() {
   ];
   return d;
 }
+test("employee multi-company access preserves project permissions and global conflict checks", () => {
+  let d = fixture();
+  d.projects.push({ id: "pm", title: "Moving", company: "moving", team: [] });
+  d.projects.push({
+    id: "pt",
+    title: "Tech private",
+    company: "tech",
+    team: ["e1"],
+  });
+  d = command(d, admin, "employee.companies", {
+    id: "e1",
+    companies: ["home", "moving"],
+  }).data;
+  assert.deepEqual(
+    D.viewState(d, employee)
+      .companies.map((c) => c.id)
+      .sort(),
+    ["home", "moving"],
+  );
+  assert.equal(
+    D.viewState(d, employee).projects.some((p) => p.id === "pm"),
+    false,
+  );
+  d = command(
+    d,
+    admin,
+    "create",
+    {
+      employeeId: "e1",
+      project: "pm",
+      date: "2026-09-15",
+      start: "08:00",
+      end: "12:00",
+    },
+    "planning",
+  ).data;
+  assert.ok(D.viewState(d, employee).projects.some((p) => p.id === "pm"));
+  assert.equal(
+    D.viewState(d, employee).projects.some((p) => p.id === "pt"),
+    false,
+  );
+  assert.throws(
+    () =>
+      command(
+        d,
+        admin,
+        "create",
+        {
+          employeeId: "e1",
+          project: "p1",
+          date: "2026-09-15",
+          start: "10:00",
+          end: "13:00",
+        },
+        "planning",
+      ),
+    /déjà une affectation/,
+  );
+  assert.throws(
+    () =>
+      command(d, employee, "employee.companies", {
+        id: "e1",
+        companies: ["home", "tech"],
+      }),
+    /Accès RH/,
+  );
+  assert.throws(
+    () =>
+      command(
+        d,
+        { ...admin, role: "hr", company: "home" },
+        "employee.companies",
+        { id: "e1", companies: ["home", "moving"] },
+      ),
+    /Accès RH/,
+  );
+  assert.throws(
+    () =>
+      command(d, admin, "employee.companies", {
+        id: "e1",
+        companies: ["home", "group"],
+      }),
+    /non autorisée/,
+  );
+  assert.throws(
+    () =>
+      command(d, admin, "employee.companies", {
+        id: "e1",
+        companies: ["home"],
+      }),
+    /affectations futures/,
+  );
+  d = command(
+    d,
+    admin,
+    "employee.companies",
+    { id: "e1", companies: ["home"] },
+    undefined,
+    "2026-09-16T08:00:00Z",
+  ).data;
+  assert.equal(
+    D.viewState(d, employee).projects.some((p) => p.id === "pm"),
+    false,
+  );
+  assert.throws(
+    () => command(d, employee, "clock.start", { project: "pm" }),
+    /non autorisé/,
+  );
+});
+test("employee removal preserves history and rejects active clocks and future assignments", () => {
+  let d = fixture();
+  d.time.push({ id: "t1", employeeId: "e1", project: "p1", hours: 4 });
+  d.planning.push(
+    { id: "past", employeeId: "e1", project: "p1", date: "2026-09-14" },
+    { id: "future", employeeId: "e1", project: "p1", date: "2026-09-16" },
+  );
+  d.clocks.push({ employeeId: "e1", userId: 2 });
+  assert.throws(
+    () => command(d, admin, "employee.delete", { id: "e1" }),
+    /pointage/,
+  );
+  d.clocks = [];
+  d = command(d, admin, "employee.delete", { id: "e1" }).data;
+  assert.ok(d.employees[0].deletedAt);
+  assert.equal(d.time.length, 1);
+  assert.deepEqual(
+    d.planning.map((p) => p.id),
+    ["past"],
+  );
+  assert.throws(() => D.viewState(d, employee), /désactivé/);
+  assert.throws(
+    () =>
+      command(
+        d,
+        admin,
+        "create",
+        {
+          employeeId: "e1",
+          project: "p1",
+          date: "2026-09-16",
+          start: "08:00",
+          end: "12:00",
+        },
+        "planning",
+      ),
+    /non autorisée/,
+  );
+});
 function command(
   d,
   u,

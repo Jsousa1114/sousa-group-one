@@ -25,6 +25,18 @@
   align-items: end;
   margin: 16px 0;
 }
+#entityForm label:has(input[type="checkbox"]) {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+}
+#entityForm input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--green);
+  flex-shrink: 0;
+}
 .planning-controls label {
   margin: 0;
   min-width: 150px;

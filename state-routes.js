@@ -102,7 +102,8 @@ function routes(db) {
         revision: row.revision,
         contacts: users
           .filter(
-            (u) => !D.same(u.id, req.user.id) && D.canContact(req.user, u),
+            (u) =>
+              !D.same(u.id, req.user.id) && D.canContact(req.user, u, row.data),
           )
           .map((u) => ({ id: u.id, name: u.name, role: u.role })),
         profile: profile(req.user),
@@ -121,6 +122,20 @@ function routes(db) {
       res.json(
         await mutate(db, req.user, req.body, async (c, d) => {
           const { data, result } = D.applyCommand(d, req.user, req.body);
+          if (req.body.action === "employee.delete") {
+            if (D.same(req.user.employee_id, result.id))
+              D.fail("Vous ne pouvez pas supprimer votre propre fiche.");
+            const protectedAccounts = await c.query(
+              "SELECT id FROM users WHERE employee_id=$1 AND role='admin' AND disabled=false",
+              [String(result.id)],
+            );
+            if (protectedAccounts.rows.length)
+              D.fail("Retirez d’abord le rôle administrateur du compte lié.");
+            await c.query(
+              "UPDATE users SET disabled=true,session_version=session_version+1 WHERE employee_id=$1",
+              [String(result.id)],
+            );
+          }
           Object.assign(d, data);
           return result;
         }),
@@ -193,7 +208,7 @@ function routes(db) {
             )
               D.fail("Liez le compte à sa fiche salarié ou client.");
             if (
-              (employee && employee.company !== company) ||
+              (employee && !D.employeeInCompany(employee, company)) ||
               (client && client.company && client.company !== company)
             )
               D.fail("Entreprise incompatible.");
@@ -327,7 +342,7 @@ function routes(db) {
                   p.recipientId,
                 ])
               ).rows[0];
-            if (!recipient || !D.canContact(req.user, recipient))
+            if (!recipient || !D.canContact(req.user, recipient, d))
               D.fail("Destinataire non autorisé.", 403);
             const msg = {
               id: randomUUID(),

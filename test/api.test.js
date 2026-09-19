@@ -376,6 +376,78 @@ test("reusing request ID with changed payload is rejected", async () => {
     409,
   );
 });
+test("multi-company membership changes apply to existing sessions and removal disables login", async () => {
+  const login = await call("auth/login", null, {
+    email: "e@test.invalid",
+    password: "A-Strong-Test-Password",
+  });
+  const session = login.data.token;
+  assert.equal(login.status, 200);
+  const body = {
+    action: "employee.companies",
+    payload: { id: "e1", companies: ["home", "moving"] },
+  };
+  assert.equal(
+    (await call("state/command", session, payload(await rev(), body))).status,
+    403,
+  );
+  assert.equal(
+    (await call("state/command", admin, payload(await rev(), body))).status,
+    200,
+  );
+  let state = await call("state", session);
+  assert.deepEqual(state.data.profile.companies, ["home", "moving"]);
+  assert.ok(state.data.data.companies.some((c) => c.id === "moving"));
+  assert.equal(
+    (
+      await call(
+        "state/command",
+        admin,
+        payload(await rev(), {
+          action: "employee.companies",
+          payload: { id: "e1", companies: ["home"] },
+        }),
+      )
+    ).status,
+    200,
+  );
+  state = await call("state", session);
+  assert.equal(
+    state.data.data.companies.some((c) => c.id === "moving"),
+    false,
+  );
+  assert.equal(
+    (
+      await call(
+        "state/command",
+        admin,
+        payload(await rev(), {
+          action: "employee.delete",
+          payload: { id: "e1" },
+        }),
+      )
+    ).status,
+    200,
+  );
+  assert.equal((await call("state", session)).status, 401);
+  assert.equal(
+    (
+      await call("auth/login", null, {
+        email: "e@test.invalid",
+        password: "A-Strong-Test-Password",
+      })
+    ).status,
+    401,
+  );
+  assert.equal(
+    (
+      await db.query("SELECT disabled FROM users WHERE email=$1", [
+        "e@test.invalid",
+      ])
+    ).rows[0].disabled,
+    true,
+  );
+});
 test("administrator can relink existing account and sessions are revoked", async () => {
   const users = (await call("state/users", admin)).data.users,
     u = users.find((x) => x.role === "client");

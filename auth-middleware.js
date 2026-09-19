@@ -16,7 +16,9 @@ function auth(db) {
         return res
           .status(401)
           .json({ error: "Session expirée. Reconnectez-vous." });
-      req.user = u;
+      const data = (await db.query("SELECT data FROM app_state WHERE id=1"))
+        .rows[0]?.data;
+      req.user = require("./domain").effectiveUser(data || {}, u);
       next();
     } catch (e) {
       if (
@@ -35,6 +37,7 @@ const profile = (u) => ({
   role: u.role,
   name: u.name,
   company: u.company,
+  companies: u.companies || [u.company],
   employee_id: u.employee_id,
   client_id: u.client_id,
 });
