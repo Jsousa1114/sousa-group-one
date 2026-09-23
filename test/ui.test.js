@@ -457,6 +457,28 @@ test("HR can select multiple companies and remove employee from active screens",
     h.close();
   }
 });
+test("manual hours can be added by an administrator without a linked employee account", async () => {
+  const h = await setup();
+  try {
+    click(h, '[data-page="time"]');
+    click(h, '[data-action="time-add"]');
+    fill(h, "date", "2026-01-15");
+    fill(h, "start", "08:00");
+    fill(h, "end", "12:00");
+    fill(h, "break", "30");
+    submit(h);
+    await flush();
+    await flush();
+    assert.equal(
+      h.w.document.getElementById("modalWrap").classList.contains("hidden"),
+      true,
+    );
+    assert.match(h.w.document.getElementById("content").textContent, /3.50/);
+    assert.match(h.w.document.getElementById("content").textContent, /Project/);
+  } finally {
+    h.close();
+  }
+});
 test("HTTP errors retain form and never claim saved", async () => {
   const h = await setup();
   try {

@@ -156,6 +156,31 @@ function time(v) {
     fail("Heure invalide.");
   return v;
 }
+function swissInstant(day, clock) {
+  const target = Date.parse(`${day}T${clock}:00Z`);
+  let instant = target;
+  const fmt = new Intl.DateTimeFormat("sv-SE", {
+    timeZone: "Europe/Zurich",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  });
+  for (let i = 0; i < 3; i++) {
+    const parts = Object.fromEntries(
+      fmt.formatToParts(new Date(instant)).map((p) => [p.type, p.value]),
+    );
+    const local = Date.parse(
+      `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}Z`,
+    );
+    if (local === target) return new Date(instant).toISOString();
+    instant += target - local;
+  }
+  fail("Horaire inexistant lors du changement d’heure. Vérifiez la saisie.");
+}
 function ref(d, k, id) {
   const r = d[k].find((x) => same(x.id, id));
   if (!r) fail(`${k} : élément introuvable.`, 404);
@@ -237,9 +262,12 @@ function viewState(data, u) {
           ),
     );
   v.projects = d.projects
-    .filter((p) => canProject(d, u, p))
+    .filter(
+      (p) =>
+        canProject(d, u, p) || (u.role === "hr" && inCompany(u, p.company)),
+    )
     .map((p) =>
-      u.role === "client" || u.role === "employee"
+      u.role === "client" || u.role === "employee" || u.role === "hr"
         ? Object.fromEntries(
             Object.entries(p).filter(([k]) => !["cost", "budget"].includes(k)),
           )
@@ -850,6 +878,83 @@ function applyCommand(data, u, cmd, now = new Date().toISOString()) {
           .filter((x) => same(x.project, proj.id))
           .reduce((a, x) => a + x.hours, 0);
     }
+  } else if (action === "time.add") {
+    if (!privileged(u, [...HR, "manager", "employee"]))
+      fail("Saisie non autorisée.", 403);
+    if (
+      u.role === "employee" &&
+      p.employeeId &&
+      !same(p.employeeId, u.employee_id)
+    )
+      fail("Vous pouvez saisir uniquement vos heures.", 403);
+    const e = ref(
+      d,
+      "employees",
+      u.role === "employee" ? u.employee_id : p.employeeId,
+    );
+    const proj = ref(d, "projects", p.project);
+    if (
+      !employeeInCompany(e, proj.company) ||
+      !inCompany(u, proj.company) ||
+      (u.role === "employee" && !canProject(d, u, proj))
+    )
+      fail("Affectation non autorisée.", 403);
+    const day = iso(p.date),
+      start = time(p.start),
+      end = time(p.end);
+    if (end <= start)
+      fail(
+        "La fin doit suivre le début. Pour une nuit, saisissez une ligne par jour.",
+      );
+    const startedAt = swissInstant(day, start),
+      endedAt = swissInstant(day, end);
+    const pause = num(p.break ?? 0, "Pause", 0, 1440);
+    if (!Number.isInteger(pause))
+      fail("La pause doit être en minutes entières.");
+    const seconds =
+      (Date.parse(endedAt) - Date.parse(startedAt)) / 1000 - pause * 60;
+    if (seconds <= 0)
+      fail("La pause doit être inférieure à la durée travaillée.");
+    if (Date.parse(endedAt) > Date.parse(now))
+      fail(
+        "Les heures travaillées ne peuvent pas être dans le futur. Utilisez le planning.",
+      );
+    if (d.clocks.some((c) => same(c.employeeId, e.id)))
+      fail("Terminez le pointage actif avant d’ajouter des heures.");
+    if (
+      d.time.some(
+        (t) =>
+          same(t.employeeId, e.id) &&
+          (t.startedAt && t.endedAt
+            ? Date.parse(t.startedAt) < Date.parse(endedAt) &&
+              Date.parse(t.endedAt) > Date.parse(startedAt)
+            : t.date === day && t.start < end && t.end > start),
+      )
+    )
+      fail(
+        "Des heures existent déjà sur ce créneau, y compris dans une autre entreprise.",
+      );
+    result = {
+      id: randomUUID(),
+      employeeId: e.id,
+      company: proj.company,
+      project: proj.id,
+      date: day,
+      startedAt,
+      endedAt,
+      break: pause,
+      seconds,
+      hours: Math.round(seconds / 3.6) / 1000,
+      status: "À valider",
+      source: "manual",
+      note: text(p.note, "Commentaire", 1000, true),
+      createdAt: now,
+      createdBy: u.id,
+    };
+    d.time.push(result);
+    proj.hours = d.time
+      .filter((t) => same(t.project, proj.id))
+      .reduce((sum, t) => sum + Number(t.hours || 0), 0);
   } else if (action === "time.approve") {
     if (!privileged(u, [...HR, "manager"])) fail("Accès refusé.", 403);
     const r = ref(d, "time", p.id);
