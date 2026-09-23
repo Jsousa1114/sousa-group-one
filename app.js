@@ -371,16 +371,31 @@ function clockView() {
 function timeView() {
   return (
     clockView() +
-    heading("Heures enregistrées", btn("Exporter CSV", "export", "time")) +
+    heading(
+      "Heures enregistrées",
+      (can([...hr, "manager", "employee"])
+        ? btn("Ajouter des heures", "time-add", "", "primary") + " "
+        : "") + btn("Exporter CSV", "export", "time"),
+    ) +
     table(
       ["Salarié", "Chantier", "Début", "Fin", "Pause", "Heures", "Statut", ""],
       visible("time").map((t) => [
         esc(name("employees", t.employeeId)),
-        esc(t.project),
+        esc(name("projects", t.project)),
         esc(
-          t.startedAt ? new Date(t.startedAt).toLocaleString("fr-CH") : t.start,
+          t.startedAt
+            ? new Date(t.startedAt).toLocaleString("fr-CH", {
+                timeZone: "Europe/Zurich",
+              })
+            : t.start,
         ),
-        esc(t.endedAt ? new Date(t.endedAt).toLocaleString("fr-CH") : t.end),
+        esc(
+          t.endedAt
+            ? new Date(t.endedAt).toLocaleString("fr-CH", {
+                timeZone: "Europe/Zurich",
+              })
+            : t.end,
+        ),
         esc(t.break) + " min",
         Number(t.hours).toFixed(2),
         badge(t.status),
@@ -394,6 +409,30 @@ function timeView() {
 let planningDate = today(),
   planningMode = "week",
   planningEmployee = "";
+function manualTimeForm() {
+  formShell(
+    [
+      ...(profile.role === "employee"
+        ? []
+        : [["employeeId", "Salarié", "@employees"]]),
+      ["project", "Chantier", "@projects"],
+      ["date", "Date", "date", today()],
+      ["start", "Début", "time", "08:00"],
+      ["end", "Fin", "time", "12:00"],
+      ["break", "Pause (minutes)", "number", "0"],
+      ["note", "Commentaire", "textarea?"],
+    ],
+    "time.add",
+    '<p class="muted">Horaires suisses. La pause est déduite automatiquement. Les heures seront à valider. Pour une nuit, saisissez une ligne par jour.</p>',
+    "Ajouter des heures",
+  );
+  if (profile.role === "employee")
+    $("entityForm").insertAdjacentHTML(
+      "beforeend",
+      `<input type="hidden" id="f_employeeId" name="employeeId" value="${esc(profile.employee_id)}">`,
+    );
+  planningProjects();
+}
 function planningDay(value, offset = 0) {
   const d = new Date(value + "T12:00:00Z");
   d.setUTCDate(d.getUTCDate() + offset);
@@ -1308,7 +1347,7 @@ function exportData(k) {
 document.addEventListener("change", (e) => {
   if (
     e.target.id === "f_employeeId" &&
-    $("entityForm")?.dataset.kind === "planning"
+    ["planning", "time.add"].includes($("entityForm")?.dataset.kind)
   )
     planningProjects();
   if (
@@ -1524,6 +1563,7 @@ document.addEventListener("click", async (e) => {
       );
     else if (a === "export") exportData(id);
     else if (a === "user-form") userForm();
+    else if (a === "time-add") manualTimeForm();
     else if (a === "employee-companies") {
       const employee = find("employees", id);
       const memberships = [employee.company, ...(employee.companies || [])];

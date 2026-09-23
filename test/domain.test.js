@@ -44,6 +44,97 @@ function fixture() {
   ];
   return d;
 }
+test("manual hours deduct pause, update project totals and prevent duplicate or unauthorized entries", () => {
+  const d = fixture(),
+    now = "2026-09-16T18:00:00Z";
+  const p = {
+    employeeId: "e1",
+    project: "p1",
+    date: "2026-09-15",
+    start: "08:00",
+    end: "12:00",
+    break: 30,
+  };
+  const r = command(d, admin, "time.add", p, undefined, now).result;
+  assert.equal(r.hours, 3.5);
+  assert.equal(r.startedAt, "2026-09-15T06:00:00.000Z");
+  assert.equal(r.status, "À valider");
+  assert.equal(d.projects[0].hours, 3.5);
+  assert.throws(() => command(d, admin, "time.add", p, undefined, now), /déjà/);
+  assert.throws(
+    () =>
+      command(
+        fixture(),
+        employee,
+        "time.add",
+        { ...p, employeeId: "someone-else" },
+        undefined,
+        now,
+      ),
+    /uniquement vos/,
+  );
+  assert.throws(
+    () =>
+      command(
+        fixture(),
+        employee,
+        "time.add",
+        { ...p, project: "p2" },
+        undefined,
+        now,
+      ),
+    /non autorisée/,
+  );
+  assert.throws(
+    () => command(fixture(), client, "time.add", p, undefined, now),
+    /non autorisée/,
+  );
+  assert.throws(
+    () =>
+      command(
+        fixture(),
+        admin,
+        "time.add",
+        { ...p, break: 240 },
+        undefined,
+        now,
+      ),
+    /pause/,
+  );
+  assert.throws(
+    () =>
+      command(
+        fixture(),
+        admin,
+        "time.add",
+        { ...p, date: "2027-01-01" },
+        undefined,
+        now,
+      ),
+    /futur/,
+  );
+  const winter = command(
+    fixture(),
+    employee,
+    "time.add",
+    { ...p, date: "2026-01-15" },
+    undefined,
+    now,
+  ).result;
+  assert.equal(winter.startedAt, "2026-01-15T07:00:00.000Z");
+  assert.throws(
+    () =>
+      command(
+        fixture(),
+        admin,
+        "time.add",
+        { ...p, date: "2026-03-29", start: "02:30", end: "04:00" },
+        undefined,
+        now,
+      ),
+    /inexistant/,
+  );
+});
 test("employee multi-company access preserves project permissions and global conflict checks", () => {
   let d = fixture();
   d.projects.push({ id: "pm", title: "Moving", company: "moving", team: [] });
