@@ -82,6 +82,87 @@ test("VAT, fractional quantities, per-line discounts and rounding reconcile", ()
   ])
     assert.throws(() => F.calculate([{ ...payload().lines[0], ...patch }]));
 });
+test("accepted quote creates project; completion prepares one invoice with preserved pricing and private history", () => {
+  const d = fixture(),
+    q = cmd(d, "create", payload(), "quotes");
+  cmd(d, "quote.issue", { id: q.id });
+  cmd(d, "quote.decide", { id: q.id, status: "Accepté", note: "Accord écrit" });
+  assert.equal(d.projects.length, 1);
+  const p = d.projects[0];
+  assert.equal(q.project, p.id);
+  assert.equal(p.clientId, q.clientId);
+  d.time.push({ id: "time1", project: p.id, hours: 3.5, employeeId: "e1" });
+  d.expenses.push({
+    id: "cost1",
+    project: p.id,
+    amount: 75,
+    supplier: "Internal cost",
+  });
+  d.documents.push({
+    id: "doc1",
+    project: p.id,
+    name: "Photo",
+    content: "secret-binary",
+  });
+  assert.throws(
+    () =>
+      cmd(d, "project.finish", { id: p.id }, undefined, {
+        role: "client",
+        company: "home",
+        client_id: "c1",
+      }),
+    /refusé/,
+  );
+  cmd(d, "project.finish", { id: p.id }, undefined, {
+    role: "manager",
+    company: "home",
+    id: 2,
+  });
+  const inv = d.invoices[0];
+  assert.equal(p.progress, 100);
+  assert.equal(p.status, "Terminé");
+  assert.equal(inv.status, "Brouillon");
+  assert.equal(inv.amount, q.amount);
+  assert.deepEqual(inv.lines, q.lines);
+  assert.equal(inv.quoteId, q.id);
+  assert.equal(inv.completionSnapshot.time[0].hours, 3.5);
+  assert.equal(inv.completionSnapshot.documents[0].content, undefined);
+  cmd(d, "project.finish", { id: p.id });
+  assert.equal(d.invoices.length, 1);
+  cmd(d, "invoice.issue", { id: inv.id });
+  const customer = D.viewState(d, {
+    role: "client",
+    company: "home",
+    client_id: "c1",
+  });
+  assert.equal(customer.invoices[0].completionSnapshot, undefined);
+  assert.match(customer.invoices[0].workSummary, /3.50 h/);
+  assert.throws(
+    () => cmd(d, "finance.delete", { kind: "invoices", id: inv.id }),
+    /Archivez/,
+  );
+  cmd(d, "finance.archive", { kind: "invoices", id: inv.id });
+  assert.equal(inv.amount, q.amount);
+  assert.ok(inv.archivedAt);
+  cmd(d, "finance.archive", { kind: "invoices", id: inv.id, restore: true });
+  assert.equal(inv.archivedAt, null);
+});
+test("draft deletion keeps numbering and completion recreates a deleted draft without duplicates", () => {
+  const d = fixture(),
+    q = cmd(d, "create", payload(), "quotes");
+  cmd(d, "finance.delete", { kind: "quotes", id: q.id });
+  assert.equal(D.viewState(d, admin).quotes.length, 0);
+  const next = cmd(d, "create", payload(), "quotes");
+  assert.notEqual(next.id, q.id);
+  cmd(d, "quote.issue", { id: next.id });
+  cmd(d, "quote.decide", { id: next.id, status: "Accepté", note: "Accord" });
+  cmd(d, "project.finish", { id: next.project });
+  const first = d.invoices[0];
+  cmd(d, "finance.delete", { kind: "invoices", id: first.id });
+  cmd(d, "project.finish", { id: next.project });
+  assert.equal(d.invoices.filter((i) => !i.deletedAt).length, 1);
+  assert.notEqual(next.invoiceId, first.id);
+});
 test("reference layout deposit follows quote conversion and payments without changing invoice total", async () => {
   const d = fixture(),
     p = {
@@ -303,4 +384,39 @@ test("company branding accepts generated IDs and issuer names with safe fallback
     "group",
   );
   assert.equal(companyBrand("home", { name: "Sousa Events" }), "home");
+});
+
+test("completion reuses legacy quote invoices and requires pricing without a quote", () => {
+  const d = fixture(),
+    q = cmd(d, "create", payload(), "quotes");
+  cmd(d, "quote.issue", { id: q.id });
+  cmd(d, "quote.decide", { id: q.id, status: "Accepté", note: "Accord" });
+  const inv = cmd(d, "quote.convert", {
+    id: q.id,
+    date: "2026-09-17",
+    due: "2026-10-17",
+  });
+  delete inv.project;
+  cmd(d, "project.finish", { id: q.project });
+  assert.equal(d.invoices.length, 1);
+  assert.equal(inv.project, q.project);
+  d.projects.push({
+    id: "unquoted",
+    company: "home",
+    clientId: "c1",
+    title: "Intervention",
+    team: [],
+  });
+  cmd(d, "project.finish", { id: "unquoted" });
+  const unquoted = d.invoices[1];
+  assert.equal(unquoted.amount, 0);
+  assert.throws(() => cmd(d, "invoice.issue", { id: unquoted.id }), /prix/);
+  cmd(d, "finance.update", {
+    ...payload(),
+    id: unquoted.id,
+    kind: "invoices",
+    project: "unquoted",
+  });
+  cmd(d, "invoice.issue", { id: unquoted.id });
+  assert.equal(unquoted.status, "Émise");
 });

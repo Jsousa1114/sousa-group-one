@@ -569,6 +569,7 @@ function absenceView() {
     )
   );
 }
+let showArchivedFinance = false;
 function financeView(k) {
   const quote = k === "quotes";
   return (
@@ -579,7 +580,14 @@ function financeView(k) {
             " " +
             btn("Exporter CSV", "export", k) +
             " " +
-            btn("Paramètres de facturation", "billing-settings")
+            btn("Paramètres de facturation", "billing-settings") +
+            " " +
+            btn(
+              showArchivedFinance
+                ? "Masquer les archives"
+                : "Afficher les archives",
+              "finance-archives",
+            )
         : "",
     ) +
     table(
@@ -593,23 +601,26 @@ function financeView(k) {
         "Statut",
         "",
       ],
-      visible(k).map((r) => [
-        esc(r.id),
-        esc(name("clients", r.clientId)),
-        esc(r.title),
-        money(r.amount),
-        date(quote ? r.valid : r.due),
-        ...(quote ? [] : [money(r.paid), money(r.amount - (r.paid || 0))]),
-        badge(
-          !quote &&
-            r.status !== "Brouillon" &&
-            r.status !== "Payée" &&
-            r.due < today()
-            ? "En retard"
-            : r.status,
-        ),
-        btn("Ouvrir", quote ? "quote" : "invoice", r.id),
-      ]),
+      visible(k)
+        .filter((r) => showArchivedFinance || !r.archivedAt)
+        .map((r) => [
+          esc(r.id),
+          esc(name("clients", r.clientId)),
+          esc(r.title),
+          money(r.amount),
+          date(quote ? r.valid : r.due),
+          ...(quote ? [] : [money(r.paid), money(r.amount - (r.paid || 0))]),
+          badge(
+            !quote &&
+              r.status !== "Brouillon" &&
+              r.status !== "Payée" &&
+              r.due < today()
+              ? "En retard"
+              : r.status,
+          ),
+          btn("Ouvrir", quote ? "quote" : "invoice", r.id) +
+            (r.archivedAt ? " · Archivé" : ""),
+        ]),
     )
   );
 }
@@ -1171,12 +1182,19 @@ function projectModal(id) {
   if (!p) return;
   modal(
     p.title,
-    `<p>${esc(p.description)}</p><p>${esc(p.address)}</p><p>${date(p.start)} – ${date(p.end)} · ${esc(p.progress)} %</p><p>Équipe : ${(p.team || []).map((id) => esc(name("employees", id))).join(", ") || "Non affectée"}</p>${p.budget !== undefined ? `<p>Budget ${money(p.budget)} · Coûts ${money(p.cost)}</p>` : ""}${can(ops) ? btn("Modifier le suivi", "project-edit", id) : ""}<h4 class="spaced">Documents et photos</h4>${table(
-      ["Fichier", ""],
-      state.documents
-        .filter((x) => same(x.project, id))
-        .map((d) => [esc(d.name), btn("Télécharger", "download", d.id)]),
-    )}`,
+    (can([...ops, ...fin])
+      ? btn("Chantier terminé → Facturation", "project-finish", id, "primary")
+      : "") +
+      (p.invoiceIds || [])
+        .filter((i) => find("invoices", i))
+        .map((i) => btn("Ouvrir la facture " + i, "invoice", i))
+        .join(" ") +
+      `<p>${esc(p.description)}</p><p>${esc(p.address)}</p><p>${date(p.start)} – ${date(p.end)} · ${esc(p.progress)} %</p><p>Équipe : ${(p.team || []).map((id) => esc(name("employees", id))).join(", ") || "Non affectée"}</p>${p.budget !== undefined ? `<p>Budget ${money(p.budget)} · Coûts ${money(p.cost)}</p>` : ""}${can(ops) ? btn("Modifier le suivi", "project-edit", id) : ""}<h4 class="spaced">Documents et photos</h4>${table(
+        ["Fichier", ""],
+        state.documents
+          .filter((x) => same(x.project, id))
+          .map((d) => [esc(d.name), btn("Télécharger", "download", d.id)]),
+      )}`,
   );
 }
 function documentModal(k, id) {
@@ -1236,7 +1254,25 @@ function documentModal(k, id) {
         ? '<p class="notice">Brouillon — non émis</p>'
         : "") +
       brandedHtml +
-      appendix,
+      appendix +
+      (r.project && find("projects", r.project)
+        ? btn("Ouvrir le chantier", "project", r.project)
+        : "") +
+      (r.workSummary
+        ? `<h4>Récapitulatif du chantier</h4><p class="preserve-lines">${esc(r.workSummary)}</p>`
+        : "") +
+      (can(fin) && r.completionSnapshot
+        ? `<h4>Données internes du chantier</h4><p>${r.completionSnapshot.time.length} saisie(s) d’heures · ${r.completionSnapshot.expenses.length} dépense(s) · ${r.completionSnapshot.documents.length} document(s)</p>${table(
+            ["Dépense", "Montant"],
+            r.completionSnapshot.expenses.map((e) => [
+              esc(e.supplier),
+              money(e.amount),
+            ]),
+          )}<p>Les pièces originales et le suivi restent consultables depuis le chantier. Les heures et dépenses ne sont pas ajoutées automatiquement au prix du devis.</p>`
+        : "") +
+      (can(fin)
+        ? `<div class="actions spaced">${k === "quotes" && r.status === "Accepté" ? btn(r.project ? "Ouvrir le chantier" : "Créer le chantier", "quote-project", id, "primary") : ""} ${r.status === "Brouillon" ? btn("Supprimer le brouillon", "finance-delete", k + ":" + id, "danger") : btn(r.archivedAt ? "Restaurer" : "Archiver", "finance-archive", k + ":" + id)}</div>`
+        : ""),
   );
 }
 async function loadUsers() {
@@ -1422,6 +1458,54 @@ document.addEventListener("click", async (e) => {
     } else if (a === "new") {
       if (id === "planning") planningForm(planningEmployee);
       else newForm(id);
+    } else if (a === "finance-archives") {
+      showArchivedFinance = !showArchivedFinance;
+      render();
+    } else if (a === "finance-delete" || a === "finance-archive") {
+      const [kind, rid] = id.split(":");
+      const r = find(kind, rid);
+      if (
+        confirm(
+          a === "finance-delete"
+            ? `Supprimer le brouillon ${rid} ?`
+            : r.archivedAt
+              ? `Restaurer ${rid} ?`
+              : `Archiver ${rid} ? Les montants, paiements et l’historique restent conservés.`,
+        )
+      ) {
+        const out = await mutate(
+          a === "finance-delete" ? "finance.delete" : "finance.archive",
+          { kind, id: rid, restore: !!r.archivedAt },
+        );
+        if (out) closeModal();
+      }
+    } else if (a === "quote-project") {
+      const q = find("quotes", id);
+      const project = q.project
+        ? find("projects", q.project)
+        : await mutate("quote.project", { id });
+      if (project) {
+        page = "projects";
+        render();
+        projectModal(project.id);
+      }
+    } else if (a === "project-finish") {
+      if (
+        confirm(
+          "Terminer ce chantier et préparer sa facturation ? Les prestations du devis seront reprises. Vérifiez les suppléments avant d’émettre la facture.",
+        )
+      ) {
+        const result = await mutate("project.finish", { id });
+        if (result) {
+          closeModal();
+          if (can(fin)) {
+            page = "invoices";
+            render();
+            if (result.invoiceIds?.[0])
+              documentModal("invoices", result.invoiceIds[0]);
+          } else projectModal(id);
+        }
+      }
     } else if (a === "project") projectModal(id);
     else if (a === "quote" || a === "invoice")
       documentModal(a === "quote" ? "quotes" : "invoices", id);

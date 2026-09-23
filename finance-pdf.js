@@ -425,6 +425,16 @@ async function renderPDF(r, kind, issuer, customer, includeQR = false) {
     gap: r.scope ? 6 : 24,
   });
   if (r.scope) paragraph(r.scope, { gap: 24 });
+  if (r.workSummary)
+    section(
+      {
+        fr: "Récapitulatif du chantier",
+        de: "Projektübersicht",
+        it: "Riepilogo del progetto",
+        en: "Project summary",
+      }[r.language || "fr"] || "Récapitulatif du chantier",
+      r.workSummary,
+    );
   ensure(65);
   tableHeader();
   for (const l of r.lines || [

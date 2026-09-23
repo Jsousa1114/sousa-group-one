@@ -213,6 +213,7 @@ function recordCompany(d, k, r) {
   return null;
 }
 function canFinance(d, u, r) {
+  if (r.deletedAt) return false;
   const c = recordCompany(d, "invoices", r);
   return (
     (privileged(u, FIN) && (c ? inCompany(u, c) : u.company === "group")) ||
@@ -309,7 +310,15 @@ function viewState(data, u) {
               )),
     );
   for (const k of ["quotes", "invoices"])
-    v[k] = d[k].filter((r) => canFinance(d, u, r));
+    v[k] = d[k]
+      .filter((r) => canFinance(d, u, r))
+      .map((r) =>
+        u.role === "client"
+          ? Object.fromEntries(
+              Object.entries(r).filter(([key]) => key !== "completionSnapshot"),
+            )
+          : r,
+      );
   v.payments = d.payments.filter(
     (r) => v.invoices.some((i) => same(i.id, r.invoice)) && privileged(u, FIN),
   );
@@ -375,7 +384,144 @@ function identifier(d, k, prefix, now) {
       n = Math.max(n, Number(String(r.id).slice(stem.length)) + 1 || 1);
   return stem + String(n).padStart(4, "0");
 }
-function applyCommand(data, u, cmd, now = new Date().toISOString()) {
+function quoteProject(d, q, now) {
+  if (q.status !== "Accepté" || q.deletedAt) fail("Devis accepté requis.");
+  let project = q.project ? ref(d, "projects", q.project) : null;
+  if (!project) {
+    const c = ref(d, "clients", q.clientId);
+    project = {
+      id: identifier(d, "projects", ref(d, "companies", q.company).code, now),
+      company: q.company,
+      clientId: q.clientId,
+      title: q.title,
+      address: [c.street, c.buildingNumber, c.zip, c.city]
+        .filter(Boolean)
+        .join(" "),
+      description: q.scope || q.title,
+      start: now.slice(0, 10),
+      end: "",
+      budget: q.amount,
+      cost: 0,
+      hours: 0,
+      team: [],
+      progress: 0,
+      status: "Planifié",
+      createdAt: now,
+    };
+    d.projects.push(project);
+    q.project = project.id;
+  }
+  if (project.company !== q.company || !same(project.clientId, q.clientId))
+    fail("Chantier incompatible.");
+  project.quoteIds = [...new Set([...(project.quoteIds || []), q.id])];
+  return project;
+}
+function finishProject(d, u, project, now) {
+  if (!privileged(u, [...OPS, ...FIN]) || !inCompany(u, project.company))
+    fail("Accès refusé.", 403);
+  if (d.clocks.some((c) => same(c.project, project.id)))
+    fail("Terminez les pointages actifs du chantier.");
+  const quotes = d.quotes.filter(
+    (q) => q.project === project.id && q.status === "Accepté" && !q.deletedAt,
+  );
+  let invoices = d.invoices.filter(
+    (i) => i.project === project.id && !i.deletedAt,
+  );
+  const day = now.slice(0, 10),
+    due = new Date(day + "T12:00:00Z");
+  due.setUTCDate(
+    due.getUTCDate() +
+      Number(ref(d, "companies", project.company).billing?.paymentDays ?? 30),
+  );
+  for (const q of quotes.length ? quotes : invoices.length ? [] : [null]) {
+    let inv = q
+      ? d.invoices.find(
+          (i) => !i.deletedAt && (i.quoteId === q.id || i.id === q.invoiceId),
+        )
+      : null;
+    if (inv) {
+      if (inv.project && inv.project !== project.id)
+        fail("Une facture du devis est liée à un autre chantier.");
+      if (inv.status === "Brouillon") inv.project = project.id;
+      if (!invoices.some((i) => i.id === inv.id)) invoices.push(inv);
+    }
+    if (!inv) {
+      // This operation explicitly permits a project manager to prepare a draft only.
+      inv = applyCommand(
+        d,
+        { ...u, role: "accounting", company: project.company },
+        {
+          action: "create",
+          collection: "invoices",
+          payload: {
+            ...(q || {
+              title: project.title,
+              lines: [
+                {
+                  description: project.title,
+                  quantity: 1,
+                  unitPrice: 0,
+                  vatRate: 0,
+                },
+              ],
+              scope: project.description,
+            }),
+            company: project.company,
+            clientId: project.clientId,
+            project: project.id,
+            date: day,
+            due: due.toISOString().slice(0, 10),
+          },
+        },
+        now,
+        !q,
+      ).result;
+      if (q) {
+        inv.quoteId = q.id;
+        q.invoiceId = inv.id;
+        inv.issuer = structuredClone(
+          q.issuer || ref(d, "companies", q.company),
+        );
+        inv.customer = structuredClone(
+          q.customer || ref(d, "clients", q.clientId),
+        );
+      } else inv.pricingRequired = true;
+      invoices.push(inv);
+    }
+  }
+  project.status = "Terminé";
+  project.progress = 100;
+  project.completedAt ||= now;
+  project.invoiceIds = invoices.map((i) => i.id);
+  for (const inv of invoices)
+    if (inv.status === "Brouillon") {
+      inv.completionSnapshot = {
+        project: structuredClone(project),
+        time: structuredClone(
+          d.time.filter((t) => same(t.project, project.id)),
+        ),
+        expenses: structuredClone(
+          d.expenses.filter((e) => same(e.project, project.id)),
+        ),
+        documents: d.documents
+          .filter((doc) => same(doc.project, project.id))
+          .map(({ id, name }) => ({ id, name })),
+        capturedAt: now,
+      };
+      inv.workSummary = `Chantier ${project.id} — ${project.title}\n${project.address || ""}\n${project.description || ""}\nHeures enregistrées : ${d.time
+        .filter((t) => same(t.project, project.id))
+        .reduce((n, t) => n + Number(t.hours || 0), 0)
+        .toFixed(2)} h.\nTerminé le ${day}.`;
+    }
+  return project;
+}
+function applyCommand(
+  data,
+  u,
+  cmd,
+  now = new Date().toISOString(),
+  allowUnpriced = false,
+) {
   u = effectiveUser(data, u);
   const d = normalize(data),
     p = cmd.payload || {},
@@ -506,7 +652,7 @@ function applyCommand(data, u, cmd, now = new Date().toISOString()) {
         fail("Chantier incompatible.");
       let totals;
       try {
-        totals = Finance.calculate(p.lines);
+        totals = Finance.calculate(p.lines, allowUnpriced);
       } catch (e) {
         fail(e.message);
       }
@@ -650,6 +796,38 @@ function applyCommand(data, u, cmd, now = new Date().toISOString()) {
     }
     d[k].push(r);
     result = r;
+  } else if (action === "finance.delete" || action === "finance.archive") {
+    if (!["quotes", "invoices"].includes(p.kind)) fail("Document invalide.");
+    const r = ref(d, p.kind, p.id);
+    if (!privileged(u, FIN) || !canFinance(d, u, r)) fail("Accès refusé.", 403);
+    if (action === "finance.delete") {
+      if (r.status !== "Brouillon") fail("Archivez les documents déjà émis.");
+      if (
+        p.kind === "invoices" &&
+        d.payments.some((pay) => same(pay.invoice, r.id))
+      )
+        fail("Des paiements sont liés à cette facture.");
+      r.deletedAt = now;
+      if (r.quoteId) {
+        const q = ref(d, "quotes", r.quoteId);
+        if (q.invoiceId === r.id) delete q.invoiceId;
+      }
+      if (r.project) {
+        const project = ref(d, "projects", r.project);
+        project.invoiceIds = (project.invoiceIds || []).filter(
+          (id) => id !== r.id,
+        );
+      }
+    } else {
+      r.archivedAt = p.restore ? null : now;
+    }
+    result = { id: r.id };
+  } else if (action === "quote.project") {
+    const q = ref(d, "quotes", p.id);
+    if (!privileged(u, FIN) || !canFinance(d, u, q)) fail("Accès refusé.", 403);
+    result = quoteProject(d, q, now);
+  } else if (action === "project.finish") {
+    result = finishProject(d, u, ref(d, "projects", p.id), now);
   } else if (action === "project.update") {
     if (!privileged(u, OPS)) fail("Accès refusé.", 403);
     const r = ref(d, "projects", p.id);
@@ -664,6 +842,7 @@ function applyCommand(data, u, cmd, now = new Date().toISOString()) {
       if (!employeeInCompany(ref(d, "employees", id), r.company))
         fail("Salarié d’une autre entreprise.");
     r.team = p.team;
+    if (p.status === "Terminé") finishProject(d, u, r, now);
     result = r;
   } else if (action === "employee.companies" || action === "employee.delete") {
     const e = ref(d, "employees", p.id);
@@ -767,7 +946,10 @@ function applyCommand(data, u, cmd, now = new Date().toISOString()) {
     if (!privileged(u, FIN) || !canFinance(d, u, q)) fail("Accès refusé.", 403);
     if (q.status !== "Accepté")
       fail("Acceptez le devis avant de le convertir.");
-    if (q.invoiceId || d.invoices.some((i) => i.quoteId === q.id))
+    if (
+      q.invoiceId ||
+      d.invoices.some((i) => i.quoteId === q.id && !i.deletedAt)
+    )
       fail("Ce devis a déjà une facture.");
     result = applyCommand(
       d,
@@ -799,6 +981,7 @@ function applyCommand(data, u, cmd, now = new Date().toISOString()) {
     if (p.status === "Accepté") {
       q.acceptedAt = now;
       q.acceptedBy = u.id;
+      quoteProject(d, q, now);
     }
     result = q;
   } else if (action === "invoice.issue" || action === "quote.issue") {
@@ -806,6 +989,10 @@ function applyCommand(data, u, cmd, now = new Date().toISOString()) {
       r = ref(d, k, p.id);
     if (!privileged(u, FIN) || !canFinance(d, u, r)) fail("Accès refusé.", 403);
     if (r.status !== "Brouillon") fail("Document déjà émis.");
+    if (r.pricingRequired && r.amount <= 0)
+      fail(
+        "Complétez les prestations et les prix avant d’émettre cette facture.",
+      );
     r.issuer ||= structuredClone(ref(d, "companies", r.company));
     r.customer ||= structuredClone(ref(d, "clients", r.clientId));
     r.issuedAt = now;
@@ -824,6 +1011,7 @@ function applyCommand(data, u, cmd, now = new Date().toISOString()) {
     r.status = "Accepté";
     r.acceptedAt = now;
     r.acceptedBy = u.id;
+    quoteProject(d, r, now);
     result = r;
   } else if (action === "clock.start") {
     if (!u.employee_id) fail("Compte non lié à un salarié.");

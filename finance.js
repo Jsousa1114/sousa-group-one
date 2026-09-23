@@ -15,7 +15,7 @@
       throw new Error(label + " invalide.");
     return Math.round(n * scale);
   }
-  function calculate(input) {
+  function calculate(input, allowZero = false) {
     if (!Array.isArray(input) || !input.length || input.length > 100)
       throw new Error("Ajoutez entre 1 et 100 lignes.");
     let subtotal = 0,
@@ -63,7 +63,8 @@
         total: (base + vat) / 100,
       };
     });
-    if (net + tax <= 0 || net + tax > 1e10) throw new Error("Total invalide.");
+    if (net + tax < 0 || (!allowZero && net + tax === 0) || net + tax > 1e10)
+      throw new Error("Total invalide.");
     return {
       lines,
       subtotal: subtotal / 100,

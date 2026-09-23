@@ -575,3 +575,63 @@ test("conflict preserves entered fields and offers explicit retry", async () => 
     h.close();
   }
 });
+
+test("quote acceptance to completed project invoice and draft deletion are accessible", async () => {
+  const h = await setup();
+  const settle = async () => {
+    await flush();
+    await flush();
+  };
+  try {
+    click(h, '[data-page="quotes"]');
+    click(h, '[data-action="new"]');
+    fill(h, "title", "Chantier complet");
+    fill(h, "valid", "2099-10-17");
+    fill(h, "lineDescription", "Travaux");
+    fill(h, "linePrice", "250");
+    submit(h);
+    await settle();
+    click(h, '[data-action="quote"]');
+    click(h, '[data-action="quote.issue"]');
+    await settle();
+    click(h, '[data-action="quote"]');
+    click(h, '[data-action="quote-decision"]');
+    fill(h, "note", "Accord");
+    submit(h);
+    await settle();
+    click(h, '[data-action="quote"]');
+    click(h, '[data-action="quote-project"]');
+    await settle();
+    click(h, '[data-action="project-finish"]');
+    await settle();
+    assert.match(
+      h.w.document.getElementById("modalBody").textContent,
+      /Récapitulatif du chantier/,
+    );
+    assert.match(
+      h.w.document.getElementById("modalBody").textContent,
+      /Brouillon/,
+    );
+    click(h, '[data-action="finance-delete"]');
+    await settle();
+    assert.equal(
+      h.w.document.querySelectorAll('#content [data-action="invoice"]').length,
+      0,
+    );
+    click(h, '[data-page="quotes"]');
+    click(h, '[data-action="quote"]');
+    click(h, '[data-action="finance-archive"]');
+    await settle();
+    assert.equal(
+      h.w.document.querySelectorAll('#content [data-action="quote"]').length,
+      0,
+    );
+    click(h, '[data-action="finance-archives"]');
+    assert.equal(
+      h.w.document.querySelectorAll('#content [data-action="quote"]').length,
+      1,
+    );
+  } finally {
+    h.close();
+  }
+});
