@@ -852,7 +852,10 @@ function applyCommand(
     )
       fail("Accès RH à toutes les entreprises du salarié requis.", 403);
     if (e.deletedAt) fail("Salarié déjà supprimé.");
-    if (d.clocks.some((c) => same(c.employeeId, e.id)))
+    if (
+      action === "employee.delete" &&
+      d.clocks.some((c) => same(c.employeeId, e.id))
+    )
       fail("Terminez le pointage du salarié avant cette modification.");
     if (action === "employee.companies") {
       if (!Array.isArray(p.companies) || !p.companies.length)
@@ -871,6 +874,14 @@ function applyCommand(
         fail(
           "Retirez les affectations futures des entreprises à supprimer avant de modifier les accès.",
         );
+      if (
+        d.clocks.some(
+          (c) =>
+            same(c.employeeId, e.id) &&
+            !companies.includes(ref(d, "projects", c.project).company),
+        )
+      )
+        fail("Terminez le pointage avant de retirer son entreprise.");
       e.companies = companies;
     } else {
       e.deletedAt = now;

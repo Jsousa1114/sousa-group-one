@@ -623,6 +623,7 @@ test("account type validation and deletion revoke access without deleting busine
 test("account and new employee are created atomically with retry and rollback protection", async () => {
   const body = {
     name: "Combined Employee",
+    employeeCompanies: ["home", "tech"],
     email: "combined@test.invalid",
     password: "Combined-Strong-Password",
     company: "home",
@@ -654,6 +655,14 @@ test("account and new employee are created atomically with retry and rollback pr
     password: body.password,
   });
   assert.equal(login.data.profile.employee_id, eid);
+  assert.deepEqual(
+    (await call("state", login.data.token)).data.profile.companies,
+    ["home", "tech"],
+  );
+  assert.deepEqual(state.employees.find((e) => e.id === eid).companies, [
+    "home",
+    "tech",
+  ]);
   assert.equal((await call("state", login.data.token)).status, 200);
   const before = await rev(),
     count = state.employees.length;

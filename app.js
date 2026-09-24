@@ -1434,6 +1434,16 @@ function userForm(link) {
       .map(field)
       .join("")}</fieldset>`,
   );
+  $("f_employeeId").insertAdjacentHTML(
+    "afterend",
+    `<fieldset id="accountCompanies"><legend>Entreprises du salarié</legend><p>Cocher toutes ses entreprises. Avec le rôle Salarié, il accède aux chantiers qui lui sont affectés dans ces entreprises. Pour les autres rôles, les droits restent limités au périmètre du compte choisi au-dessus.</p>${state.companies
+      .filter((c) => c.id !== "group")
+      .map(
+        (c) =>
+          `<label><input type="checkbox" name="employeeCompanies" value="${esc(c.id)}"> ${esc(c.name)}</label>`,
+      )
+      .join("")}</fieldset>`,
+  );
   $("f_role").value = "manager";
   if (link) {
     const [k, id] = link.split(":"),
@@ -1472,6 +1482,24 @@ function syncUserForm() {
     createEmployee = employee && !e.value;
   fields.disabled = !createEmployee;
   fields.classList.toggle("hidden", !createEmployee);
+  const membershipFields = $("accountCompanies"),
+    linkedEmployee = find("employees", e.value);
+  membershipFields.disabled = !employee;
+  membershipFields.classList.toggle("hidden", !employee);
+  const source = e.value || "new";
+  if (membershipFields.dataset.source !== source) {
+    const assigned = linkedEmployee
+      ? [linkedEmployee.company, ...(linkedEmployee.companies || [])]
+      : [];
+    membershipFields
+      .querySelectorAll("input")
+      .forEach((x) => (x.checked = assigned.includes(x.value)));
+    membershipFields.dataset.source = source;
+  }
+  const primary = linkedEmployee?.company || $("f_company").value;
+  membershipFields.querySelectorAll("input").forEach((x) => {
+    if (x.value === primary) x.checked = true;
+  });
   const clientFields = $("newClientFields"),
     createClient = client && !c.value;
   clientFields.disabled = !createClient;
@@ -1507,9 +1535,13 @@ function exportData(k) {
 document.addEventListener("change", (e) => {
   if (
     $("entityForm")?.dataset.kind === "user" &&
-    ["f_isEmployee", "f_role", "f_employeeId", "f_clientId"].includes(
-      e.target.id,
-    )
+    [
+      "f_isEmployee",
+      "f_role",
+      "f_employeeId",
+      "f_clientId",
+      "f_company",
+    ].includes(e.target.id)
   ) {
     if (e.target.id === "f_isEmployee") {
       if (e.target.value === "yes") $("f_role").value = "employee";
@@ -1923,6 +1955,8 @@ document.addEventListener("submit", async (e) => {
         f,
       );
     }
+    if (k === "user" && p.isEmployee === "yes")
+      p.employeeCompanies = data.getAll("employeeCompanies");
     if (k === "user" && p.isEmployee === "yes" && !p.employeeId) {
       p.newEmployee = {
         job: p.employeeJob,
