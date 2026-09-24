@@ -62,7 +62,7 @@ const core = ["admin", "direction"],
 const menus = {
   dashboard: ["Tableau de bord", Object.keys(roles)],
   companies: ["Entreprises", core],
-  employees: ["Salariés", [...hr, "manager"]],
+  employees: ["Salariés et comptes", [...hr, "manager"]],
   time: ["Heures", [...hr, "manager", "accounting", "employee"]],
   planning: ["Planning", [...hr, "manager", "employee"]],
   absences: ["Absences", [...hr, "manager", "employee"]],
@@ -285,11 +285,7 @@ function render() {
   $("title").textContent = menus[page][0];
   $("userName").textContent = profile.name + " · " + roles[profile.role];
   $("nav").innerHTML = Object.entries(menus)
-    .filter(
-      ([k, [, rs]]) =>
-        rs.includes(profile.role) &&
-        (k !== "users" || profile.company === "group"),
-    )
+    .filter(([k, [, rs]]) => rs.includes(profile.role) && k !== "users")
     .map(
       ([k, [label]]) =>
         `<button class="nav-item ${page === k ? "active" : ""}" data-page="${k}">${esc(label)}</button>`,
@@ -306,7 +302,12 @@ function render() {
   $("activeCompanyLogo").alt =
     name("companies", company || profile.company) || "Sousa Group";
   $("content").innerHTML = views[page] ? views[page]() : genericPage(page);
-  if (page === "users") loadUsers();
+  if (
+    (page === "users" || page === "employees") &&
+    profile.role === "admin" &&
+    profile.company === "group"
+  )
+    loadUsers();
   if (page === "audit") loadAudit();
 }
 function projectRows(list) {
@@ -702,6 +703,15 @@ const views = {
   documents: documentsView,
   messages: messagesView,
   reports: reportsView,
+  employees: () =>
+    genericPage("employees") +
+    (profile.role === "admin" && profile.company === "group"
+      ? heading(
+          "Autres comptes",
+          btn("Créer un accès", "user-form", "", "primary"),
+        ) +
+        '<p class="muted">Comptes sans fiche salarié active : clients, partenaires et administration.</p><div id="usersList">Chargement…</div>'
+      : ""),
   users: () =>
     heading(
       "Comptes utilisateurs",
@@ -790,10 +800,8 @@ function genericPage(k) {
     table(
       [
         ...cols.map((c) => c[1]),
-        ...(k === "employees" && can(hr) ? ["Gestion"] : []),
-        ...(["employees", "clients"].includes(k) && profile.role === "admin"
-          ? ["Accès"]
-          : []),
+        ...(k === "employees" ? ["Fiche et compte"] : []),
+        ...(k === "clients" && profile.role === "admin" ? ["Accès"] : []),
       ],
       visible(k).map((r) => [
         ...cols.map(([f]) =>
@@ -813,14 +821,19 @@ function genericPage(k) {
                     ? `<span class="company-identity"><img class="company-row-logo" src="${companyLogoPath(r.id)}" alt="" />${esc(r[f])}</span>`
                     : esc(r[f] ?? "—"),
         ),
-        ...(k === "employees" && can(hr)
+        ...(k === "employees"
           ? [
-              btn("Entreprises / accès", "employee-companies", r.id) +
-                " " +
-                btn("Supprimer", "employee-delete", r.id, "danger"),
+              btn("Ouvrir la fiche", "employee-detail", r.id) +
+                `<div data-employee-account="${esc(r.id)}" class="muted">${profile.role === "admin" && profile.company === "group" ? "Chargement du compte…" : ""}</div>` +
+                (can(hr)
+                  ? " " +
+                    btn("Entreprises / accès", "employee-companies", r.id) +
+                    " " +
+                    btn("Supprimer", "employee-delete", r.id, "danger")
+                  : ""),
             ]
           : []),
-        ...(["employees", "clients"].includes(k) && profile.role === "admin"
+        ...(k === "clients" && profile.role === "admin"
           ? [btn("Créer un compte", "linked-user", k + ":" + r.id)]
           : []),
       ]),
@@ -1279,31 +1292,71 @@ async function loadUsers() {
   try {
     const out = await api("state/users");
     userAccounts = out.users;
+    document.querySelectorAll("[data-employee-account]").forEach((el) => {
+      const u = userAccounts.find((u) =>
+        same(u.employee_id, el.dataset.employeeAccount),
+      );
+      el.textContent = u
+        ? `${roles[u.role]} · ${u.disabled ? "Compte désactivé" : "Compte actif"}`
+        : "Sans compte";
+    });
     if (!$("usersList")) return;
     $("usersList").innerHTML = table(
       ["Nom", "E-mail", "Rôle", "Salarié", "Statut", ""],
-      out.users.map((u) => [
-        esc(u.name),
-        esc(u.email),
-        esc(roles[u.role]),
-        u.employee_id ? esc(name("employees", u.employee_id)) : "Non",
-        u.disabled ? "Désactivé" : "Actif",
-        btn("Modifier / relier", "edit-user", u.id) +
-          " " +
-          btn("Réinitialiser le mot de passe", "reset-password", u.id) +
-          " " +
-          (!same(u.id, profile.id) && !u.disabled
-            ? btn("Désactiver", "disable-user", u.id, "danger")
-            : "") +
-          " " +
-          (!same(u.id, profile.id)
-            ? btn("Supprimer", "delete-user", u.id, "danger")
-            : ""),
-      ]),
+      out.users
+        .filter(
+          (u) =>
+            page !== "employees" ||
+            !state.employees.some(
+              (e) => !e.deletedAt && same(e.id, u.employee_id),
+            ),
+        )
+        .filter((u) => !company || u.company === company)
+        .map((u) => [
+          esc(u.name),
+          esc(u.email),
+          esc(roles[u.role]),
+          u.employee_id ? esc(name("employees", u.employee_id)) : "Non",
+          u.disabled ? "Désactivé" : "Actif",
+          btn("Modifier / relier", "edit-user", u.id) +
+            " " +
+            btn("Réinitialiser le mot de passe", "reset-password", u.id) +
+            " " +
+            (!same(u.id, profile.id) && !u.disabled
+              ? btn("Désactiver", "disable-user", u.id, "danger")
+              : "") +
+            " " +
+            (!same(u.id, profile.id)
+              ? btn("Supprimer", "delete-user", u.id, "danger")
+              : ""),
+        ]),
     );
   } catch (e) {
     if ($("usersList")) $("usersList").textContent = e.message;
   }
+}
+async function employeeDetail(id) {
+  const e = find("employees", id);
+  if (!e || e.deletedAt) return;
+  const admin = profile.role === "admin" && profile.company === "group";
+  let accountHtml = "";
+  if (admin) {
+    try {
+      userAccounts = (await api("state/users")).users;
+      const u = userAccounts.find((u) => same(u.employee_id, id));
+      accountHtml =
+        `<h3>Compte de connexion</h3>` +
+        (u
+          ? `<p>${esc(u.email)} · ${esc(roles[u.role])} · ${u.disabled ? "Désactivé" : "Actif"}</p><div class="actions">${btn("Modifier le compte", "edit-user", u.id)} ${btn("Réinitialiser le mot de passe", "reset-password", u.id)} ${!same(u.id, profile.id) ? btn("Supprimer le compte", "delete-user", u.id, "danger") : ""}</div>`
+          : `<p>Aucun compte de connexion.</p>${btn("Créer son compte", "linked-user", "employees:" + id, "primary")}`);
+    } catch (err) {
+      accountHtml = `<p class="error">${esc(err.message)}</p>`;
+    }
+  }
+  modal(
+    "Fiche salarié et compte",
+    `<h3>${esc(e.name)}</h3><p>${esc(e.job || "")} · ${esc(e.email || "")} · ${esc(e.phone || "")}</p><p>${[...new Set([e.company, ...(e.companies || [])])].map((c) => esc(name("companies", c))).join(" · ")}</p>${can(hr) ? `<p>Salaire mensuel : ${money(e.salary)} · Activité : ${esc(e.activity ?? "—")} % · Vacances : ${esc(e.vacation ?? "—")} jours</p><div class="actions">${btn("Entreprises / accès", "employee-companies", id)} ${btn("Supprimer le salarié", "employee-delete", id, "danger")}</div>` : ""}${accountHtml}`,
+  );
 }
 async function loadAudit() {
   try {
@@ -1689,6 +1742,7 @@ document.addEventListener("click", async (e) => {
         "Demande d’absence",
       );
     else if (a === "export") exportData(id);
+    else if (a === "employee-detail") await employeeDetail(id);
     else if (a === "user-form") userForm();
     else if (a === "time-add") manualTimeForm();
     else if (a === "employee-companies") {
@@ -1847,6 +1901,7 @@ document.addEventListener("submit", async (e) => {
       "state/command",
       f,
     );
+    if (result && k === "employees") await employeeDetail(result.id);
     if (result && k === "planning") {
       planningDate = p.date;
       render();
