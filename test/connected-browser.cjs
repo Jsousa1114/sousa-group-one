@@ -40,6 +40,7 @@ async function seed(){
 async function login(role,mobile=false){
  const context=await browser.newContext({viewport:mobile?{width:390,height:844}:{width:1440,height:900},isMobile:mobile,hasTouch:mobile});
  const page=await context.newPage();
+ page.on("dialog",async dialog=>{await dialog.accept();});
  const errors=[];
  page.on("pageerror",(e)=>errors.push(e.message));
  const response=await page.goto(base,{waitUntil:"networkidle",timeout:30000});
