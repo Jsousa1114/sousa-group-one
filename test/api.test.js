@@ -619,3 +619,67 @@ test("account type validation and deletion revoke access without deleting busine
     200,
   );
 });
+
+test("account and new employee are created atomically with retry and rollback protection", async () => {
+  const body = {
+    name: "Combined Employee",
+    email: "combined@test.invalid",
+    password: "Combined-Strong-Password",
+    company: "home",
+    role: "employee",
+    isEmployee: "yes",
+    newEmployee: {
+      job: "Technicien",
+      phone: "",
+      salary: 5000,
+      activity: 80,
+      vacation: 20,
+      entry: "2026-09-24",
+    },
+  };
+  const request = payload(await rev(), { payload: body });
+  const created = await call("state/users", admin, request);
+  assert.equal(created.status, 200);
+  const eid = created.data.result.employeeId;
+  assert.ok(eid);
+  assert.equal(
+    (await call("state/users", admin, request)).data.result.employeeId,
+    eid,
+  );
+  const state = (await call("state", admin)).data.data;
+  assert.equal(state.employees.filter((e) => e.id === eid).length, 1);
+  assert.equal(state.employees.find((e) => e.id === eid).activity, 80);
+  const login = await call("auth/login", null, {
+    email: body.email,
+    password: body.password,
+  });
+  assert.equal(login.data.profile.employee_id, eid);
+  assert.equal((await call("state", login.data.token)).status, 200);
+  const before = await rev(),
+    count = state.employees.length;
+  const failed = await call(
+    "state/users",
+    admin,
+    payload(before, { payload: { ...body, email: "a@test.invalid" } }),
+  );
+  assert.notEqual(failed.status, 200);
+  assert.equal(await rev(), before);
+  assert.equal((await call("state", admin)).data.data.employees.length, count);
+  assert.equal(
+    (
+      await call(
+        "state/users",
+        admin,
+        payload(before, {
+          payload: {
+            ...body,
+            email: "invalid-combined@test.invalid",
+            newEmployee: { ...body.newEmployee, salary: -1 },
+          },
+        }),
+      )
+    ).status,
+    400,
+  );
+  assert.equal(await rev(), before);
+});

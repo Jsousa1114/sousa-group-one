@@ -197,11 +197,36 @@ function routes(db) {
               D.fail(
                 "E-mail invalide ou mot de passe de moins de 12 caractères.",
               );
-            const company = D.ref(d, "companies", p.company).id,
-              employee = p.employeeId
+            const company = D.ref(d, "companies", p.company).id;
+            let employee = p.employeeId
                 ? D.ref(d, "employees", p.employeeId)
                 : null,
               client = p.clientId ? D.ref(d, "clients", p.clientId) : null;
+            if (p.newEmployee) {
+              if (
+                p.isEmployee !== "yes" ||
+                employee ||
+                role === "client" ||
+                company === "group"
+              )
+                D.fail(
+                  "Choisissez une entreprise et un compte salarié sans fiche existante.",
+                );
+              if (
+                d.employees.some(
+                  (e) =>
+                    !e.deletedAt && String(e.email).toLowerCase() === email,
+                )
+              )
+                D.fail(
+                  "Une fiche salarié utilise déjà cet e-mail. Sélectionnez la fiche existante.",
+                );
+              employee = D.applyCommand(d, req.user, {
+                action: "create",
+                collection: "employees",
+                payload: { ...p.newEmployee, name: p.name, email, company },
+              }).result;
+            }
             if (
               p.isEmployee !== undefined &&
               !["yes", "no"].includes(p.isEmployee)
@@ -274,7 +299,7 @@ function routes(db) {
                   p.id,
                 ],
               );
-              return { id: p.id };
+              return { id: p.id, employeeId: employee?.id || null };
             }
             // Release an old address only for an explicit new-account request.
             // Keeping it on deletion prevents bootstrap from recreating a deleted admin.
@@ -295,7 +320,7 @@ function routes(db) {
                 client ? String(client.id) : null,
               ],
             );
-            return { id: out.rows[0].id };
+            return { id: out.rows[0].id, employeeId: employee?.id || null };
           },
         ),
       );

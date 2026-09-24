@@ -649,7 +649,7 @@ test("account form explicitly switches employee and non-employee access", async 
       new h.w.Event("change", { bubbles: true }),
     );
     assert.equal(d.getElementById("f_role").value, "employee");
-    assert.equal(d.getElementById("f_employeeId").required, true);
+    assert.equal(d.getElementById("newEmployeeFields").disabled, false);
     assert.equal(d.getElementById("f_employeeId").hidden, false);
     fill(h, "employeeId", "e1");
     fill(h, "role", "manager");
@@ -727,6 +727,53 @@ test("employee dossier combines personal details and account without a separate 
     assert.match(body.textContent, /employee@test.invalid/);
     assert.ok(body.querySelector('[data-action="edit-user"]'));
     assert.ok(body.querySelector('[data-action="delete-user"]'));
+  } finally {
+    h.close();
+  }
+});
+
+test("new employee details submit together with the account and existing links hide those fields", async () => {
+  const h = await setup();
+  try {
+    click(h, '[data-page="employees"]');
+    await flush();
+    await flush();
+    click(h, '[data-action="user-form"]');
+    const d = h.w.document;
+    fill(h, "isEmployee", "yes");
+    d.getElementById("f_isEmployee").dispatchEvent(
+      new h.w.Event("change", { bubbles: true }),
+    );
+    assert.equal(d.getElementById("newEmployeeFields").disabled, false);
+    fill(h, "employeeId", "e1");
+    d.getElementById("f_employeeId").dispatchEvent(
+      new h.w.Event("change", { bubbles: true }),
+    );
+    assert.equal(d.getElementById("newEmployeeFields").disabled, true);
+    fill(h, "employeeId", "");
+    d.getElementById("f_employeeId").dispatchEvent(
+      new h.w.Event("change", { bubbles: true }),
+    );
+    fill(h, "name", "Combined");
+    fill(h, "email", "combined@test.invalid");
+    fill(h, "password", "Combined-Test-Password");
+    fill(h, "company", "home");
+    fill(h, "employeeJob", "Technicien");
+    fill(h, "employeeSalary", "5000");
+    fill(h, "employeeActivity", "80");
+    fill(h, "employeeVacation", "20");
+    fill(h, "employeeEntry", "2026-09-24");
+    submit(h);
+    await flush();
+    await flush();
+    const req = h.requests.find(
+      (r) => r.url.endsWith("/users") && r.opts.method === "POST",
+    );
+    assert.ok(req);
+    const p = JSON.parse(req.opts.body).payload;
+    assert.equal(p.newEmployee.job, "Technicien");
+    assert.equal(p.newEmployee.salary, "5000");
+    assert.equal(p.role, "employee");
   } finally {
     h.close();
   }
