@@ -227,6 +227,33 @@ function routes(db) {
                 payload: { ...p.newEmployee, name: p.name, email, company },
               }).result;
             }
+            if (p.newClient) {
+              if (
+                role !== "client" ||
+                client ||
+                employee ||
+                p.isEmployee === "yes" ||
+                company === "group"
+              )
+                D.fail(
+                  "Choisissez une entreprise et un compte client sans fiche existante.",
+                );
+              if (
+                d.clients.some(
+                  (x) =>
+                    x.company === company &&
+                    String(x.email).toLowerCase() === email,
+                )
+              )
+                D.fail(
+                  "Une fiche client utilise déjà cet e-mail. Sélectionnez la fiche existante.",
+                );
+              client = D.applyCommand(d, req.user, {
+                action: "create",
+                collection: "clients",
+                payload: { ...p.newClient, name: p.name, email, company },
+              }).result;
+            }
             if (
               p.isEmployee !== undefined &&
               !["yes", "no"].includes(p.isEmployee)
@@ -299,7 +326,11 @@ function routes(db) {
                   p.id,
                 ],
               );
-              return { id: p.id, employeeId: employee?.id || null };
+              return {
+                id: p.id,
+                employeeId: employee?.id || null,
+                clientId: client?.id || null,
+              };
             }
             // Release an old address only for an explicit new-account request.
             // Keeping it on deletion prevents bootstrap from recreating a deleted admin.
@@ -320,7 +351,11 @@ function routes(db) {
                 client ? String(client.id) : null,
               ],
             );
-            return { id: out.rows[0].id, employeeId: employee?.id || null };
+            return {
+              id: out.rows[0].id,
+              employeeId: employee?.id || null,
+              clientId: client?.id || null,
+            };
           },
         ),
       );

@@ -683,3 +683,75 @@ test("account and new employee are created atomically with retry and rollback pr
   );
   assert.equal(await rev(), before);
 });
+
+test("new client and account commit together with private access and full rollback", async () => {
+  const body = {
+    name: "Combined Client",
+    email: "combined-client@test.invalid",
+    password: "Combined-Client-Password",
+    company: "home",
+    role: "client",
+    isEmployee: "no",
+    newClient: {
+      phone: "",
+      street: "Rue Exemple",
+      buildingNumber: "2",
+      zip: "1000",
+      city: "Lausanne",
+      country: "CH",
+      type: "Particulier",
+    },
+  };
+  const request = payload(await rev(), { payload: body });
+  const created = await call("state/users", admin, request);
+  assert.equal(created.status, 200);
+  const cid = created.data.result.clientId;
+  assert.ok(cid);
+  assert.equal(
+    (await call("state/users", admin, request)).data.result.clientId,
+    cid,
+  );
+  const state = (await call("state", admin)).data.data;
+  assert.equal(state.clients.filter((c) => c.id === cid).length, 1);
+  assert.equal(state.clients.find((c) => c.id === cid).city, "Lausanne");
+  const login = await call("auth/login", null, {
+    email: body.email,
+    password: body.password,
+  });
+  assert.equal(login.data.profile.client_id, cid);
+  const own = await call("state", login.data.token);
+  assert.equal(own.status, 200);
+  assert.equal(own.data.data.employees.length, 0);
+  assert.ok(own.data.data.clients.every((c) => c.id === cid));
+  const before = await rev(),
+    count = state.clients.length;
+  assert.notEqual(
+    (
+      await call(
+        "state/users",
+        admin,
+        payload(before, { payload: { ...body, email: "a@test.invalid" } }),
+      )
+    ).status,
+    200,
+  );
+  assert.equal(await rev(), before);
+  assert.equal((await call("state", admin)).data.data.clients.length, count);
+  assert.equal(
+    (
+      await call(
+        "state/users",
+        admin,
+        payload(before, {
+          payload: {
+            ...body,
+            email: "invalid-client@test.invalid",
+            newClient: { ...body.newClient, city: "" },
+          },
+        }),
+      )
+    ).status,
+    400,
+  );
+  assert.equal(await rev(), before);
+});

@@ -667,7 +667,7 @@ test("account form explicitly switches employee and non-employee access", async 
     d.getElementById("f_role").dispatchEvent(
       new h.w.Event("change", { bubbles: true }),
     );
-    assert.equal(d.getElementById("f_clientId").required, true);
+    assert.equal(d.getElementById("newClientFields").disabled, false);
   } finally {
     h.close();
   }
@@ -774,6 +774,52 @@ test("new employee details submit together with the account and existing links h
     assert.equal(p.newEmployee.job, "Technicien");
     assert.equal(p.newEmployee.salary, "5000");
     assert.equal(p.role, "employee");
+  } finally {
+    h.close();
+  }
+});
+
+test("new client address submits with the account and existing client links skip creation", async () => {
+  const h = await setup();
+  try {
+    click(h, '[data-page="employees"]');
+    await flush();
+    await flush();
+    click(h, '[data-action="user-form"]');
+    const d = h.w.document;
+    fill(h, "role", "client");
+    d.getElementById("f_role").dispatchEvent(
+      new h.w.Event("change", { bubbles: true }),
+    );
+    assert.equal(d.getElementById("newClientFields").disabled, false);
+    assert.equal(d.getElementById("newEmployeeFields").disabled, true);
+    fill(h, "clientId", "c1");
+    d.getElementById("f_clientId").dispatchEvent(
+      new h.w.Event("change", { bubbles: true }),
+    );
+    assert.equal(d.getElementById("newClientFields").disabled, true);
+    fill(h, "clientId", "");
+    d.getElementById("f_clientId").dispatchEvent(
+      new h.w.Event("change", { bubbles: true }),
+    );
+    fill(h, "name", "New Client");
+    fill(h, "email", "newclient@test.invalid");
+    fill(h, "password", "New-Client-Password");
+    fill(h, "company", "home");
+    fill(h, "clientCity", "Lausanne");
+    fill(h, "clientZip", "1000");
+    submit(h);
+    await flush();
+    await flush();
+    const req = h.requests.find(
+      (r) => r.url.endsWith("/users") && r.opts.method === "POST",
+    );
+    assert.ok(req);
+    const p = JSON.parse(req.opts.body).payload;
+    assert.equal(p.newClient.city, "Lausanne");
+    assert.equal(p.newClient.zip, "1000");
+    assert.equal(p.newEmployee, undefined);
+    assert.equal(p.role, "client");
   } finally {
     h.close();
   }
