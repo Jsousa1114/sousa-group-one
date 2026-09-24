@@ -1,0 +1,44 @@
+name: Surveillance publique Sousa Group One
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/uptime.yml
+  schedule:
+    - cron: '17 * * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sousa-public-uptime
+  cancel-in-progress: false
+
+jobs:
+  public-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Verify public home page
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location \
+            --retry 2 --retry-all-errors --retry-delay 8 \
+            --connect-timeout 15 --max-time 90 \
+            https://sousa-group-one.onrender.com/ \
+            --output /dev/null
+          echo "Public home page: HTTP success"
+
+      - name: Verify server and production database through health endpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location \
+            --retry 2 --retry-all-errors --retry-delay 8 \
+            --connect-timeout 15 --max-time 90 \
+            https://sousa-group-one.onrender.com/healthz \
+            --output health-response.json
+          node -e "const fs=require('node:fs');const x=JSON.parse(fs.readFileSync('health-response.json','utf8'));if(x.ok!==true){throw new Error('Health endpoint did not confirm database health')} console.log('Health endpoint: OK')"
+          rm health-response.json
