@@ -1386,7 +1386,7 @@ function userForm(link) {
       ["clientId", "Fiche client", "@clients?"],
     ],
     "user",
-    `<label for="f_isEmployee">Cette personne est-elle un salarié ?</label><select id="f_isEmployee" name="isEmployee"><option value="no">Non — compte sans fiche salarié</option><option value="yes">Oui — compte lié à un salarié</option></select><p class="muted">Pour un salarié, choisissez sa fiche existante et son rôle. Le rôle Salarié donne accès à ses heures et son planning. Créez sa fiche dans Salariés si nécessaire.</p><label for="f_role">Rôle et droits d’accès</label><select id="f_role" name="role">${Object.entries(
+    `<label for="f_isEmployee">Cette personne est-elle un salarié ?</label><select id="f_isEmployee" name="isEmployee"><option value="no">Non — compte sans fiche salarié</option><option value="yes">Oui — compte lié à un salarié</option></select><p class="muted">La fiche salarié et le compte seront créés ensemble. Vous pouvez aussi relier une fiche existante.</p><label for="f_role">Rôle et droits d’accès</label><select id="f_role" name="role">${Object.entries(
       roles,
     )
       .map(([k, v]) => `<option value="${k}">${v}</option>`)
@@ -1403,6 +1403,21 @@ function userForm(link) {
     typeLabel = typeChoice.labels[0],
     typeHelp = typeChoice.nextElementSibling;
   $("f_company").after(typeLabel, typeChoice, typeHelp);
+  $("f_employeeId").options[0].textContent = "Créer une nouvelle fiche salarié";
+  $("f_employeeId").labels[0].textContent = "Fiche salarié";
+  $("f_employeeId").insertAdjacentHTML(
+    "afterend",
+    `<fieldset id="newEmployeeFields"><legend>Informations du nouveau salarié</legend>${[
+      ["employeeJob", "Fonction"],
+      ["employeePhone", "Téléphone", "tel?"],
+      ["employeeSalary", "Salaire mensuel CHF", "number"],
+      ["employeeActivity", "Taux d’activité %", "number", "100"],
+      ["employeeVacation", "Solde de vacances (jours)", "number", "20"],
+      ["employeeEntry", "Date d’entrée", "date"],
+    ]
+      .map(field)
+      .join("")}</fieldset>`,
+  );
   $("f_role").value = "manager";
   if (link) {
     const [k, id] = link.split(":"),
@@ -1424,7 +1439,7 @@ function syncUserForm() {
   const e = $("f_employeeId"),
     c = $("f_clientId");
   e.disabled = !employee;
-  e.required = employee;
+  e.required = false;
   e.hidden = !employee;
   e.labels[0].hidden = !employee;
   e.classList.toggle("hidden", !employee);
@@ -1437,6 +1452,10 @@ function syncUserForm() {
   c.labels[0].classList.toggle("hidden", !client);
   if (!employee) e.value = "";
   if (!client) c.value = "";
+  const fields = $("newEmployeeFields"),
+    createEmployee = employee && !e.value;
+  fields.disabled = !createEmployee;
+  fields.classList.toggle("hidden", !createEmployee);
 }
 function downloadBlob(blob, name) {
   const a = document.createElement("a"),
@@ -1468,7 +1487,7 @@ function exportData(k) {
 document.addEventListener("change", (e) => {
   if (
     $("entityForm")?.dataset.kind === "user" &&
-    ["f_isEmployee", "f_role"].includes(e.target.id)
+    ["f_isEmployee", "f_role", "f_employeeId"].includes(e.target.id)
   ) {
     if (e.target.id === "f_isEmployee") {
       if (e.target.value === "yes") $("f_role").value = "employee";
@@ -1882,14 +1901,27 @@ document.addEventListener("submit", async (e) => {
         f,
       );
     }
-    if (k === "user" || k === "reset-password")
-      return await mutate(
+    if (k === "user" && p.isEmployee === "yes" && !p.employeeId) {
+      p.newEmployee = {
+        job: p.employeeJob,
+        phone: p.employeePhone,
+        salary: p.employeeSalary,
+        activity: p.employeeActivity,
+        vacation: p.employeeVacation,
+        entry: p.employeeEntry,
+      };
+    }
+    if (k === "user" || k === "reset-password") {
+      const account = await mutate(
         k,
         p,
         null,
         k === "user" ? "state/users" : "state/users/password",
         f,
       );
+      if (account?.employeeId) await employeeDetail(account.employeeId);
+      return;
+    }
     if (k === "project.update") p.team = data.getAll("team");
     if (k === "employee.companies") p.companies = data.getAll("companies");
     if (["quotes", "invoices", "finance.update"].includes(k))
