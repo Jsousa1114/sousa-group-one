@@ -227,6 +227,14 @@ function routes(db) {
                 payload: { ...p.newEmployee, name: p.name, email, company },
               }).result;
             }
+            if (p.employeeCompanies !== undefined) {
+              if (!employee || !Array.isArray(p.employeeCompanies))
+                D.fail("Entreprises du salarié invalides.");
+              D.applyCommand(d, req.user, {
+                action: "employee.companies",
+                payload: { id: employee.id, companies: p.employeeCompanies },
+              });
+            }
             if (p.newClient) {
               if (
                 role !== "client" ||

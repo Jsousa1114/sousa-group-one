@@ -554,3 +554,33 @@ test("project documents stay private unless explicitly shared with the client", 
   );
   assert.equal(D.viewState(d, employee).documents.length, 2);
 });
+
+test("adding company access works during a clock but removing its company is blocked", () => {
+  const d = fixture();
+  d.clocks.push({
+    employeeId: "e1",
+    project: "p1",
+    startedAt: "2026-09-24T09:00:00Z",
+  });
+  D.applyCommand(d, admin, {
+    action: "employee.companies",
+    payload: { id: "e1", companies: ["home", "tech"] },
+  });
+  assert.deepEqual(d.employees[0].companies, ["home", "tech"]);
+  d.projects.push({
+    id: "tech1",
+    company: "tech",
+    team: ["e1"],
+    clientId: "c1",
+  });
+  d.clocks[0].project = "tech1";
+  assert.throws(
+    () =>
+      D.applyCommand(d, admin, {
+        action: "employee.companies",
+        payload: { id: "e1", companies: ["home"] },
+      }),
+    /pointage/,
+  );
+  assert.deepEqual(d.employees[0].companies, ["home", "tech"]);
+});

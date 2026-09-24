@@ -758,8 +758,12 @@ test("new employee details submit together with the account and existing links h
     fill(h, "email", "combined@test.invalid");
     fill(h, "password", "Combined-Test-Password");
     fill(h, "company", "home");
+    d.getElementById("f_company").dispatchEvent(
+      new h.w.Event("change", { bubbles: true }),
+    );
     fill(h, "employeeJob", "Technicien");
     fill(h, "employeeSalary", "5000");
+    d.querySelector('[name="employeeCompanies"][value="tech"]').checked = true;
     fill(h, "employeeActivity", "80");
     fill(h, "employeeVacation", "20");
     fill(h, "employeeEntry", "2026-09-24");
@@ -773,6 +777,8 @@ test("new employee details submit together with the account and existing links h
     const p = JSON.parse(req.opts.body).payload;
     assert.equal(p.newEmployee.job, "Technicien");
     assert.equal(p.newEmployee.salary, "5000");
+    assert.ok(p.employeeCompanies.includes("tech"));
+    assert.ok(p.employeeCompanies.includes("home"));
     assert.equal(p.role, "employee");
   } finally {
     h.close();
