@@ -1418,6 +1418,22 @@ function userForm(link) {
       .map(field)
       .join("")}</fieldset>`,
   );
+  $("f_clientId").options[0].textContent = "Créer une nouvelle fiche client";
+  $("f_clientId").labels[0].textContent = "Fiche client";
+  $("f_clientId").insertAdjacentHTML(
+    "afterend",
+    `<fieldset id="newClientFields"><legend>Informations du nouveau client</legend><p>Le nom, l’e-mail et l’entreprise du compte seront repris dans la fiche client.</p>${[
+      ["clientPhone", "Téléphone", "tel?"],
+      ["clientStreet", "Rue", "text?"],
+      ["clientBuildingNumber", "Numéro", "text?"],
+      ["clientZip", "Code postal", "text?"],
+      ["clientCity", "Ville"],
+      ["clientCountry", "Pays (code)", "text", "CH"],
+      ["clientType", "Type de client", "text", "Particulier"],
+    ]
+      .map(field)
+      .join("")}</fieldset>`,
+  );
   $("f_role").value = "manager";
   if (link) {
     const [k, id] = link.split(":"),
@@ -1445,7 +1461,7 @@ function syncUserForm() {
   e.classList.toggle("hidden", !employee);
   e.labels[0].classList.toggle("hidden", !employee);
   c.disabled = !client;
-  c.required = client;
+  c.required = false;
   c.hidden = !client;
   c.labels[0].hidden = !client;
   c.classList.toggle("hidden", !client);
@@ -1456,6 +1472,10 @@ function syncUserForm() {
     createEmployee = employee && !e.value;
   fields.disabled = !createEmployee;
   fields.classList.toggle("hidden", !createEmployee);
+  const clientFields = $("newClientFields"),
+    createClient = client && !c.value;
+  clientFields.disabled = !createClient;
+  clientFields.classList.toggle("hidden", !createClient);
 }
 function downloadBlob(blob, name) {
   const a = document.createElement("a"),
@@ -1487,7 +1507,9 @@ function exportData(k) {
 document.addEventListener("change", (e) => {
   if (
     $("entityForm")?.dataset.kind === "user" &&
-    ["f_isEmployee", "f_role", "f_employeeId"].includes(e.target.id)
+    ["f_isEmployee", "f_role", "f_employeeId", "f_clientId"].includes(
+      e.target.id,
+    )
   ) {
     if (e.target.id === "f_isEmployee") {
       if (e.target.value === "yes") $("f_role").value = "employee";
@@ -1909,6 +1931,17 @@ document.addEventListener("submit", async (e) => {
         activity: p.employeeActivity,
         vacation: p.employeeVacation,
         entry: p.employeeEntry,
+      };
+    }
+    if (k === "user" && p.role === "client" && !p.clientId) {
+      p.newClient = {
+        phone: p.clientPhone,
+        street: p.clientStreet,
+        buildingNumber: p.clientBuildingNumber,
+        zip: p.clientZip,
+        city: p.clientCity,
+        country: p.clientCountry,
+        type: p.clientType,
       };
     }
     if (k === "user" || k === "reset-password") {
