@@ -1,0 +1,28 @@
+name: Parcours connectés - base de test isolée
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - test/connected-browser.cjs
+      - .github/workflows/connected-browser.yml
+
+permissions:
+  contents: read
+
+jobs:
+  connected-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install dependencies and Chromium
+        run: |
+          npm ci
+          npm install --no-save playwright
+          npx playwright install --with-deps chromium
+      - name: Execute authenticated browser tests against an isolated test database
+        run: node test/connected-browser.cjs
