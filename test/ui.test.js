@@ -639,7 +639,7 @@ test("quote acceptance to completed project invoice and draft deletion are acces
 test("account form explicitly switches employee and non-employee access", async () => {
   const h = await setup();
   try {
-    click(h, '[data-page="users"]');
+    click(h, '[data-page="employees"]');
     await flush();
     click(h, '[data-action="user-form"]');
     const d = h.w.document;
@@ -668,6 +668,65 @@ test("account form explicitly switches employee and non-employee access", async 
       new h.w.Event("change", { bubbles: true }),
     );
     assert.equal(d.getElementById("f_clientId").required, true);
+  } finally {
+    h.close();
+  }
+});
+
+test("employee dossier combines personal details and account without a separate accounts menu", async () => {
+  const h = await setup();
+  try {
+    const original = h.w.fetch;
+    h.w.fetch = async (url, opts = {}) =>
+      url.endsWith("/users") && (!opts.method || opts.method === "GET")
+        ? {
+            ok: true,
+            json: async () => ({
+              users: [
+                {
+                  id: 2,
+                  name: "Employee",
+                  email: "employee@test.invalid",
+                  role: "employee",
+                  company: "home",
+                  employee_id: "e1",
+                  disabled: false,
+                },
+                {
+                  id: 3,
+                  name: "External",
+                  email: "outside@test.invalid",
+                  role: "manager",
+                  company: "home",
+                },
+              ],
+            }),
+          }
+        : original(url, opts);
+    click(h, '[data-page="employees"]');
+    await flush();
+    await flush();
+    assert.equal(h.w.document.querySelector('[data-page="users"]'), null);
+    assert.match(
+      h.w.document.querySelector('[data-employee-account="e1"]').textContent,
+      /Compte actif/,
+    );
+    assert.doesNotMatch(
+      h.w.document.getElementById("usersList").textContent,
+      /employee@test.invalid/,
+    );
+    assert.match(
+      h.w.document.getElementById("usersList").textContent,
+      /outside@test.invalid/,
+    );
+    click(h, '[data-action="employee-detail"]');
+    await flush();
+    await flush();
+    const body = h.w.document.getElementById("modalBody");
+    assert.match(body.textContent, /Employee/);
+    assert.match(body.textContent, /employee@test.invalid/);
+    assert.ok(body.querySelector('[data-action="edit-user"]'));
+    assert.ok(body.querySelector('[data-action="delete-user"]'));
   } finally {
     h.close();
   }
