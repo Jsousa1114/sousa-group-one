@@ -1,0 +1,36 @@
+name: Test navigateur en production
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/live-browser.yml
+      - test/live-browser.cjs
+
+permissions:
+  contents: read
+
+jobs:
+  browser-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install browser test dependencies
+        run: |
+          npm ci
+          npm install --no-save playwright
+          npx playwright install --with-deps chromium
+      - name: Test live site in desktop and mobile Chromium
+        run: node test/live-browser.cjs
+      - name: Upload public login screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: public-login-screenshots
+          path: browser-test-results/
+          if-no-files-found: ignore
+          retention-days: 2
