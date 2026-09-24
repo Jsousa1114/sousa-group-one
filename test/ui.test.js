@@ -635,3 +635,40 @@ test("quote acceptance to completed project invoice and draft deletion are acces
     h.close();
   }
 });
+
+test("account form explicitly switches employee and non-employee access", async () => {
+  const h = await setup();
+  try {
+    click(h, '[data-page="users"]');
+    await flush();
+    click(h, '[data-action="user-form"]');
+    const d = h.w.document;
+    assert.equal(d.getElementById("f_employeeId").disabled, true);
+    fill(h, "isEmployee", "yes");
+    d.getElementById("f_isEmployee").dispatchEvent(
+      new h.w.Event("change", { bubbles: true }),
+    );
+    assert.equal(d.getElementById("f_role").value, "employee");
+    assert.equal(d.getElementById("f_employeeId").required, true);
+    assert.equal(d.getElementById("f_employeeId").hidden, false);
+    fill(h, "employeeId", "e1");
+    fill(h, "role", "manager");
+    d.getElementById("f_role").dispatchEvent(
+      new h.w.Event("change", { bubbles: true }),
+    );
+    assert.equal(d.getElementById("f_employeeId").value, "e1");
+    fill(h, "isEmployee", "no");
+    d.getElementById("f_isEmployee").dispatchEvent(
+      new h.w.Event("change", { bubbles: true }),
+    );
+    assert.equal(d.getElementById("f_employeeId").disabled, true);
+    assert.equal(d.getElementById("f_employeeId").value, "");
+    fill(h, "role", "client");
+    d.getElementById("f_role").dispatchEvent(
+      new h.w.Event("change", { bubbles: true }),
+    );
+    assert.equal(d.getElementById("f_clientId").required, true);
+  } finally {
+    h.close();
+  }
+});

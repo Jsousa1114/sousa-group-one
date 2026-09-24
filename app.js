@@ -1281,11 +1281,12 @@ async function loadUsers() {
     userAccounts = out.users;
     if (!$("usersList")) return;
     $("usersList").innerHTML = table(
-      ["Nom", "E-mail", "Rôle", "Statut", ""],
+      ["Nom", "E-mail", "Rôle", "Salarié", "Statut", ""],
       out.users.map((u) => [
         esc(u.name),
         esc(u.email),
         esc(roles[u.role]),
+        u.employee_id ? esc(name("employees", u.employee_id)) : "Non",
         u.disabled ? "Désactivé" : "Actif",
         btn("Modifier / relier", "edit-user", u.id) +
           " " +
@@ -1293,6 +1294,10 @@ async function loadUsers() {
           " " +
           (!same(u.id, profile.id) && !u.disabled
             ? btn("Désactiver", "disable-user", u.id, "danger")
+            : "") +
+          " " +
+          (!same(u.id, profile.id)
+            ? btn("Supprimer", "delete-user", u.id, "danger")
             : ""),
       ]),
     );
@@ -1328,7 +1333,7 @@ function userForm(link) {
       ["clientId", "Fiche client", "@clients?"],
     ],
     "user",
-    `<label for="f_role">Rôle</label><select id="f_role" name="role">${Object.entries(
+    `<label for="f_isEmployee">Cette personne est-elle un salarié ?</label><select id="f_isEmployee" name="isEmployee"><option value="no">Non — compte sans fiche salarié</option><option value="yes">Oui — compte lié à un salarié</option></select><p class="muted">Pour un salarié, choisissez sa fiche existante et son rôle. Le rôle Salarié donne accès à ses heures et son planning. Créez sa fiche dans Salariés si nécessaire.</p><label for="f_role">Rôle et droits d’accès</label><select id="f_role" name="role">${Object.entries(
       roles,
     )
       .map(([k, v]) => `<option value="${k}">${v}</option>`)
@@ -1341,6 +1346,11 @@ function userForm(link) {
     "afterbegin",
     '<option value="group">Sousa Group (toutes les entreprises)</option>',
   );
+  const typeChoice = $("f_isEmployee"),
+    typeLabel = typeChoice.labels[0],
+    typeHelp = typeChoice.nextElementSibling;
+  $("f_company").after(typeLabel, typeChoice, typeHelp);
+  $("f_role").value = "manager";
   if (link) {
     const [k, id] = link.split(":"),
       r = find(k, id);
@@ -1352,6 +1362,28 @@ function userForm(link) {
       $(k === "employees" ? "f_employeeId" : "f_clientId").value = r.id;
     }
   }
+  $("f_isEmployee").value = $("f_employeeId").value ? "yes" : "no";
+  syncUserForm();
+}
+function syncUserForm() {
+  const employee = $("f_isEmployee").value === "yes",
+    client = $("f_role").value === "client";
+  const e = $("f_employeeId"),
+    c = $("f_clientId");
+  e.disabled = !employee;
+  e.required = employee;
+  e.hidden = !employee;
+  e.labels[0].hidden = !employee;
+  e.classList.toggle("hidden", !employee);
+  e.labels[0].classList.toggle("hidden", !employee);
+  c.disabled = !client;
+  c.required = client;
+  c.hidden = !client;
+  c.labels[0].hidden = !client;
+  c.classList.toggle("hidden", !client);
+  c.labels[0].classList.toggle("hidden", !client);
+  if (!employee) e.value = "";
+  if (!client) c.value = "";
 }
 function downloadBlob(blob, name) {
   const a = document.createElement("a"),
@@ -1381,6 +1413,17 @@ function exportData(k) {
   );
 }
 document.addEventListener("change", (e) => {
+  if (
+    $("entityForm")?.dataset.kind === "user" &&
+    ["f_isEmployee", "f_role"].includes(e.target.id)
+  ) {
+    if (e.target.id === "f_isEmployee") {
+      if (e.target.value === "yes") $("f_role").value = "employee";
+      else if ($("f_role").value === "employee") $("f_role").value = "manager";
+    } else if (e.target.value === "employee") $("f_isEmployee").value = "yes";
+    else if (e.target.value === "client") $("f_isEmployee").value = "no";
+    syncUserForm();
+  }
   if (
     e.target.id === "f_employeeId" &&
     ["planning", "time.add"].includes($("entityForm")?.dataset.kind)
@@ -1681,10 +1724,20 @@ document.addEventListener("click", async (e) => {
       $("f_employeeId").value = u.employee_id || "";
       $("f_clientId").value = u.client_id || "";
       $("f_role").value = u.role;
+      $("f_isEmployee").value = u.employee_id ? "yes" : "no";
+      syncUserForm();
       $("entityForm").insertAdjacentHTML(
         "beforeend",
         `<input type="hidden" name="id" value="${esc(u.id)}">`,
       );
+    } else if (a === "delete-user") {
+      const u = userAccounts.find((x) => same(x.id, id));
+      if (
+        confirm(
+          `Supprimer le compte de ${u.name} (${u.email}) ? Ses sessions seront fermées. Sa fiche salarié ou client et l’historique métier seront conservés.`,
+        )
+      )
+        await mutate("delete", { id }, null, "state/users/delete");
     } else if (a === "disable-user") {
       if (confirm("Désactiver ce compte et ses sessions ?"))
         await mutate("disable", { id }, null, "state/users/disable");

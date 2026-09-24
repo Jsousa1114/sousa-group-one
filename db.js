@@ -15,6 +15,7 @@ async function migrate(db = pool) {
     "employee_id TEXT",
     "client_id TEXT",
     "disabled BOOLEAN NOT NULL DEFAULT false",
+    "deleted_at TIMESTAMPTZ",
     "session_version INTEGER NOT NULL DEFAULT 0",
   ])
     await db.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS " + column);
