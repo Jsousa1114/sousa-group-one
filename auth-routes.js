@@ -33,6 +33,7 @@ function routes(db) {
       if (
         !u ||
         u.disabled ||
+        u.deleted_at ||
         !(await bcrypt.compare(password, u.password_hash))
       )
         throw new AppError("E-mail ou mot de passe incorrect.", 401);

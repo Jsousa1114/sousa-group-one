@@ -475,3 +475,147 @@ test("administrator can relink existing account and sessions are revoked", async
   assert.equal(login.status, 200);
   assert.equal(login.data.profile.client_id, "c1");
 });
+
+test("account type validation and deletion revoke access without deleting business records", async () => {
+  const employeeRecord = await call(
+    "state/command",
+    admin,
+    payload(await rev(), {
+      action: "create",
+      collection: "employees",
+      payload: {
+        company: "home",
+        name: "Account deletion test",
+        job: "Tech",
+        email: "removal@test.invalid",
+        salary: 1000,
+        activity: 100,
+        vacation: 20,
+        entry: "2026-09-15",
+      },
+    }),
+  );
+  const eid = employeeRecord.data.result.id;
+  const body = {
+    name: "Removal test",
+    email: "removal@test.invalid",
+    password: "Secure-Removal-Test-Password",
+    role: "employee",
+    company: "home",
+    employeeId: eid,
+    isEmployee: "no",
+  };
+  assert.equal(
+    (await call("state/users", admin, payload(await rev(), { payload: body })))
+      .status,
+    400,
+  );
+  body.isEmployee = "yes";
+  const created = await call(
+    "state/users",
+    admin,
+    payload(await rev(), { payload: body }),
+  );
+  assert.equal(created.status, 200);
+  const id = created.data.result.id;
+  const token = (
+    await call("auth/login", null, {
+      email: body.email,
+      password: body.password,
+    })
+  ).data.token;
+  assert.ok(token);
+  assert.equal(
+    (
+      await call(
+        "state/users/delete",
+        token,
+        payload(await rev(), { payload: { id } }),
+      )
+    ).status,
+    403,
+  );
+  const own = (await call("state/users", admin)).data.users.find(
+    (x) => x.email === "a@test.invalid",
+  );
+  assert.equal(
+    (
+      await call(
+        "state/users/delete",
+        admin,
+        payload(await rev(), { payload: { id: own.id } }),
+      )
+    ).status,
+    400,
+  );
+  assert.equal(
+    (
+      await call(
+        "state/users/delete",
+        admin,
+        payload(await rev(), { payload: { id } }),
+      )
+    ).status,
+    200,
+  );
+  assert.equal((await call("state", token)).status, 401);
+  assert.equal(
+    (
+      await call("auth/login", null, {
+        email: body.email,
+        password: body.password,
+      })
+    ).status,
+    401,
+  );
+  assert.ok(
+    !(await call("state/users", admin)).data.users.some((x) => x.id === id),
+  );
+  assert.ok(
+    (await call("state", admin)).data.data.employees.some((x) => x.id === eid),
+  );
+  assert.equal(
+    (
+      await call(
+        "state/users/password",
+        admin,
+        payload(await rev(), { payload: { id, password: body.password } }),
+      )
+    ).status,
+    404,
+  );
+  assert.equal(
+    (
+      await call(
+        "state/users",
+        admin,
+        payload(await rev(), { payload: { ...body, id } }),
+      )
+    ).status,
+    404,
+  );
+  assert.equal(
+    (await call("state/users", admin, payload(await rev(), { payload: body })))
+      .status,
+    200,
+  );
+  assert.equal(
+    (
+      await call(
+        "state/users",
+        admin,
+        payload(await rev(), {
+          payload: {
+            name: "External manager",
+            email: "external@test.invalid",
+            password: body.password,
+            role: "manager",
+            company: "home",
+            isEmployee: "no",
+          },
+        }),
+      )
+    ).status,
+    200,
+  );
+});

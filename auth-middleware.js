@@ -12,7 +12,7 @@ function auth(db) {
       const u = (
         await db.query("SELECT * FROM users WHERE id=$1", [claims.sub])
       ).rows[0];
-      if (!u || u.disabled || u.session_version !== claims.sv)
+      if (!u || u.disabled || u.deleted_at || u.session_version !== claims.sv)
         return res
           .status(401)
           .json({ error: "Session expirée. Reconnectez-vous." });

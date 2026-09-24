@@ -168,7 +168,7 @@ function routes(db) {
       res.json({
         users: (
           await db.query(
-            "SELECT id,email,name,role,company,employee_id,client_id,disabled FROM users ORDER BY id",
+            "SELECT id,email,name,role,company,employee_id,client_id,disabled FROM users WHERE deleted_at IS NULL ORDER BY id",
           )
         ).rows,
       });
@@ -203,6 +203,17 @@ function routes(db) {
                 : null,
               client = p.clientId ? D.ref(d, "clients", p.clientId) : null;
             if (
+              p.isEmployee !== undefined &&
+              !["yes", "no"].includes(p.isEmployee)
+            )
+              D.fail("Type de compte invalide.");
+            if (
+              (p.isEmployee === "yes" && !employee) ||
+              (p.isEmployee === "no" && employee)
+            )
+              D.fail("Le choix salarié doit correspondre à la fiche liée.");
+            if (employee?.deletedAt) D.fail("Ce salarié a été supprimé.");
+            if (
               (role === "employee" && !employee) ||
               (role === "client" && !client)
             )
@@ -221,7 +232,7 @@ function routes(db) {
               employee &&
               (
                 await c.query(
-                  "SELECT id FROM users WHERE employee_id=$1 AND id<>$2",
+                  "SELECT id FROM users WHERE employee_id=$1 AND id<>$2 AND deleted_at IS NULL",
                   [String(employee.id), p.id || 0],
                 )
               ).rows.length
@@ -231,7 +242,7 @@ function routes(db) {
               client &&
               (
                 await c.query(
-                  "SELECT id FROM users WHERE client_id=$1 AND id<>$2",
+                  "SELECT id FROM users WHERE client_id=$1 AND id<>$2 AND deleted_at IS NULL",
                   [String(client.id), p.id || 0],
                 )
               ).rows.length
@@ -239,7 +250,10 @@ function routes(db) {
               D.fail("Ce client a déjà un compte.");
             if (p.id) {
               const target = (
-                await c.query("SELECT id FROM users WHERE id=$1", [p.id])
+                await c.query(
+                  "SELECT id FROM users WHERE id=$1 AND deleted_at IS NULL",
+                  [p.id],
+                )
               ).rows[0];
               if (!target) D.fail("Compte introuvable.", 404);
               if (
@@ -262,6 +276,12 @@ function routes(db) {
               );
               return { id: p.id };
             }
+            // Release an old address only for an explicit new-account request.
+            // Keeping it on deletion prevents bootstrap from recreating a deleted admin.
+            await c.query(
+              "UPDATE users SET email='deleted-' || id || '@removed.invalid' WHERE email=$1 AND deleted_at IS NOT NULL",
+              [email],
+            );
             const out = await c.query(
               "INSERT INTO users(email,password_hash,role,name,avatar,company,employee_id,client_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id",
               [
@@ -276,6 +296,37 @@ function routes(db) {
               ],
             );
             return { id: out.rows[0].id };
+          },
+        ),
+      );
+    }),
+  );
+  r.post(
+    "/users/delete",
+    wrap(async (req, res) => {
+      if (req.user.role !== "admin" || req.user.company !== "group")
+        D.fail("Accès refusé.", 403);
+      res.json(
+        await mutate(
+          db,
+          req.user,
+          { ...req.body, action: "Compte supprimé" },
+          async (c) => {
+            const id = req.body.payload?.id;
+            if (D.same(id, req.user.id))
+              D.fail("Vous ne pouvez pas supprimer votre propre compte.");
+            const target = (
+              await c.query(
+                "SELECT id FROM users WHERE id=$1 AND deleted_at IS NULL",
+                [id],
+              )
+            ).rows[0];
+            if (!target) D.fail("Compte introuvable.", 404);
+            await c.query(
+              "UPDATE users SET deleted_at=NOW(),disabled=true,session_version=session_version+1,employee_id=NULL,client_id=NULL WHERE id=$1",
+              [id],
+            );
+            return { id: target.id };
           },
         ),
       );
@@ -317,8 +368,15 @@ function routes(db) {
           async (c) => {
             const p = D.text(req.body.payload?.password, "Mot de passe", 200);
             if (p.length < 12) D.fail("12 caractères minimum.");
+            const target = (
+              await c.query(
+                "SELECT id FROM users WHERE id=$1 AND deleted_at IS NULL",
+                [req.body.payload.id],
+              )
+            ).rows[0];
+            if (!target) D.fail("Compte introuvable.", 404);
             await c.query(
-              "UPDATE users SET password_hash=$1,disabled=false,session_version=session_version+1 WHERE id=$2",
+              "UPDATE users SET password_hash=$1,disabled=false,session_version=session_version+1 WHERE id=$2 AND deleted_at IS NULL",
               [await bcrypt.hash(p, 12), req.body.payload.id],
             );
             return { id: req.body.payload.id };
