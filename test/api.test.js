@@ -1239,7 +1239,8 @@ test("advanced messaging supports groups, project threads, attachments, replies 
   assert.equal(sent.status, 200);
   const messageId = sent.data.result.id;
 
-  let clientState = await call("state", client);
+  let clientState = await call("state", freshClient);
+  assert.equal(clientState.status, 200, JSON.stringify(clientState.data));
   assert.ok(
     clientState.data.data.messageThreads.some((t) => t.id === groupId),
   );
@@ -1257,7 +1258,7 @@ test("advanced messaging supports groups, project threads, attachments, replies 
 
   const read = await call(
     "state/messages/read",
-    client,
+    freshClient,
     payload(await rev(), { payload: { threadId: groupId } }),
   );
   assert.equal(read.status, 200);
@@ -1269,7 +1270,7 @@ test("advanced messaging supports groups, project threads, attachments, replies 
 
   const reply = await call(
     "state/messages",
-    client,
+    freshClient,
     payload(await rev(), {
       payload: {
         threadId: groupId,
