@@ -808,7 +808,7 @@ function genericPage(k) {
       [
         ...cols.map((c) => c[1]),
         ...(k === "employees" ? ["Fiche et compte"] : []),
-        ...(k === "clients" && profile.role === "admin" ? ["Accès"] : []),
+        ...(k === "clients" && can(createRoles.clients) ? ["Actions"] : []),
       ],
       visible(k).map((r) => [
         ...cols.map(([f]) =>
@@ -844,8 +844,13 @@ function genericPage(k) {
                   : ""),
             ]
           : []),
-        ...(k === "clients" && profile.role === "admin"
-          ? [btn("Créer un compte", "linked-user", k + ":" + r.id)]
+        ...(k === "clients" && can(createRoles.clients)
+          ? [
+              (profile.role === "admin"
+                ? btn("Créer un compte", "linked-user", k + ":" + r.id) + " "
+                : "") +
+                btn("Supprimer le client", "client-delete", r.id, "danger"),
+            ]
           : []),
       ]),
     )
@@ -1871,6 +1876,17 @@ document.addEventListener("click", async (e) => {
         page = "projects";
         render();
         projectModal(project.id);
+      }
+    } else if (a === "client-delete") {
+      const client = find("clients", id);
+      if (
+        client &&
+        confirm(
+          `Supprimer définitivement le client « ${client.name} » ? Cette action est irréversible. La suppression sera refusée si des données ou un compte de connexion sont liés.`,
+        )
+      ) {
+        const result = await mutate("client.delete", { id });
+        if (result) toast("Client supprimé.");
       }
     } else if (a === "project-delete") {
       const project = find("projects", id);

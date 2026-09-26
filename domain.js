@@ -917,6 +917,23 @@ function applyCommand(
     result = quoteProject(d, q, now);
   } else if (action === "project.finish") {
     result = finishProject(d, u, ref(d, "projects", p.id), now);
+  } else if (action === "client.delete") {
+    const client = ref(d, "clients", p.id);
+    if (
+      !privileged(u, access.clients) ||
+      !(client.company ? inCompany(u, client.company) : u.company === "group")
+    )
+      fail("Suppression du client non autorisée.", 403);
+    if (
+      COLLECTIONS.filter((k) => k !== "clients").some((k) =>
+        d[k].some((r) => same(r.clientId, client.id)),
+      )
+    )
+      fail(
+        "Ce client possède des chantiers, devis, factures ou documents liés. Sa suppression est bloquée pour conserver ces données.",
+      );
+    d.clients = d.clients.filter((r) => !same(r.id, client.id));
+    result = { id: client.id };
   } else if (action === "project.delete") {
     const project = ref(d, "projects", p.id);
     if (!privileged(u, OPS) || !canProject(d, u, project))

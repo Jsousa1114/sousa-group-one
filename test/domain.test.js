@@ -876,3 +876,41 @@ test("project deletion respects roles, company boundaries and linked records", (
     );
   }
 });
+
+test("client deletion protects linked records and company access", () => {
+  const unlinked = () => {
+    const d = fixture();
+    d.projects = [];
+    return d;
+  };
+  assert.equal(
+    command(unlinked(), admin, "client.delete", { id: "c2" }).data.clients.some(
+      (c) => c.id === "c2",
+    ),
+    false,
+  );
+  for (const u of [
+    employee,
+    client,
+    { ...admin, role: "hr" },
+    { ...admin, company: "moving" },
+  ])
+    assert.throws(
+      () => command(unlinked(), u, "client.delete", { id: "c2" }),
+      /non autorisée/,
+    );
+  for (const kind of [
+    "projects",
+    "quotes",
+    "invoices",
+    "documents",
+    "payments",
+  ]) {
+    const d = unlinked();
+    d[kind].push({ id: "linked", clientId: "c2" });
+    assert.throws(
+      () => command(d, admin, "client.delete", { id: "c2" }),
+      /liés/,
+    );
+  }
+});
