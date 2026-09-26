@@ -134,6 +134,27 @@ async function noOverflow(page, label) {
     await login(client.page, "suite-client@e2e.invalid");
     await openMessages(admin.page, false);
     await openMessages(client.page, true);
+    for (const entry of [admin, client]) {
+      const diagnostics = await entry.page.evaluate(async () => {
+        const result = {
+          secure: window.isSecureContext,
+          subtle: !!window.crypto?.subtle,
+          indexedDB: !!window.indexedDB,
+          cryptoModule: !!window.SGOMessageCrypto,
+          suiteModule: !!window.SGOMessagingSuite,
+          core: !!window.SGOChatCore,
+        };
+        try {
+          await window.SGOMessageCrypto.ensureIdentity(window.SGOChatCore.api);
+          result.identity = "ok";
+        } catch (e) {
+          result.identity = e?.name + ": " + e?.message;
+        }
+        return result;
+      });
+      console.log("E2EE DIAGNOSTICS", diagnostics);
+      assert.equal(diagnostics.identity, "ok", JSON.stringify(diagnostics));
+    }
     await waitKeys();
 
     // Direct E2EE message: auto mode must encrypt once both keys exist.
