@@ -508,7 +508,7 @@ function routes(db) {
           )}"`,
           "Cache-Control": "private, no-store",
         })
-        .send(file.content);
+        .send(Buffer.from(file.content));
     }),
   );
   r.post(
