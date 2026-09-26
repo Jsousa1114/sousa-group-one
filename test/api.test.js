@@ -1185,6 +1185,12 @@ test("advanced messaging supports groups, project threads, attachments, replies 
   const users = (await call("state/users", admin)).data.users;
   const clientUser = users.find((u) => u.role === "client");
   assert.ok(clientUser);
+  const freshClientLogin = await call("auth/login", null, {
+    email: clientUser.email,
+    password: "New-Test-Password-123",
+  });
+  assert.equal(freshClientLogin.status, 200);
+  const freshClient = freshClientLogin.data.token;
 
   const group = await call(
     "state/message-threads",
@@ -1244,7 +1250,7 @@ test("advanced messaging supports groups, project threads, attachments, replies 
 
   const attachment = await fetch(
     url + "/api/state/messages/" + messageId + "/attachment",
-    { headers: { Authorization: "Bearer " + client } },
+    { headers: { Authorization: "Bearer " + freshClient } },
   );
   assert.equal(attachment.status, 200);
   assert.equal(await attachment.text(), "contenu-chat");
