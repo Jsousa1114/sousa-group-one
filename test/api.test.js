@@ -67,6 +67,8 @@ test.before(async () => {
   d.employees = [
     { id: "e1", name: "Employee", salary: 5000, vacation: 20, company: "home" },
   ];
+  d.employees[0].photo =
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=";
   d.projects = [
     {
       id: "p1",
@@ -198,6 +200,20 @@ test("API authentication, filtered state and disabled snapshot overwrite", async
       )
     ).status,
     403,
+  );
+});
+test("messaging contacts expose profile photos without HR fields", async () => {
+  const own = (await call("state", employee)).data;
+  const contacts = (await call("state", admin)).data.contacts;
+  const sender = contacts.find((c) => c.id === own.profile.id);
+  assert.match(sender.photo, /^data:image\/png;base64,/);
+  assert.equal(sender.photo, own.profile.photo);
+  assert.deepEqual(Object.keys(sender).sort(), ["id", "name", "photo", "role"]);
+  assert.equal(
+    (await call("state", client)).data.contacts.some(
+      (c) => c.id === own.profile.id,
+    ),
+    false,
   );
 });
 test("concurrent edits reject stale revision without data loss, idempotent retry", async () => {
