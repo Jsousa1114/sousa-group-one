@@ -1,15 +1,63 @@
-// This service worker replaces an earlier version that aggressively cached
-// app.js/index.html, which caused old (demo) code to keep being served
-// after updates. It self-destructs: it deletes all caches, unregisters
-// itself, and reloads any open tabs so fresh files are always fetched
-// from the network from now on.
+"use strict";
+
 self.addEventListener("install", () => self.skipWaiting());
+
 self.addEventListener("activate", (event) => {
   event.waitUntil(
-    caches.keys()
-      .then(keys => Promise.all(keys.map(k => caches.delete(k))))
-      .then(() => self.registration.unregister())
-      .then(() => self.clients.matchAll())
-      .then(clients => clients.forEach(client => client.navigate(client.url)))
+    Promise.all([
+      caches.keys().then((keys) => Promise.all(keys.map((key) => caches.delete(key)))),
+      self.clients.claim(),
+    ]),
+  );
+});
+
+self.addEventListener("push", (event) => {
+  let data = {};
+  try {
+    data = event.data ? event.data.json() : {};
+  } catch {
+    data = { body: event.data?.text?.() || "Nouvelle notification" };
+  }
+  const title = data.title || "Sousa Group One",
+    options = {
+      body: data.body || "Nouvelle activité",
+      icon: "/assets/logos/group.png?v=push-20260927",
+      badge: "/assets/logos/group.png?v=push-20260927",
+      tag: data.tag || "sgo-notification",
+      renotify: !!data.tag,
+      data: {
+        url: data.url || "/",
+        conversationKey: data.conversationKey || "",
+        callRoomId: data.callRoomId || "",
+      },
+      actions: data.callRoomId
+        ? [
+            { action: "open", title: "Ouvrir" },
+            { action: "dismiss", title: "Ignorer" },
+          ]
+        : [{ action: "open", title: "Ouvrir" }],
+    };
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  if (event.action === "dismiss") return;
+  const target = new URL(event.notification.data?.url || "/", self.location.origin).href;
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
+      const existing = clients.find((client) => {
+        try {
+          return new URL(client.url).origin === self.location.origin;
+        } catch {
+          return false;
+        }
+      });
+      if (existing) {
+        existing.navigate(target);
+        return existing.focus();
+      }
+      return self.clients.openWindow(target);
+    }),
   );
 });
