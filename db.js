@@ -38,6 +38,17 @@ async function migrate(db = pool) {
     `CREATE TABLE IF NOT EXISTS file_contents(id TEXT PRIMARY KEY,content BYTEA NOT NULL)`,
   );
   await db.query(
+    `CREATE TABLE IF NOT EXISTS message_reads(
+      message_id TEXT NOT NULL,
+      user_id INTEGER NOT NULL,
+      read_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY(message_id,user_id)
+    )`,
+  );
+  await db.query(
+    `CREATE INDEX IF NOT EXISTS message_reads_user_idx ON message_reads(user_id,read_at DESC)`,
+  );
+  await db.query(
     `CREATE TABLE IF NOT EXISTS rtc_calls(
       id TEXT PRIMARY KEY,
       caller_id INTEGER NOT NULL,

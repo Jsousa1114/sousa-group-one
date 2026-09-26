@@ -1256,13 +1256,15 @@ test("advanced messaging supports groups, project threads, attachments, replies 
   assert.equal(attachment.status, 200);
   assert.equal(await attachment.text(), "contenu-chat");
 
+  const revisionBeforeRead = await rev();
   const read = await call(
     "state/messages/read",
     freshClient,
-    payload(await rev(), { payload: { threadId: groupId } }),
+    payload(revisionBeforeRead, { payload: { threadId: groupId } }),
   );
   assert.equal(read.status, 200);
   assert.ok(read.data.result.changed >= 1);
+  assert.equal(await rev(), revisionBeforeRead, "reading messages must not change the global business revision");
 
   let adminState = await call("state", admin);
   const readMessage = adminState.data.data.messages.find((m) => m.id === messageId);
@@ -1285,6 +1287,28 @@ test("advanced messaging supports groups, project threads, attachments, replies 
     (m) => m.id === reply.data.result.id,
   );
   assert.equal(replied.replyToId, messageId);
+
+  const direct = await call(
+    "state/messages",
+    admin,
+    payload(await rev(), {
+      payload: { recipientId: clientUser.id, text: "Message direct séparé" },
+    }),
+  );
+  assert.equal(direct.status, 200);
+  const crossConversationReply = await call(
+    "state/messages",
+    freshClient,
+    payload(await rev(), {
+      payload: {
+        threadId: groupId,
+        text: "Tentative de citation croisée",
+        replyToId: direct.data.result.id,
+      },
+    }),
+  );
+  assert.equal(crossConversationReply.status, 403);
+  assert.match(crossConversationReply.data.error, /autre conversation/i);
 });
 
 
