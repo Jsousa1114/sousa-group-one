@@ -44,6 +44,7 @@ let token = sessionStorage.getItem("sgo_session"),
   chatReplyToId = "",
   chatAttachmentDraft = null,
   chatRecorder = null,
+  chatRecordingDiscard = false,
   activeCall = null,
   incomingCall = null,
   callStatusTimer = null,
@@ -186,7 +187,18 @@ async function api(path, body) {
   }
   return data;
 }
+function cancelChatRecording() {
+  if (!chatRecorder) return;
+  chatRecordingDiscard = true;
+  try {
+    if (chatRecorder.state !== "inactive") chatRecorder.stop();
+  } catch {}
+  try {
+    chatRecorder.stream?.getTracks().forEach((track) => track.stop());
+  } catch {}
+}
 function clearSession() {
+  cancelChatRecording();
   if (activeCall || incomingCall) endCurrentCall(false).catch(() => {});
   document.body.dataset.brand = "group";
   token = null;
@@ -1089,6 +1101,7 @@ async function endCurrentCall(send = true) {
   finishCallLocal();
 }
 async function startAudioCall(contactId) {
+  if (chatRecorder?.state === "recording") cancelChatRecording();
   if (activeCall || incomingCall)
     throw new Error("Un appel est déjà en cours.");
   const contact = contacts.find((c) => same(c.id, contactId));
@@ -1150,8 +1163,6 @@ async function acceptIncomingCall() {
     setCallUi(call.callerName, "Connexion…", "active");
   } catch (e) {
     await api("state/calls/" + encodeURIComponent(call.id) + "/reject", {}).catch(() => {});
-    activeCall = null;
-    incomingCall = null;
     finishCallLocal(
       e.name === "NotAllowedError" || e.name === "SecurityError"
         ? "Microphone refusé."
@@ -2568,7 +2579,9 @@ document.addEventListener("change", (e) => {
 document.addEventListener("click", async (e) => {
   const nav = e.target.closest("[data-page]");
   if (nav) {
-    page = nav.dataset.page;
+    const nextPage = nav.dataset.page;
+    if (page === "messages" && nextPage !== "messages") cancelChatRecording();
+    page = nextPage;
     if (page === "messages") mobileChatOpen = false;
     render();
     $("sidebar").classList.remove("open");
@@ -2645,6 +2658,8 @@ document.addEventListener("click", async (e) => {
       window.open(url, "_blank", "noopener");
       setTimeout(() => URL.revokeObjectURL(url), 60000);
     } else if (a === "chat-voice") {
+      if (activeCall || incomingCall)
+        throw new Error("Terminez l’appel avant d’enregistrer un message vocal.");
       if (chatRecorder?.state === "recording") {
         chatRecorder.stop();
         b.textContent = "🎤";
@@ -2671,6 +2686,7 @@ document.addEventListener("click", async (e) => {
             recorder = preferred
               ? new MediaRecorder(stream, { mimeType: preferred })
               : new MediaRecorder(stream);
+          chatRecordingDiscard = false;
           chatRecorder = recorder;
           recorder.ondataavailable = (event) => {
             if (event.data.size) chunks.push(event.data);
@@ -2683,6 +2699,11 @@ document.addEventListener("click", async (e) => {
           };
           recorder.onstop = async () => {
             stream.getTracks().forEach((track) => track.stop());
+            if (chatRecordingDiscard) {
+              chatRecordingDiscard = false;
+              chatRecorder = null;
+              return;
+            }
             const mime = (recorder.mimeType || preferred || "audio/webm").split(";")[0],
               blob = new Blob(chunks, { type: mime });
             chatRecorder = null;
