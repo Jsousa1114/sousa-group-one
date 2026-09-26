@@ -1,3 +1,4 @@
+// Messaging suite full regression after script-loader integration.
 "use strict";
 process.env.JWT_SECRET = "suite-browser-secret-2026-with-very-long-value";
 const assert = require("node:assert/strict");
