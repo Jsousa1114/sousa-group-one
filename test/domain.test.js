@@ -584,3 +584,69 @@ test("adding company access works during a clock but removing its company is blo
   );
   assert.deepEqual(d.employees[0].companies, ["home", "tech"]);
 });
+
+test("linked staff roles use employee companies without gaining new role permissions", () => {
+  const d = fixture();
+  d.employees[0].companies = ["home", "tech"];
+  d.projects.push({ id: "pt", title: "Tech", company: "tech", team: [] });
+  d.projects.push({ id: "pm", title: "Moving", company: "moving", team: [] });
+  for (const role of [
+    "admin",
+    "direction",
+    "manager",
+    "hr",
+    "accounting",
+    "employee",
+  ]) {
+    const u = { ...employee, role };
+    const effective = D.effectiveUser(d, u);
+    assert.deepEqual(
+      D.viewState(d, u)
+        .companies.map((c) => c.id)
+        .sort(),
+      ["home", "tech"],
+      role,
+    );
+    assert.equal(D.inCompany(effective, "moving"), false);
+    assert.equal(D.inCompany(effective, "group"), false);
+    assert.equal(
+      D.canProject(
+        d,
+        effective,
+        d.projects.find((p) => p.id === "pt"),
+      ),
+      ["admin", "direction", "manager", "accounting"].includes(role),
+    );
+    d.employees[0].companies = ["home"];
+    assert.equal(
+      D.inCompany(D.effectiveUser(d, effective), "tech"),
+      false,
+      "revokes stale memberships",
+    );
+    d.employees[0].companies = ["home", "tech"];
+  }
+  assert.equal(
+    D.inCompany(D.effectiveUser(d, { ...admin, employee_id: "e1" }), "moving"),
+    true,
+  );
+  assert.equal(
+    D.inCompany(
+      D.effectiveUser(d, { role: "manager", company: "home" }),
+      "tech",
+    ),
+    false,
+  );
+  assert.equal(
+    D.canContact(
+      { role: "employee", company: "tech", companies: ["tech"] },
+      { ...employee, role: "manager" },
+      d,
+    ),
+    true,
+  );
+  d.employees[0].deletedAt = new Date().toISOString();
+  assert.throws(
+    () => D.effectiveUser(d, { ...employee, role: "manager" }),
+    /désactivé/,
+  );
+});

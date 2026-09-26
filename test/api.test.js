@@ -767,28 +767,184 @@ test("new client and account commit together with private access and full rollba
 
 test("editing employee companies without a new password preserves login credentials", async () => {
   const body = {
-    name: "Membership edit", email: "membership-edit@test.invalid",
-    password: "Membership-Strong-Password", company: "home", role: "employee",
-    isEmployee: "yes", employeeCompanies: ["home"],
-    newEmployee: { job: "Technicien", salary: 5000, activity: 100, vacation: 20, entry: "2026-09-24" },
+    name: "Membership edit",
+    email: "membership-edit@test.invalid",
+    password: "Membership-Strong-Password",
+    company: "home",
+    role: "employee",
+    isEmployee: "yes",
+    employeeCompanies: ["home"],
+    newEmployee: {
+      job: "Technicien",
+      salary: 5000,
+      activity: 100,
+      vacation: 20,
+      entry: "2026-09-24",
+    },
   };
-  const created = await call("state/users", admin, payload(await rev(), { payload: body }));
+  const created = await call(
+    "state/users",
+    admin,
+    payload(await rev(), { payload: body }),
+  );
   assert.equal(created.status, 200);
   const id = created.data.result.id;
-  const before = (await db.query("SELECT password_hash FROM users WHERE id=$1", [id])).rows[0].password_hash;
-  const edit = { ...body, id, employeeId: created.data.result.employeeId, employeeCompanies: ["home", "tech"] };
+  const before = (
+    await db.query("SELECT password_hash FROM users WHERE id=$1", [id])
+  ).rows[0].password_hash;
+  const edit = {
+    ...body,
+    id,
+    employeeId: created.data.result.employeeId,
+    employeeCompanies: ["home", "tech"],
+  };
   delete edit.newEmployee;
   delete edit.password;
-  const saved = await call("state/users", admin, payload(await rev(), { payload: edit }));
+  const saved = await call(
+    "state/users",
+    admin,
+    payload(await rev(), { payload: edit }),
+  );
   assert.equal(saved.status, 200, JSON.stringify(saved.data));
-  assert.equal((await db.query("SELECT password_hash FROM users WHERE id=$1", [id])).rows[0].password_hash, before);
-  const login = await call("auth/login", null, { email: body.email, password: body.password });
+  assert.equal(
+    (await db.query("SELECT password_hash FROM users WHERE id=$1", [id]))
+      .rows[0].password_hash,
+    before,
+  );
+  const login = await call("auth/login", null, {
+    email: body.email,
+    password: body.password,
+  });
   assert.equal(login.status, 200);
-  assert.deepEqual((await call("state", login.data.token)).data.profile.companies, ["home", "tech"]);
-  const invalid = await call("state/users", admin, payload(await rev(), { payload: { ...edit, password: "short" } }));
+  assert.deepEqual(
+    (await call("state", login.data.token)).data.profile.companies,
+    ["home", "tech"],
+  );
+  const invalid = await call(
+    "state/users",
+    admin,
+    payload(await rev(), { payload: { ...edit, password: "short" } }),
+  );
   assert.equal(invalid.status, 400);
-  const changed = await call("state/users", admin, payload(await rev(), { payload: { ...edit, password: "Replacement-Strong-Password" } }));
+  const changed = await call(
+    "state/users",
+    admin,
+    payload(await rev(), {
+      payload: { ...edit, password: "Replacement-Strong-Password" },
+    }),
+  );
   assert.equal(changed.status, 200);
-  assert.equal((await call("auth/login", null, { email: body.email, password: body.password })).status, 401);
-  assert.equal((await call("auth/login", null, { email: body.email, password: "Replacement-Strong-Password" })).status, 200);
+  assert.equal(
+    (
+      await call("auth/login", null, {
+        email: body.email,
+        password: body.password,
+      })
+    ).status,
+    401,
+  );
+  assert.equal(
+    (
+      await call("auth/login", null, {
+        email: body.email,
+        password: "Replacement-Strong-Password",
+      })
+    ).status,
+    200,
+  );
+});
+
+test("manager company memberships apply to login, writes and an already open session", async () => {
+  const body = {
+    name: "Multi manager",
+    email: "multi-manager@test.invalid",
+    password: "Multi-Manager-Password",
+    company: "home",
+    role: "manager",
+    isEmployee: "yes",
+    employeeCompanies: ["home", "tech"],
+    newEmployee: {
+      job: "Responsable",
+      salary: 5000,
+      activity: 100,
+      vacation: 20,
+      entry: "2026-09-26",
+    },
+  };
+  const created = await call(
+    "state/users",
+    admin,
+    payload(await rev(), { payload: body }),
+  );
+  assert.equal(created.status, 200);
+  const login = await call("auth/login", null, {
+    email: body.email,
+    password: body.password,
+  });
+  assert.equal(login.status, 200);
+  const token = login.data.token;
+  const state = await call("state", token);
+  assert.deepEqual(state.data.profile.companies, ["home", "tech"]);
+  assert.deepEqual(state.data.data.companies.map((c) => c.id).sort(), [
+    "home",
+    "tech",
+  ]);
+  const allowed = await call(
+    "state/command",
+    token,
+    payload(await rev(), {
+      action: "create",
+      collection: "clients",
+      payload: {
+        company: "tech",
+        name: "Allowed",
+        email: "allowed@test.invalid",
+        city: "Nyon",
+        type: "Particulier",
+      },
+    }),
+  );
+  assert.equal(allowed.status, 200, JSON.stringify(allowed.data));
+  const forbidden = await call(
+    "state/command",
+    token,
+    payload(await rev(), {
+      action: "create",
+      collection: "clients",
+      payload: {
+        company: "moving",
+        name: "Denied",
+        city: "Nyon",
+        type: "Particulier",
+      },
+    }),
+  );
+  assert.equal(forbidden.status, 403);
+  const removed = await call(
+    "state/command",
+    admin,
+    payload(await rev(), {
+      action: "employee.companies",
+      payload: { id: created.data.result.employeeId, companies: ["home"] },
+    }),
+  );
+  assert.equal(removed.status, 200);
+  assert.deepEqual((await call("state", token)).data.profile.companies, [
+    "home",
+  ]);
+  const revoked = await call(
+    "state/command",
+    token,
+    payload(await rev(), {
+      action: "create",
+      collection: "clients",
+      payload: {
+        company: "tech",
+        name: "Denied",
+        city: "Nyon",
+        type: "Particulier",
+      },
+    }),
+  );
+  assert.equal(revoked.status, 403);
 });
