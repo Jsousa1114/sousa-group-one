@@ -841,3 +841,29 @@ test("new client address submits with the account and existing client links skip
     h.close();
   }
 });
+
+test("named id input cannot bypass submit interception in a real browser", async () => {
+  const h = await setup();
+  try {
+    click(h, '[data-page="employees"]');
+    click(h, '[data-action="employee-companies"]');
+    const form = h.w.document.getElementById("entityForm");
+    const hiddenId = form.querySelector('[name="id"]');
+    // jsdom does not implement Chromium's named property override for form.id.
+    Object.defineProperty(form, "id", { configurable: true, value: hiddenId });
+    assert.equal(form.id.tagName, "INPUT");
+    form.querySelector('[name="companies"][value="tech"]').checked = true;
+    const event = new h.w.Event("submit", { bubbles: true, cancelable: true });
+    form.dispatchEvent(event);
+    assert.equal(event.defaultPrevented, true, "must not navigate with form values in URL");
+    assert.equal(form.getAttribute("method"), "post");
+    await flush();
+    await flush();
+    const request = h.requests.findLast(r => r.url.endsWith("/command") && r.opts.method === "POST");
+    assert.equal(JSON.parse(request.opts.body).action, "employee.companies");
+    assert.deepEqual(JSON.parse(request.opts.body).payload.companies, ["home", "tech"]);
+    assert.match(h.w.document.getElementById("toast").textContent, /enregistrée/);
+    click(h, '[data-action="employee-companies"]');
+    assert.equal(h.w.document.querySelector('[name="companies"][value="tech"]').checked, true);
+  } finally { h.close(); }
+});
