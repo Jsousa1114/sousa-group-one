@@ -36,6 +36,7 @@ function createApp(db = pool) {
     "app.js",
     "finance.js",
     "messaging-crypto.js",
+    "messaging-suite.js",
     "styles.css",
     "manifest.webmanifest",
     "service-worker.js",
