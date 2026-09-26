@@ -1224,7 +1224,13 @@
               groupCall.cursor,
           ),
         ]),
-        joined = (membersOut.members || []).filter((m) => m.joinedAt && !m.leftAt);
+        members = membersOut.members || [],
+        me = members.find((m) => String(m.userId) === String(profile().id));
+      if (!me || me.leftAt) {
+        await stopGroupCall(false);
+        return;
+      }
+      const joined = members.filter((m) => m.joinedAt && !m.leftAt);
       for (const member of joined) {
         if (String(member.userId) === String(profile().id)) continue;
         if (!groupCall.peers.has(String(member.userId))) {
