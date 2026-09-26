@@ -143,6 +143,9 @@ async function migrate(db = pool) {
     )`,
   );
   await db.query(
+    "ALTER TABLE message_overrides ADD COLUMN IF NOT EXISTS edited_encryption JSONB",
+  );
+  await db.query(
     `CREATE TABLE IF NOT EXISTS user_crypto_keys(
       user_id INTEGER PRIMARY KEY,
       public_jwk JSONB NOT NULL,
