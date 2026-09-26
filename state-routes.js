@@ -114,7 +114,7 @@ function routes(db) {
               [ids],
             ),
             db.query(
-              "SELECT message_id,edited_text,edited_at,deleted_for_all,deleted_at FROM message_overrides WHERE message_id = ANY($1::text[])",
+              "SELECT message_id,edited_text,edited_encryption,edited_at,deleted_for_all,deleted_at FROM message_overrides WHERE message_id = ANY($1::text[])",
               [ids],
             ),
           ]),
@@ -137,7 +137,11 @@ function routes(db) {
           ];
           const override = overrides.get(String(message.id));
           if (override?.edited_at && !override.deleted_for_all) {
-            message.text = override.edited_text || "";
+            message.text = override.edited_encryption
+              ? ""
+              : override.edited_text || "";
+            if (override.edited_encryption)
+              message.encryption = override.edited_encryption;
             message.editedAt = override.edited_at;
           }
           if (override?.deleted_for_all) {
