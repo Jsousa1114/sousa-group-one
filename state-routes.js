@@ -97,6 +97,13 @@ function routes(db) {
           "SELECT id,email,name,role,company,employee_id,client_id,disabled FROM users",
         )
       ).rows;
+      const employeePhotos = new Map(
+        (row.data.employees || [])
+          .filter((e) => !e.deletedAt)
+          .map((e) => [String(e.id), e.photo || ""]),
+      );
+      const contactPhoto = (u) =>
+        employeePhotos.get(String(u.employee_id)) || "";
       res.set("Cache-Control", "no-store").json({
         data: D.viewState(row.data, req.user),
         revision: row.revision,
@@ -105,8 +112,13 @@ function routes(db) {
             (u) =>
               !D.same(u.id, req.user.id) && D.canContact(req.user, u, row.data),
           )
-          .map((u) => ({ id: u.id, name: u.name, role: u.role })),
-        profile: profile(req.user),
+          .map((u) => ({
+            id: u.id,
+            name: u.name,
+            role: u.role,
+            photo: contactPhoto(u),
+          })),
+        profile: { ...profile(req.user), photo: contactPhoto(req.user) },
       });
     }),
   );
