@@ -174,7 +174,8 @@
       cryptoBox()?.ensureIdentity?.(core().api).catch(() => {});
       ensureServiceWorker()
         .then(() => {
-          if (Notification?.permission === "granted") enablePush(false).catch(() => {});
+          if ("Notification" in window && Notification.permission === "granted")
+            enablePush(false).catch(() => {});
         })
         .catch(() => {});
       heartbeat();
@@ -279,7 +280,7 @@
       row.classList.toggle("suite-pinned", !!pref.pinned);
       row.classList.toggle("suite-muted", !!(pref.mutedUntil && new Date(pref.mutedUntil) > new Date()));
       row.classList.toggle("suite-archived", !!pref.archived);
-      if (pref.archived && !archivedVisible) row.hidden = true;
+      if (pref.archived) row.hidden = !archivedVisible;
       if (!row.querySelector(".suite-conversation-flags")) {
         const flags = document.createElement("span");
         flags.className = "suite-conversation-flags";
@@ -492,6 +493,7 @@
             mine &&
             !message.system &&
             !message.deletedForAll &&
+            !(message.encryption && message.attachment) &&
             Date.now() - new Date(message.createdAt).getTime() < 15 * 60 * 1000,
           deleteAllAllowed =
             mine &&
@@ -1083,7 +1085,10 @@
     const video = tile.querySelector("video");
     video.srcObject = stream;
     video.play().catch(() => {});
-    if (groupCall?.callType !== "video") video.classList.add("audio-only");
+    if (groupCall?.callType !== "video") {
+      video.muted = true;
+      video.classList.add("audio-only");
+    }
   }
   async function sendGroupSignal(toUser, kind, payload) {
     if (!groupCall) return;
@@ -1190,7 +1195,7 @@
   }
   async function startGroupSession(room, incoming = false) {
     if (groupCall) throw new Error("Un appel de groupe est déjà en cours.");
-    if (window.activeCall) throw new Error("Un appel est déjà en cours.");
+    if (core().hasDirectCall?.()) throw new Error("Un appel privé est déjà en cours.");
     const join = incoming
         ? await core().api(
             "messaging/group-calls/" + encodeURIComponent(room.id) + "/join",
