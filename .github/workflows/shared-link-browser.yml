@@ -1,0 +1,28 @@
+name: Test lien partage Sousa Group One
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - test/shared-link-browser.cjs
+      - .github/workflows/shared-link-browser.yml
+
+permissions:
+  contents: read
+
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install Chromium test tools
+        run: |
+          npm ci
+          npm install --no-save playwright
+          npx playwright install --with-deps chromium
+      - name: Test the exact shared URL on desktop and mobile
+        run: node test/shared-link-browser.cjs
