@@ -1286,3 +1286,80 @@ test("advanced messaging supports groups, project threads, attachments, replies 
   );
   assert.equal(replied.replyToId, messageId);
 });
+
+
+test("audio call signaling supports ring, answer, ICE exchange, hangup and reject", async () => {
+  const users = (await call("state/users", admin)).data.users,
+    clientUser = users.find((u) => u.role === "client");
+  assert.ok(clientUser);
+  const login = await call("auth/login", null, {
+    email: clientUser.email,
+    password: "New-Test-Password-123",
+  });
+  assert.equal(login.status, 200);
+  const freshClient = login.data.token,
+    offer = { type: "offer", sdp: "v=0\r\no=sgo 1 1 IN IP4 127.0.0.1\r\ns=audio-call-test" },
+    answer = { type: "answer", sdp: "v=0\r\no=sgo 2 2 IN IP4 127.0.0.1\r\ns=audio-call-test-answer" };
+
+  const started = await call("state/calls/start", admin, {
+    recipientId: clientUser.id,
+    offer,
+  });
+  assert.equal(started.status, 200);
+  const id = started.data.id;
+  assert.ok(id);
+
+  const pending = await call("state/calls/pending", freshClient);
+  assert.equal(pending.status, 200);
+  assert.equal(pending.data.call.id, id);
+  assert.equal(pending.data.call.status, "ringing");
+
+  const candidate = {
+    candidate: "candidate:1 1 UDP 2122260223 192.0.2.1 54321 typ host",
+    sdpMid: "0",
+    sdpMLineIndex: 0,
+  };
+  assert.equal(
+    (
+      await call("state/calls/" + id + "/candidates", admin, {
+        candidate,
+      })
+    ).status,
+    200,
+  );
+  const candidates = await call(
+    "state/calls/" + id + "/candidates?after=0",
+    freshClient,
+  );
+  assert.equal(candidates.status, 200);
+  assert.equal(candidates.data.candidates.length, 1);
+  assert.equal(candidates.data.candidates[0].candidate.candidate, candidate.candidate);
+
+  const accepted = await call("state/calls/" + id + "/answer", freshClient, {
+    answer,
+  });
+  assert.equal(accepted.status, 200);
+  assert.equal(accepted.data.status, "accepted");
+
+  const active = await call("state/calls/" + id, admin);
+  assert.equal(active.status, 200);
+  assert.equal(active.data.call.status, "accepted");
+  assert.equal(active.data.call.answer.type, "answer");
+
+  const ended = await call("state/calls/" + id + "/end", admin, {});
+  assert.equal(ended.status, 200);
+  assert.equal(ended.data.status, "ended");
+
+  const second = await call("state/calls/start", admin, {
+    recipientId: clientUser.id,
+    offer,
+  });
+  assert.equal(second.status, 200);
+  const rejected = await call(
+    "state/calls/" + second.data.id + "/reject",
+    freshClient,
+    {},
+  );
+  assert.equal(rejected.status, 200);
+  assert.equal(rejected.data.status, "rejected");
+});
