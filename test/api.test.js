@@ -1179,3 +1179,104 @@ test("deleting a document removes stored bytes transactionally", async () => {
   );
   assert.equal((await call("state/documents/" + id, admin)).status, 404);
 });
+
+
+test("advanced messaging supports groups, project threads, attachments, replies and read receipts", async () => {
+  const users = (await call("state/users", admin)).data.users;
+  const clientUser = users.find((u) => u.role === "client");
+  const employeeUser = users.find((u) => u.role === "employee");
+  assert.ok(clientUser && employeeUser);
+
+  const group = await call(
+    "state/message-threads",
+    admin,
+    payload(await rev(), {
+      payload: {
+        type: "group",
+        name: "Equipe test",
+        participants: [clientUser.id, employeeUser.id],
+      },
+    }),
+  );
+  assert.equal(group.status, 200);
+  const groupId = group.data.result.id;
+
+  const projectThread = await call(
+    "state/message-threads",
+    admin,
+    payload(await rev(), {
+      payload: {
+        type: "project",
+        name: "Chantier Project",
+        projectId: "p1",
+        participants: [clientUser.id, employeeUser.id],
+      },
+    }),
+  );
+  assert.equal(projectThread.status, 200);
+  assert.ok(projectThread.data.result.id);
+
+  const sent = await call(
+    "state/messages",
+    admin,
+    payload(await rev(), {
+      payload: {
+        threadId: groupId,
+        text: "Photo et document",
+        attachment: {
+          name: "preuve.txt",
+          mime: "text/plain",
+          content: Buffer.from("contenu-chat").toString("base64"),
+        },
+      },
+    }),
+  );
+  assert.equal(sent.status, 200);
+  const messageId = sent.data.result.id;
+
+  let clientState = await call("state", client);
+  assert.ok(
+    clientState.data.data.messageThreads.some((t) => t.id === groupId),
+  );
+  const received = clientState.data.data.messages.find((m) => m.id === messageId);
+  assert.ok(received);
+  assert.equal(received.attachment.name, "preuve.txt");
+  assert.equal(received.readBy.includes(String(clientUser.id)), false);
+
+  const attachment = await fetch(
+    url + "/api/state/messages/" + messageId + "/attachment",
+    { headers: { Authorization: "Bearer " + client } },
+  );
+  assert.equal(attachment.status, 200);
+  assert.equal(await attachment.text(), "contenu-chat");
+
+  const read = await call(
+    "state/messages/read",
+    client,
+    payload(await rev(), { payload: { threadId: groupId } }),
+  );
+  assert.equal(read.status, 200);
+  assert.ok(read.data.result.changed >= 1);
+
+  let adminState = await call("state", admin);
+  const readMessage = adminState.data.data.messages.find((m) => m.id === messageId);
+  assert.ok(readMessage.readBy.includes(String(clientUser.id)));
+
+  const reply = await call(
+    "state/messages",
+    client,
+    payload(await rev(), {
+      payload: {
+        threadId: groupId,
+        text: "Bien reçu",
+        replyToId: messageId,
+      },
+    }),
+  );
+  assert.equal(reply.status, 200);
+  adminState = await call("state", admin);
+  const replied = adminState.data.data.messages.find(
+    (m) => m.id === reply.data.result.id,
+  );
+  assert.equal(replied.replyToId, messageId);
+});
