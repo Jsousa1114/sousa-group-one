@@ -38,6 +38,7 @@ const COLLECTIONS = [
   "maintenance",
   "documents",
   "messages",
+  "messageThreads",
   "clocks",
 ];
 const STAFF = ["admin", "direction"],
@@ -423,9 +424,21 @@ function viewState(data, u) {
         (r.company ? inCompany(u, r.company) : u.company === "group"),
     );
   v.documents = d.documents.filter((r) => canDocument(d, u, r));
+  v.messageThreads = d.messageThreads.filter((t) => {
+    if ((t.hiddenFor || []).some((id) => same(id, u.id))) return false;
+    if ((t.participants || []).some((id) => same(id, u.id))) return true;
+    if (t.projectId) {
+      const project = d.projects.find((p) => same(p.id, t.projectId));
+      return !!project && canProject(d, u, project);
+    }
+    return false;
+  });
+  const allowedThreads = new Set(v.messageThreads.map((t) => String(t.id)));
   v.messages = d.messages.filter(
     (r) =>
-      (same(r.senderId, u.id) || same(r.recipientId, u.id)) &&
+      ((r.threadId && allowedThreads.has(String(r.threadId))) ||
+        (!r.threadId &&
+          (same(r.senderId, u.id) || same(r.recipientId, u.id)))) &&
       !(r.hiddenFor || []).some((id) => same(id, u.id)),
   );
   v.clocks = d.clocks.filter((r) => same(r.userId, u.id));
