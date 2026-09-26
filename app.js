@@ -44,6 +44,11 @@ let token = sessionStorage.getItem("sgo_session"),
   chatReplyToId = "",
   chatAttachmentDraft = null,
   chatRecorder = null,
+  activeCall = null,
+  incomingCall = null,
+  callStatusTimer = null,
+  callCandidateCursor = 0,
+  pendingIceCandidates = [],
   mobileChatOpen = false,
   userAccounts = [],
   pending = false,
@@ -175,6 +180,7 @@ async function api(path, body) {
   return data;
 }
 function clearSession() {
+  if (activeCall || incomingCall) endCurrentCall(false).catch(() => {});
   document.body.dataset.brand = "group";
   token = null;
   state = null;
@@ -809,6 +815,274 @@ function threadForm(type = "group", projectId = "") {
     </form>`,
   );
 }
+function ensureCallOverlay() {
+  let overlay = $("callOverlay");
+  if (overlay) return overlay;
+  overlay = document.createElement("div");
+  overlay.id = "callOverlay";
+  overlay.className = "call-overlay hidden";
+  overlay.innerHTML = `
+    <div class="call-card">
+      <div class="call-avatar" id="callAvatar">☎</div>
+      <h3 id="callName">Appel</h3>
+      <p id="callState">Connexion…</p>
+      <div class="call-timer hidden" id="callTimer">00:00</div>
+      <div class="call-controls">
+        <button type="button" id="callReject" class="call-control danger hidden" data-action="call-reject" aria-label="Refuser l'appel">✕</button>
+        <button type="button" id="callAccept" class="call-control accept hidden" data-action="call-accept" aria-label="Accepter l'appel">📞</button>
+        <button type="button" id="callMute" class="call-control hidden" data-action="call-mute" aria-label="Couper le micro">🎙</button>
+        <button type="button" id="callHangup" class="call-control danger hidden" data-action="call-hangup" aria-label="Raccrocher">☎</button>
+      </div>
+      <audio id="remoteCallAudio" autoplay playsinline></audio>
+    </div>`;
+  document.body.appendChild(overlay);
+  return overlay;
+}
+function callDisplayName(call) {
+  if (!call) return "Appel";
+  return same(call.callerId, profile?.id) ? call.calleeName : call.callerName;
+}
+function setCallUi(name, status, mode = "active") {
+  ensureCallOverlay();
+  $("callName").textContent = name || "Appel";
+  $("callState").textContent = status;
+  $("callOverlay").classList.remove("hidden");
+  $("callAccept").classList.toggle("hidden", mode !== "incoming");
+  $("callReject").classList.toggle("hidden", mode !== "incoming");
+  $("callMute").classList.toggle("hidden", mode === "incoming");
+  $("callHangup").classList.toggle("hidden", mode === "incoming");
+  $("callTimer").classList.toggle("hidden", mode !== "connected");
+}
+function hideCallUi() {
+  $("callOverlay")?.classList.add("hidden");
+  if ($("remoteCallAudio")) $("remoteCallAudio").srcObject = null;
+}
+function formatCallTime(seconds) {
+  const m = String(Math.floor(seconds / 60)).padStart(2, "0"),
+    sec = String(seconds % 60).padStart(2, "0");
+  return m + ":" + sec;
+}
+function startCallTimer() {
+  if (!activeCall) return;
+  activeCall.connectedAt ||= Date.now();
+  clearInterval(callStatusTimer);
+  callStatusTimer = setInterval(() => {
+    if (!activeCall?.connectedAt || !$("callTimer")) return;
+    $("callTimer").textContent = formatCallTime(
+      Math.floor((Date.now() - activeCall.connectedAt) / 1000),
+    );
+  }, 1000);
+}
+async function postIceCandidate(candidate) {
+  if (!candidate) return;
+  if (!activeCall?.id) {
+    pendingIceCandidates.push(candidate);
+    return;
+  }
+  await api("state/calls/" + encodeURIComponent(activeCall.id) + "/candidates", {
+    candidate: candidate.toJSON ? candidate.toJSON() : candidate,
+  }).catch(() => {});
+}
+async function flushIceCandidates() {
+  const queued = pendingIceCandidates.splice(0);
+  for (const candidate of queued) await postIceCandidate(candidate);
+}
+async function makePeer() {
+  if (!navigator.mediaDevices?.getUserMedia || !window.RTCPeerConnection)
+    throw new Error("Les appels audio ne sont pas disponibles sur cet appareil.");
+  const stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+      video: false,
+    }),
+    peer = new RTCPeerConnection({
+      iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+    });
+  for (const track of stream.getTracks()) peer.addTrack(track, stream);
+  peer.onicecandidate = (e) => {
+    if (e.candidate) postIceCandidate(e.candidate);
+  };
+  peer.ontrack = (e) => {
+    ensureCallOverlay();
+    const audio = $("remoteCallAudio");
+    audio.srcObject = e.streams[0];
+    audio.play().catch(() => {});
+  };
+  peer.onconnectionstatechange = () => {
+    if (!activeCall || activeCall.peer !== peer) return;
+    if (peer.connectionState === "connected") {
+      setCallUi(callDisplayName(activeCall), "En appel", "connected");
+      startCallTimer();
+    } else if (["failed", "closed"].includes(peer.connectionState)) {
+      finishCallLocal("Appel terminé.");
+    } else if (peer.connectionState === "disconnected") {
+      setCallUi(callDisplayName(activeCall), "Connexion interrompue…", "active");
+    }
+  };
+  return { peer, stream };
+}
+async function receiveRemoteCandidates() {
+  if (!activeCall?.id || !activeCall.peer) return;
+  const out = await api(
+    "state/calls/" +
+      encodeURIComponent(activeCall.id) +
+      "/candidates?after=" +
+      callCandidateCursor,
+  );
+  for (const row of out.candidates || []) {
+    callCandidateCursor = Math.max(callCandidateCursor, Number(row.id) || 0);
+    try {
+      await activeCall.peer.addIceCandidate(row.candidate);
+    } catch {}
+  }
+}
+function stopCallMedia() {
+  if (activeCall?.stream)
+    activeCall.stream.getTracks().forEach((track) => track.stop());
+  try {
+    activeCall?.peer?.close();
+  } catch {}
+  clearInterval(callStatusTimer);
+  callStatusTimer = null;
+}
+function finishCallLocal(message = "Appel terminé.") {
+  stopCallMedia();
+  const name = callDisplayName(activeCall || incomingCall);
+  activeCall = null;
+  incomingCall = null;
+  callCandidateCursor = 0;
+  pendingIceCandidates = [];
+  setCallUi(name, message, "ended");
+  if ($("callMute")) $("callMute").classList.add("hidden");
+  if ($("callHangup")) $("callHangup").classList.add("hidden");
+  setTimeout(() => {
+    if (!activeCall && !incomingCall) hideCallUi();
+  }, 1800);
+}
+async function endCurrentCall(send = true) {
+  const id = activeCall?.id || incomingCall?.id;
+  if (send && id)
+    await api("state/calls/" + encodeURIComponent(id) + "/end", {}).catch(() => {});
+  finishCallLocal();
+}
+async function startAudioCall(contactId) {
+  if (activeCall || incomingCall)
+    throw new Error("Un appel est déjà en cours.");
+  const contact = contacts.find((c) => same(c.id, contactId));
+  if (!contact) throw new Error("Contact introuvable.");
+  setCallUi(contact.name, "Préparation de l’appel…", "active");
+  const { peer, stream } = await makePeer();
+  activeCall = {
+    id: "",
+    callerId: profile.id,
+    calleeId: contact.id,
+    callerName: profile.name,
+    calleeName: contact.name,
+    peer,
+    stream,
+    answerApplied: false,
+  };
+  try {
+    const offer = await peer.createOffer({ offerToReceiveAudio: true });
+    await peer.setLocalDescription(offer);
+    const out = await api("state/calls/start", {
+      recipientId: contact.id,
+      offer: peer.localDescription,
+    });
+    activeCall.id = out.id;
+    callCandidateCursor = 0;
+    await flushIceCandidates();
+    setCallUi(contact.name, "Appel en cours…", "active");
+  } catch (e) {
+    finishCallLocal("Appel impossible.");
+    throw e;
+  }
+}
+async function acceptIncomingCall() {
+  if (!incomingCall) return;
+  const call = incomingCall;
+  setCallUi(call.callerName, "Connexion…", "active");
+  const { peer, stream } = await makePeer();
+  activeCall = { ...call, peer, stream, answerApplied: true };
+  incomingCall = null;
+  callCandidateCursor = 0;
+  try {
+    await peer.setRemoteDescription(call.offer);
+    const answer = await peer.createAnswer();
+    await peer.setLocalDescription(answer);
+    await api("state/calls/" + encodeURIComponent(call.id) + "/answer", {
+      answer: peer.localDescription,
+    });
+    await flushIceCandidates();
+    setCallUi(call.callerName, "Connexion…", "active");
+  } catch (e) {
+    await endCurrentCall(true);
+    throw e;
+  }
+}
+async function rejectIncomingCall() {
+  if (!incomingCall) return;
+  const id = incomingCall.id;
+  await api("state/calls/" + encodeURIComponent(id) + "/reject", {}).catch(() => {});
+  finishCallLocal("Appel refusé.");
+}
+async function pollCallState() {
+  if (!token) return;
+  if (activeCall?.id) {
+    try {
+      const out = await api("state/calls/" + encodeURIComponent(activeCall.id)),
+        call = out.call;
+      if (["ended", "rejected", "missed"].includes(call.status)) {
+        finishCallLocal(
+          call.status === "rejected"
+            ? "Appel refusé."
+            : call.status === "missed"
+              ? "Pas de réponse."
+              : "Appel terminé.",
+        );
+        return;
+      }
+      if (
+        same(call.callerId, profile.id) &&
+        call.status === "accepted" &&
+        call.answer &&
+        !activeCall.answerApplied
+      ) {
+        await activeCall.peer.setRemoteDescription(call.answer);
+        activeCall.answerApplied = true;
+        setCallUi(call.calleeName, "Connexion…", "active");
+      }
+      await receiveRemoteCandidates();
+    } catch (e) {
+      if (e.status === 404) finishCallLocal();
+    }
+    return;
+  }
+  if (incomingCall) {
+    try {
+      const out = await api("state/calls/" + encodeURIComponent(incomingCall.id));
+      if (out.call.status !== "ringing") finishCallLocal("Appel annulé.");
+    } catch {
+      finishCallLocal("Appel annulé.");
+    }
+    return;
+  }
+  try {
+    const out = await api("state/calls/pending"),
+      call = out.call;
+    if (
+      call &&
+      call.status === "ringing" &&
+      same(call.calleeId, profile.id)
+    ) {
+      incomingCall = call;
+      setCallUi(call.callerName, "Appel audio entrant", "incoming");
+    }
+  } catch {}
+}
 function messagesView() {
   const threads = state.messageThreads || [];
   if (!contacts.length && !threads.length)
@@ -929,7 +1203,7 @@ function messagesView() {
       <header class="chat-header">
         <button type="button" class="chat-back" data-action="chat-back" aria-label="Retour aux discussions">←</button>
         ${active.kind === "direct" ? chatAvatar(active.contact) : `<span class="chat-avatar chat-avatar-initial chat-group-avatar">${active.thread.type === "project" ? "🏗" : "👥"}</span>`}
-        <div class="chat-header-person"><strong>${esc(active.title)}</strong><span>${esc(active.subtitle)}</span></div>
+        <div class="chat-header-person"><strong>${esc(active.title)}</strong><span>${esc(active.subtitle)}</span></div>${active.kind === "direct" ? `<button type="button" class="chat-call-button" data-action="call-start" data-id="${esc(active.contact.id)}" aria-label="Appeler ${esc(active.title)}" title="Appel audio">📞</button>` : ""}
       </header>
       <div id="messageThread" class="messages chat-thread" role="log" aria-live="polite" aria-label="Messages avec ${esc(active.title)}">${bubbles}</div>
       <div id="chatReplyBar" class="chat-reply-bar ${chatReplyToId ? "" : "hidden"}">
@@ -2176,6 +2450,18 @@ document.addEventListener("click", async (e) => {
     } else if (a === "chat-back") {
       mobileChatOpen = false;
       render();
+    } else if (a === "call-start") await startAudioCall(id);
+    else if (a === "call-accept") await acceptIncomingCall();
+    else if (a === "call-reject") await rejectIncomingCall();
+    else if (a === "call-hangup") await endCurrentCall(true);
+    else if (a === "call-mute") {
+      if (!activeCall?.stream) return;
+      const tracks = activeCall.stream.getAudioTracks(),
+        muted = tracks.every((track) => !track.enabled);
+      tracks.forEach((track) => (track.enabled = muted));
+      b.classList.toggle("muted", !muted);
+      b.textContent = muted ? "🎙" : "🔇";
+      b.title = muted ? "Couper le micro" : "Réactiver le micro";
     } else if (a === "chat-new-group") threadForm("group");
     else if (a === "chat-new-project") threadForm("project");
     else if (a === "chat-open-project") {
@@ -2883,6 +3169,10 @@ if (token)
       clearSession();
       $("loginError").textContent = e.message;
     });
+setInterval(() => {
+  if (token && profile && document.visibilityState !== "hidden")
+    pollCallState();
+}, 2500);
 setInterval(() => {
   if (
     token &&
