@@ -675,3 +675,126 @@ test("employee salary period defaults to monthly and validates hourly amounts", 
   assert.throws(() => create({ salary: "" }), /Renseignez le salaire/);
   assert.throws(() => create({ salary: -1 }), /./);
 });
+
+test("employee profile edits preserve identity, scope and account linkage", () => {
+  const d = fixture();
+  Object.assign(d.employees[0], {
+    job: "Tech",
+    email: "before@test.invalid",
+    activity: 100,
+    entry: "2026-01-01",
+  });
+  const photo =
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=";
+  const r = command(d, admin, "employee.update", {
+    id: "e1",
+    name: "Updated",
+    email: "new@test.invalid",
+    street: "Rue 1",
+    city: "Nyon",
+    photo,
+    notes: "Private",
+    company: "moving",
+    companies: ["moving"],
+  }).result;
+  assert.equal(r.company, "home");
+  assert.equal(r.name, "Updated");
+  assert.equal(r.photo, photo);
+  assert.equal(r.companies, undefined);
+  assert.throws(
+    () => command(d, employee, "employee.update", { id: "e1", name: "Self" }),
+    /Accès RH/,
+  );
+  assert.throws(
+    () =>
+      command(d, { ...admin, role: "manager" }, "employee.update", {
+        id: "e1",
+      }),
+    /Accès RH/,
+  );
+  const view = D.viewState(d, { ...admin, role: "manager", company: "home" })
+    .employees[0];
+  assert.equal(view.street, undefined);
+  assert.equal(view.notes, undefined);
+  assert.throws(
+    () =>
+      command(d, admin, "employee.update", {
+        id: "e1",
+        photo: "https://tracking.invalid/photo.png",
+      }),
+    /Photo invalide/,
+  );
+  assert.throws(
+    () =>
+      command(d, admin, "employee.update", {
+        id: "e1",
+        photo: "data:image/png;base64,PHN2Zz4=",
+      }),
+    /Format/,
+  );
+  assert.equal(
+    command(d, admin, "employee.update", { id: "e1", photo: "" }).result.photo,
+    "",
+  );
+});
+
+test("employee equipment assignments validate scope, exclusivity, history and returns", () => {
+  let d = fixture();
+  d.employees[0].companies = ["home", "tech"];
+  d.employees.push({ id: "e2", company: "home", name: "Other" });
+  d.tools = [
+    { id: "t1", company: "home", name: "Drill", serial: "S1" },
+    { id: "t2", company: "home", employeeId: "e2" },
+    { id: "t3", company: "moving" },
+  ];
+  d.vehicles = [{ id: "v1", company: "tech", plate: "VD 123" }];
+  d = command(d, admin, "employee.assets", {
+    id: "e1",
+    tools: ["t1"],
+    vehicles: ["v1"],
+  }).data;
+  assert.equal(d.tools[0].employeeId, "e1");
+  assert.equal(d.vehicles[0].employeeId, "e1");
+  assert.equal(D.viewState(d, employee).vehicles.length, 1);
+  assert.equal(
+    D.viewState(d, employee).tools.some((t) => t.id === "t2"),
+    false,
+  );
+  assert.throws(
+    () =>
+      command(d, admin, "employee.assets", {
+        id: "e1",
+        tools: ["t2"],
+        vehicles: [],
+      }),
+    /déjà attribué/,
+  );
+  assert.throws(
+    () =>
+      command(d, admin, "employee.assets", {
+        id: "e1",
+        tools: ["t3"],
+        vehicles: [],
+      }),
+    /non autorisée/,
+  );
+  assert.throws(
+    () =>
+      command(d, admin, "employee.companies", {
+        id: "e1",
+        companies: ["home"],
+      }),
+    /Restituez/,
+  );
+  assert.throws(
+    () => command(d, admin, "employee.delete", { id: "e1" }),
+    /Restituez/,
+  );
+  d = command(d, admin, "employee.assets", {
+    id: "e1",
+    tools: [],
+    vehicles: [],
+  }).data;
+  assert.equal(d.tools[0].employeeId, "");
+  assert.equal(d.tools[0].assignmentHistory.length, 2);
+});

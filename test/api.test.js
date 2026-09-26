@@ -954,3 +954,68 @@ test("manager company memberships apply to login, writes and an already open ses
   );
   assert.equal(revoked.status, 403);
 });
+
+test("employee dossier updates persist without changing linked login email", async () => {
+  const create = await call(
+    "state/users",
+    admin,
+    payload(await rev(), {
+      payload: {
+        name: "Dossier",
+        email: "dossier@test.invalid",
+        password: "Dossier-Test-Password",
+        company: "home",
+        role: "employee",
+        isEmployee: "yes",
+        newEmployee: {
+          job: "Tech",
+          salary: 30,
+          salaryPeriod: "hourly",
+          activity: 100,
+          vacation: 20,
+          entry: "2026-01-01",
+        },
+      },
+    }),
+  );
+  assert.equal(create.status, 200);
+  const id = create.data.result.employeeId;
+  const photo =
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=";
+  const save = await call(
+    "state/command",
+    admin,
+    payload(await rev(), {
+      action: "employee.update",
+      payload: {
+        id,
+        email: "contact@test.invalid",
+        street: "Rue 1",
+        zip: "1260",
+        city: "Nyon",
+        photo,
+      },
+    }),
+  );
+  assert.equal(save.status, 200, JSON.stringify(save.data));
+  const e = (await call("state", admin)).data.data.employees.find(
+    (e) => e.id === id,
+  );
+  assert.equal(e.city, "Nyon");
+  assert.equal(e.photo, photo);
+  assert.equal(e.salaryPeriod, "hourly");
+  const login = await call("auth/login", null, {
+    email: "dossier@test.invalid",
+    password: "Dossier-Test-Password",
+  });
+  assert.equal(login.status, 200);
+  const denied = await call(
+    "state/command",
+    login.data.token,
+    payload(await rev(), {
+      action: "employee.update",
+      payload: { id, salary: 999 },
+    }),
+  );
+  assert.equal(denied.status, 403);
+});
