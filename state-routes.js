@@ -152,11 +152,7 @@ function routes(db) {
         )
       ).rows;
       res.json({
-        rows: rows.filter(
-          (x) =>
-            req.user.company === "group" ||
-            x.metadata?.company === req.user.company,
-        ),
+        rows: rows.filter((x) => D.inCompany(req.user, x.metadata?.company)),
       });
     }),
   );

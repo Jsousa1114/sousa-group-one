@@ -66,13 +66,15 @@ const employeeCompanies = (e) =>
     ...new Set([e.company, ...(Array.isArray(e.companies) ? e.companies : [])]),
   ].filter((c) => c && c !== "group");
 const inCompany = (u, c) =>
-  u.role === "employee"
+  u.role === "employee" || (u.employee_id && u.company !== "group")
     ? (u.companies || [u.company]).includes(c) && c !== "group"
     : u.company === "group" || u.company === c;
 function effectiveUser(data, u) {
-  if (u.role !== "employee") return u;
+  if (u.role === "client" || (!u.employee_id && u.role !== "employee"))
+    return u;
   const e = data.employees?.find((e) => same(e.id, u.employee_id));
   if (!e || e.deletedAt) fail("Compte salarié désactivé.", 401);
+  if (u.company === "group" && u.role !== "employee") return u;
   return { ...u, company: e.company, companies: employeeCompanies(e) };
 }
 const employeeInCompany = (e, c) =>
@@ -349,7 +351,7 @@ function viewState(data, u) {
   return v;
 }
 function canContact(u, v, data) {
-  if (data && v.role === "employee") {
+  if (data && (v.employee_id || v.role === "employee")) {
     const e = data.employees?.find((e) => same(e.id, v.employee_id));
     if (!e || e.deletedAt) return false;
     v = effectiveUser(data, v);
@@ -358,11 +360,11 @@ function canContact(u, v, data) {
     !v.disabled &&
     ((!["client", "employee"].includes(u.role) &&
       (inCompany(u, v.company) ||
-        (v.role === "employee" &&
-          (v.companies || []).some((c) => inCompany(u, c))))) ||
+        (v.companies || []).some((c) => inCompany(u, c)))) ||
       (["client", "employee"].includes(u.role) &&
         privileged(v, [...STAFF, "manager"]) &&
-        (v.company === "group" || inCompany(u, v.company))))
+        (v.company === "group" ||
+          (v.companies || [v.company]).some((c) => inCompany(u, c)))))
   );
 }
 function weekdays(start, end) {

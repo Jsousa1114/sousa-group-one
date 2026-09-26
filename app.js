@@ -276,6 +276,7 @@ $("companyFilter").onchange = (e) => {
 };
 function render() {
   if (!state || !profile) return;
+  if (company && !state.companies.some((c) => c.id === company)) company = "";
   const activeCompanyId = company || profile.company;
   document.body.dataset.brand = SousaFinance.companyBrand(
     activeCompanyId,
@@ -1436,7 +1437,7 @@ function userForm(link) {
   );
   $("f_employeeId").insertAdjacentHTML(
     "afterend",
-    `<fieldset id="accountCompanies"><legend>Entreprises du salarié</legend><p>Cocher toutes ses entreprises. Avec le rôle Salarié, il accède aux chantiers qui lui sont affectés dans ces entreprises. Pour les autres rôles, les droits restent limités au périmètre du compte choisi au-dessus.</p>${state.companies
+    `<fieldset id="accountCompanies"><legend>Entreprises du salarié</legend><p>Cochez les entreprises autorisées. Le rôle définit les fonctions disponibles dans chacune d’elles. Avec le rôle Salarié, seuls les chantiers affectés sont accessibles. Un accès Groupe conserve son périmètre global.</p>${state.companies
       .filter((c) => c.id !== "group")
       .map(
         (c) =>
@@ -1848,7 +1849,8 @@ document.addEventListener("click", async (e) => {
       $("f_password").required = false;
       $("f_password").labels[0].textContent =
         "Nouveau mot de passe (facultatif, 12 caractères minimum)";
-      $("f_password").placeholder = "Laisser vide pour conserver le mot de passe";
+      $("f_password").placeholder =
+        "Laisser vide pour conserver le mot de passe";
       $("f_name").value = u.name;
       $("f_email").value = u.email;
       $("f_company").value = u.company;
