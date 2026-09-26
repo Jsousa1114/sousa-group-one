@@ -968,6 +968,8 @@ test("employee dossier edits profile and assigns tools from the same screen", as
     await flush();
     await flush();
     click(h, '[data-action="employee-edit"]');
+    fill(h, "nationality", "Portugaise");
+    fill(h, "residencePermit", "C");
     fill(h, "city", "Nyon");
     fill(h, "street", "Rue 1");
     fill(h, "phone", "+41 00 000 00 00");
@@ -980,6 +982,24 @@ test("employee dossier edits profile and assigns tools from the same screen", as
       h.w.document.getElementById("modalBody").textContent,
       /Rue 1, Nyon/,
     );
+    assert.match(
+      h.w.document.getElementById("modalBody").textContent,
+      /Portugaise/,
+    );
+    click(h, '[data-action="employee-document"]');
+    assert.equal(h.w.document.querySelector('[name="employeeId"]').value, "e1");
+    assert.equal(
+      h.w.document.querySelector('[name="category"]').value,
+      "identity",
+    );
+    assert.match(
+      h.w.document.querySelector('[name="documentType"]').textContent,
+      /Permis de séjour/,
+    );
+    click(h, '[data-action="close-modal"]');
+    click(h, '[data-action="employee-detail"]');
+    await flush();
+    await flush();
     click(h, '[data-action="employee-assets"]');
     h.w.document.querySelector('[name="tools"]').checked = true;
     h.w.document.querySelector('[name="vehicles"]').checked = true;

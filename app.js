@@ -865,6 +865,13 @@ const employeeContactFields = [
   ["city", "Ville", "text?"],
   ["country", "Pays", "text?"],
   ["birthDate", "Date de naissance", "date?"],
+  ["nationality", "Nationalité(s)", "text?"],
+  [
+    "residencePermit",
+    "Permis de séjour (B, C, L, G, etc. ou non applicable)",
+    "text?",
+  ],
+  ["residencePermitExpiry", "Expiration du permis de séjour", "date?"],
   ["emergencyName", "Contact d’urgence", "text?"],
   ["emergencyPhone", "Téléphone d’urgence", "tel?"],
   ["contractType", "Type de contrat", "text?"],
@@ -1384,7 +1391,12 @@ async function employeeDetail(id) {
   const projects = state.projects.filter((p) =>
     (p.team || []).some((eid) => same(eid, id)),
   );
-  const docs = state.documents.filter((d) => same(d.employeeId, id));
+  const docs = state.documents.filter(
+    (d) => same(d.employeeId, id) && d.category !== "identity",
+  );
+  const identityDocs = state.documents.filter(
+    (d) => same(d.employeeId, id) && d.category === "identity",
+  );
   const privateInfo = can(hr) || same(profile.employee_id, id);
   modal(
     "Fiche salarié et compte",
@@ -1395,8 +1407,21 @@ async function employeeDetail(id) {
     <div class="employee-summary"><article><strong>${assignedTools.length}</strong><span>Outils attribués</span></article><article><strong>${assignedVehicles.length}</strong><span>Véhicules attribués</span></article><article><strong>${times.reduce((sum, t) => sum + Number(t.hours || 0), 0).toFixed(2)} h</strong><span>Heures enregistrées visibles</span></article><article><strong>${projects.length}</strong><span>Chantiers affectés visibles</span></article></div>
     ${
       privateInfo
-        ? `<details open><summary>Coordonnées et informations personnelles</summary><dl class="employee-info"><dt>E-mail de contact</dt><dd>${esc(e.email || "—")}</dd><dt>Téléphone</dt><dd>${esc(e.phone || "—")}</dd><dt>Adresse</dt><dd>${esc([e.street, e.zip, e.city, e.country].filter(Boolean).join(", ") || "Non renseignée")}</dd><dt>Date de naissance</dt><dd>${e.birthDate ? date(e.birthDate) : "—"}</dd><dt>Contact d’urgence</dt><dd>${esc([e.emergencyName, e.emergencyPhone].filter(Boolean).join(" · ") || "—")}</dd></dl></details>
+        ? `<details open><summary>Coordonnées et informations personnelles</summary><dl class="employee-info"><dt>E-mail de contact</dt><dd>${esc(e.email || "—")}</dd><dt>Téléphone</dt><dd>${esc(e.phone || "—")}</dd><dt>Adresse</dt><dd>${esc([e.street, e.zip, e.city, e.country].filter(Boolean).join(", ") || "Non renseignée")}</dd><dt>Date de naissance</dt><dd>${e.birthDate ? date(e.birthDate) : "—"}</dd><dt>Nationalité(s)</dt><dd>${esc(e.nationality || "Non renseignée")}</dd><dt>Permis de séjour</dt><dd>${esc(e.residencePermit || "Non renseigné")}</dd><dt>Expiration du permis</dt><dd>${e.residencePermitExpiry ? date(e.residencePermitExpiry) : "—"}</dd><dt>Contact d’urgence</dt><dd>${esc([e.emergencyName, e.emergencyPhone].filter(Boolean).join(" · ") || "—")}</dd></dl></details>
     <details><summary>Contrat et rémunération</summary><p>${e.salaryPeriod === "hourly" ? "Salaire horaire" : "Salaire mensuel"} : ${money(e.salary)}${e.salaryPeriod === "hourly" ? " / heure" : " / mois"}</p><p>Activité : ${esc(e.activity ?? "—")} % · Vacances : ${esc(e.vacation ?? "—")} jours</p><p>Contrat : ${esc(e.contractType || "Non renseigné")} · Entrée : ${e.entry ? date(e.entry) : "—"} · Fin : ${e.endDate ? date(e.endDate) : "—"}</p>${can(hr) && e.notes ? `<p class="employee-notes">${esc(e.notes)}</p>` : ""}</details>`
+        : ""
+    }
+    ${
+      can(hr)
+        ? `<details open><summary>Documents d’identité et justificatifs</summary><p>Documents confidentiels réservés aux personnes disposant d’un accès RH.</p>${btn("Ajouter un justificatif", "employee-document", id)}${table(
+            ["Type", "Fichier / description", "Ajouté le", ""],
+            identityDocs.map((d) => [
+              esc(d.documentType),
+              esc(d.name) + (d.description ? `<br>${esc(d.description)}` : ""),
+              date(d.createdAt.slice(0, 10)),
+              btn("Télécharger", "download", d.id),
+            ]),
+          )}</details>`
         : ""
     }
     <details open><summary>Outils et véhicules</summary>${can(hr) ? btn("Gérer les attributions", "employee-assets", id) : ""}<h4>Outils</h4>${table(
@@ -1451,6 +1476,15 @@ async function employeeDetail(id) {
       docs.map((d) => [esc(d.name), btn("Télécharger", "download", d.id)]),
     )}</details>
     ${accountHtml ? `<details><summary>Compte de connexion</summary>${accountHtml}</details>` : ""}`,
+  );
+}
+function employeeDocument(id) {
+  const e = find("employees", id);
+  formShell(
+    [],
+    "document",
+    `<input type="hidden" name="employeeId" value="${esc(id)}"><input type="hidden" name="company" value="${esc(e.company)}"><input type="hidden" name="category" value="identity"><label>Type de document<select name="documentType">${["Carte d’identité", "Passeport", "Permis de conduire", "Permis de séjour", "Autre justificatif"].map((t) => `<option>${esc(t)}</option>`).join("")}</select></label><label>Description (facultative)<input name="description" maxlength="200" placeholder="Par exemple : recto ou verso"></label><label>Photo ou fichier<input type="file" name="file" accept="application/pdf,image/jpeg,image/png,image/webp" required></label><p>JPG, PNG, WebP ou PDF, 5 Mo maximum par fichier. Ajoutez le recto et le verso séparément. Accès réservé aux RH.</p>`,
+    "Ajouter un justificatif — " + e.name,
   );
 }
 function employeeEdit(id) {
@@ -1988,6 +2022,7 @@ document.addEventListener("click", async (e) => {
     else if (a === "export") exportData(id);
     else if (a === "employee-detail") await employeeDetail(id);
     else if (a === "employee-edit") employeeEdit(id);
+    else if (a === "employee-document") employeeDocument(id);
     else if (a === "employee-assets") employeeAssets(id);
     else if (a === "user-form") userForm();
     else if (a === "time-add") manualTimeForm();
@@ -2138,13 +2173,16 @@ document.addEventListener("submit", async (e) => {
         r.readAsDataURL(file);
       });
       delete p.file;
-      return await mutate(
+      const result = await mutate(
         "document",
         { ...p, name: file.name, mime: file.type, content },
         null,
         "state/documents",
         f,
       );
+      if (result && p.category === "identity")
+        await employeeDetail(p.employeeId);
+      return;
     }
     if (k === "user" && p.isEmployee === "yes")
       p.employeeCompanies = data.getAll("employeeCompanies");

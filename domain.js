@@ -87,12 +87,17 @@ function employeeProfile(p) {
     "zip",
     "city",
     "country",
+    "nationality",
+    "residencePermit",
     "emergencyName",
     "emergencyPhone",
     "contractType",
     "notes",
   ])
     out[key] = text(p[key], key, key === "notes" ? 2000 : 200, true);
+  out.residencePermitExpiry = p.residencePermitExpiry
+    ? iso(p.residencePermitExpiry)
+    : "";
   out.birthDate = p.birthDate ? iso(p.birthDate) : "";
   out.endDate = p.endDate ? iso(p.endDate) : "";
   if (out.endDate && p.entry && out.endDate < p.entry)
@@ -266,6 +271,16 @@ function canFinance(d, u, r) {
   );
 }
 function canDocument(d, u, r) {
+  u = effectiveUser(d, u);
+  if (r.category === "identity") {
+    const e = d.employees.find((e) => same(e.id, r.employeeId));
+    return (
+      !!e &&
+      !e.deletedAt &&
+      privileged(u, HR) &&
+      employeeCompanies(e).some((c) => inCompany(u, c))
+    );
+  }
   if (u.role === "client" && r.visibility !== "client") return false;
   if (r.project)
     return canProject(
@@ -312,6 +327,9 @@ function viewState(data, u) {
                   "city",
                   "country",
                   "birthDate",
+                  "nationality",
+                  "residencePermit",
+                  "residencePermitExpiry",
                   "emergencyName",
                   "emergencyPhone",
                   "notes",

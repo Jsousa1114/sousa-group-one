@@ -258,6 +258,71 @@ test("message delivery isolates recipients and escapes via UI boundary", async (
   assert.equal((await call("state", client)).data.data.messages.length, 1);
   assert.equal((await call("state", employee)).data.data.messages.length, 0);
 });
+test("identity photos persist and cannot be read or uploaded by employees or clients", async () => {
+  const photo =
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=";
+  const doc = {
+    company: "home",
+    employeeId: "e1",
+    category: "identity",
+    documentType: "Carte d’identité",
+    description: "Recto",
+    name: "identity.png",
+    mime: "image/png",
+    content: photo,
+  };
+  const saved = await call(
+    "state/documents",
+    admin,
+    payload(await rev(), { payload: doc }),
+  );
+  assert.equal(saved.status, 200);
+  const id = saved.data.result.id;
+  const response = await fetch(url + "/api/state/documents/" + id, {
+    headers: { Authorization: "Bearer " + admin },
+  });
+  assert.equal(response.status, 200);
+  assert.deepEqual(
+    Buffer.from(await response.arrayBuffer()),
+    Buffer.from(photo, "base64"),
+  );
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  assert.equal((await call("state/documents/" + id, employee)).status, 403);
+  assert.equal((await call("state/documents/" + id, client)).status, 403);
+  assert.equal(
+    (
+      await call(
+        "state/documents",
+        employee,
+        payload(await rev(), { payload: doc }),
+      )
+    ).status,
+    403,
+  );
+  assert.equal(
+    (
+      await call(
+        "state/documents",
+        admin,
+        payload(await rev(), {
+          payload: { ...doc, content: Buffer.from("fake").toString("base64") },
+        }),
+      )
+    ).status,
+    400,
+  );
+  assert.equal(
+    (
+      await call(
+        "state/documents",
+        admin,
+        payload(await rev(), { payload: { ...doc, visibility: "client" } }),
+      )
+    ).status,
+    400,
+  );
+});
+
 test("document upload and download authorization", async () => {
   const r = await call(
     "state/documents",
