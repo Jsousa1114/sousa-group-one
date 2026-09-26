@@ -422,7 +422,7 @@ function routes(db) {
     wrap(async (req, res) => {
       const direct = (
           await db.query(
-            `SELECT id,caller_id,callee_id,caller_name,callee_name,status,created_at,ended_at
+            `SELECT id,caller_id,callee_id,caller_name,callee_name,status,call_type,created_at,ended_at
              FROM rtc_calls
              WHERE caller_id=$1 OR callee_id=$1
              ORDER BY created_at DESC LIMIT 150`,
@@ -447,6 +447,7 @@ function routes(db) {
           callerName: x.caller_name,
           calleeName: x.callee_name,
           status: x.status,
+          callType: x.call_type || "audio",
           createdAt: x.created_at,
           endedAt: x.ended_at,
         })),
@@ -718,10 +719,26 @@ async function notifyUsers(db, userIds, payload) {
     process.env.VAPID_PUBLIC_KEY,
     process.env.VAPID_PRIVATE_KEY,
   );
+  let allowedUserIds = userIds.map(Number);
+  if (payload?.conversationKey) {
+    const muted = (
+      await db.query(
+        `SELECT user_id FROM conversation_prefs
+         WHERE user_id=ANY($1::int[])
+           AND conversation_key=$2
+           AND muted_until IS NOT NULL
+           AND muted_until > NOW()`,
+        [allowedUserIds, payload.conversationKey],
+      )
+    ).rows.map((x) => Number(x.user_id));
+    const mutedSet = new Set(muted);
+    allowedUserIds = allowedUserIds.filter((id) => !mutedSet.has(id));
+  }
+  if (!allowedUserIds.length) return { sent: 0 };
   const rows = (
     await db.query(
       "SELECT id,user_id,endpoint,p256dh,auth FROM push_subscriptions WHERE user_id=ANY($1::int[])",
-      [userIds.map(Number)],
+      [allowedUserIds],
     )
   ).rows;
   let sent = 0;
@@ -768,6 +785,30 @@ async function cleanupRetention(db) {
     "DELETE FROM rtc_group_rooms WHERE ended_at IS NOT NULL AND ended_at < NOW() - ($1::text || ' days')::interval",
     [String(callDays)],
   );
+  const messageDays = Math.max(1, policies.messages || 3650),
+    row = (await db.query("SELECT data,revision FROM app_state WHERE id=1")).rows[0],
+    data = D.normalize(row.data),
+    cutoff = Date.now() - messageDays * 86400000,
+    expired = data.messages.filter(
+      (m) => m.createdAt && new Date(m.createdAt).getTime() < cutoff,
+    );
+  if (expired.length) {
+    const fileIds = expired
+      .map((m) => m.attachment?.fileId)
+      .filter(Boolean);
+    data.messages = data.messages.filter((m) => !expired.includes(m));
+    await db.query(
+      "UPDATE app_state SET data=$1,revision=revision+1,updated_at=NOW(),updated_by='retention-policy' WHERE id=1",
+      [JSON.stringify(data)],
+    );
+    if (fileIds.length)
+      await db.query("DELETE FROM file_contents WHERE id=ANY($1::text[])", [fileIds]);
+    const ids = expired.map((m) => String(m.id));
+    await db.query("DELETE FROM message_reads WHERE message_id=ANY($1::text[])", [ids]);
+    await db.query("DELETE FROM message_reactions WHERE message_id=ANY($1::text[])", [ids]);
+    await db.query("DELETE FROM message_favorites WHERE message_id=ANY($1::text[])", [ids]);
+    await db.query("DELETE FROM message_overrides WHERE message_id=ANY($1::text[])", [ids]);
+  }
 }
 
 module.exports = { routes, notifyUsers, cleanupRetention };
