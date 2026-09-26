@@ -174,55 +174,224 @@ function routes(db) {
         "La sauvegarde complète est désactivée. Utilisez une opération métier.",
     }),
   );
+  async function ensureProjectThread(c, d, project, actor) {
+    if (!project) return null;
+    const team = (project.team || []).map(String),
+      users = (
+        await c.query(
+          `SELECT id,employee_id,client_id FROM users
+           WHERE deleted_at IS NULL AND disabled=false
+             AND (
+               ($1::text[] <> '{}'::text[] AND employee_id=ANY($1::text[]))
+               OR client_id=$2
+               OR id=$3
+             )`,
+          [team, String(project.clientId || ""), actor.id],
+        )
+      ).rows,
+      participantIds = [
+        ...new Set(users.map((u) => String(u.id))),
+      ];
+    if (!participantIds.some((id) => D.same(id, actor.id)))
+      participantIds.push(String(actor.id));
+    let thread = d.messageThreads.find(
+      (t) => t.type === "project" && D.same(t.projectId, project.id),
+    );
+    if (!thread) {
+      thread = {
+        id: randomUUID(),
+        type: "project",
+        name: project.title || "Discussion chantier",
+        participants: participantIds,
+        projectId: String(project.id),
+        createdBy: actor.id,
+        createdAt: new Date().toISOString(),
+      };
+      d.messageThreads.push(thread);
+    } else {
+      thread.name = project.title || thread.name;
+      thread.participants = participantIds;
+    }
+    return thread;
+  }
+  async function addProjectSystemMessage(c, d, project, actor, text) {
+    if (!project || !text) return null;
+    const thread = await ensureProjectThread(c, d, project, actor);
+    if (!thread) return null;
+    const message = {
+      id: randomUUID(),
+      senderId: actor.id,
+      recipientId: null,
+      threadId: thread.id,
+      sender: "Sousa Group One",
+      text,
+      system: true,
+      readBy: [String(actor.id)],
+      createdAt: new Date().toISOString(),
+    };
+    d.messages.push(message);
+    return {
+      messageId: message.id,
+      threadId: thread.id,
+      participants: (thread.participants || [])
+        .map(Number)
+        .filter((id) => !D.same(id, actor.id)),
+      projectTitle: project.title || project.id,
+    };
+  }
+  function commandProjectAndText(d, action, result, payload) {
+    let project = null,
+      text = "";
+    if (action === "create" && reqSafeCollection(payload) === "projects") {
+      project = d.projects.find((p) => D.same(p.id, result?.id));
+      text = project ? "🏗 Chantier créé : " + project.title : "";
+    } else if (action === "project.update") {
+      project = d.projects.find((p) => D.same(p.id, result?.id));
+      text = project
+        ? "📌 Chantier mis à jour · " +
+          project.status +
+          " · " +
+          Number(project.progress || 0) +
+          " %"
+        : "";
+    } else if (action === "project.finish") {
+      project = d.projects.find((p) => D.same(p.id, result?.id || payload?.id));
+      text = project
+        ? "✅ Chantier terminé · brouillon de facturation préparé"
+        : "";
+    } else if (action === "quote.project") {
+      project = d.projects.find((p) => D.same(p.id, result?.id));
+      text = project ? "🏗 Chantier créé depuis un devis accepté" : "";
+    } else if (
+      ["quote.accept", "quote.decide", "quote.issue", "quote.convert"].includes(action)
+    ) {
+      const doc =
+        d.quotes.find((q) => D.same(q.id, result?.id)) ||
+        d.invoices.find((i) => D.same(i.id, result?.id));
+      project = doc?.project
+        ? d.projects.find((p) => D.same(p.id, doc.project))
+        : null;
+      text =
+        action === "quote.accept" ||
+        (action === "quote.decide" && result?.status === "Accepté")
+          ? "✅ Devis accepté : " + (doc?.id || "")
+          : action === "quote.issue"
+            ? "📄 Devis émis : " + (doc?.id || "")
+            : action === "quote.convert"
+              ? "🧾 Facture créée depuis le devis"
+              : "";
+    } else if (action === "invoice.issue") {
+      const invoice = d.invoices.find((i) => D.same(i.id, result?.id));
+      project = invoice?.project
+        ? d.projects.find((p) => D.same(p.id, invoice.project))
+        : null;
+      text = invoice ? "🧾 Facture émise : " + invoice.id : "";
+    } else if (
+      action === "create" &&
+      reqSafeCollection(payload) === "planning"
+    ) {
+      project = d.projects.find((p) => D.same(p.id, result?.project));
+      const employee = d.employees.find((e) => D.same(e.id, result?.employeeId));
+      text = project
+        ? "📅 Planning · " +
+          (employee?.name || "Salarié") +
+          " · " +
+          (result?.date || "")
+        : "";
+    }
+    return { project, text };
+  }
+  function reqSafeCollection(payload) {
+    return payload?.__collection || "";
+  }
   r.post(
     "/command",
-    wrap(async (req, res) =>
-      res.json(
-        await mutate(db, req.user, req.body, async (c, d) => {
-          const { data, result } = D.applyCommand(d, req.user, req.body);
-          if (req.body.action === "employee.delete") {
-            if (D.same(req.user.employee_id, result.id))
-              D.fail("Vous ne pouvez pas supprimer votre propre fiche.");
-            const protectedAccounts = await c.query(
-              "SELECT id FROM users WHERE employee_id=$1 AND role='admin' AND disabled=false",
-              [String(result.id)],
+    wrap(async (req, res) => {
+      let systemPush = null;
+      const bodyForSystem = {
+        ...(req.body || {}),
+        payload: {
+          ...(req.body?.payload || {}),
+          __collection: req.body?.collection || "",
+        },
+      };
+      const out = await mutate(db, req.user, req.body, async (c, d) => {
+        const { data, result } = D.applyCommand(d, req.user, req.body);
+        if (req.body.action === "employee.delete") {
+          if (D.same(req.user.employee_id, result.id))
+            D.fail("Vous ne pouvez pas supprimer votre propre fiche.");
+          const protectedAccounts = await c.query(
+            "SELECT id FROM users WHERE employee_id=$1 AND role='admin' AND disabled=false",
+            [String(result.id)],
+          );
+          if (protectedAccounts.rows.length)
+            D.fail("Retirez d’abord le rôle administrateur du compte lié.");
+          await c.query(
+            "UPDATE users SET disabled=true,session_version=session_version+1 WHERE employee_id=$1",
+            [String(result.id)],
+          );
+        }
+        if (req.body.action === "client.delete") {
+          const accounts = await c.query(
+            "SELECT id FROM users WHERE client_id=$1 AND deleted_at IS NULL",
+            [String(result.id)],
+          );
+          if (accounts.rows.length)
+            D.fail(
+              "Ce client possède un compte de connexion lié. Supprimez ou dissociez ce compte avant de supprimer le client.",
             );
-            if (protectedAccounts.rows.length)
-              D.fail("Retirez d’abord le rôle administrateur du compte lié.");
-            await c.query(
-              "UPDATE users SET disabled=true,session_version=session_version+1 WHERE employee_id=$1",
-              [String(result.id)],
-            );
-          }
-          if (req.body.action === "client.delete") {
+        }
+        if (req.body.action === "record.delete") {
+          if (req.body.payload?.kind === "companies") {
             const accounts = await c.query(
-              "SELECT id FROM users WHERE client_id=$1 AND deleted_at IS NULL",
+              "SELECT id FROM users WHERE company=$1 AND deleted_at IS NULL",
               [String(result.id)],
             );
             if (accounts.rows.length)
-              D.fail(
-                "Ce client possède un compte de connexion lié. Supprimez ou dissociez ce compte avant de supprimer le client.",
-              );
+              D.fail("Cette entreprise possède encore des comptes liés.");
           }
-          if (req.body.action === "record.delete") {
-            if (req.body.payload?.kind === "companies") {
-              const accounts = await c.query(
-                "SELECT id FROM users WHERE company=$1 AND deleted_at IS NULL",
-                [String(result.id)],
-              );
-              if (accounts.rows.length)
-                D.fail("Cette entreprise possède encore des comptes liés.");
-            }
-            if (req.body.payload?.kind === "documents")
-              await c.query("DELETE FROM file_contents WHERE id=$1", [
-                String(result.id),
-              ]);
-          }
-          Object.assign(d, data);
-          return result;
-        }),
-      ),
-    ),
+          if (req.body.payload?.kind === "documents")
+            await c.query("DELETE FROM file_contents WHERE id=$1", [
+              String(result.id),
+            ]);
+        }
+        Object.assign(d, data);
+        const event = commandProjectAndText(
+          d,
+          req.body.action,
+          result,
+          bodyForSystem.payload,
+        );
+        if (event.project && event.text)
+          systemPush = await addProjectSystemMessage(
+            c,
+            d,
+            event.project,
+            req.user,
+            event.text,
+          );
+        else if (
+          req.body.action === "project.update" ||
+          (req.body.action === "create" && req.body.collection === "projects")
+        ) {
+          const project =
+            d.projects.find((p) => D.same(p.id, result?.id)) || null;
+          if (project) await ensureProjectThread(c, d, project, req.user);
+        }
+        return result;
+      });
+      if (systemPush?.participants?.length)
+        await notifyUsers(db, systemPush.participants, {
+          title: systemPush.projectTitle,
+          body: "Nouvelle activité sur le chantier",
+          url:
+            "/?open=messages&conversation=" +
+            encodeURIComponent("thread:" + systemPush.threadId),
+          tag: "project-" + systemPush.messageId,
+          conversationKey: "thread:" + systemPush.threadId,
+        }).catch(() => {});
+      res.json(out);
+    }),
   );
   r.get(
     "/audit",
