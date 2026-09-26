@@ -26,6 +26,10 @@ function createApp(db = pool) {
   });
   app.use("/api/auth", require("./auth-routes").routes(db));
   app.use("/api/state", require("./state-routes").routes(db));
+  app.get(["/favicon.ico", "/icon.svg"], (req, res) => {
+    res.set("Cache-Control", "no-cache");
+    res.redirect(302, "/assets/logos/group.png?v=group-20260926");
+  });
   for (const file of [
     "index.html",
     "app.js",
@@ -33,7 +37,6 @@ function createApp(db = pool) {
     "styles.css",
     "manifest.webmanifest",
     "service-worker.js",
-    "icon.svg",
     ...[
       "group",
       "home",
