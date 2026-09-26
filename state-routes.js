@@ -6,6 +6,7 @@ const { auth, profile } = require("./auth-middleware"),
   { wrap } = require("./auth-routes"),
   { mutate } = require("./db");
 const D = require("./domain");
+const { notifyUsers } = require("./messaging-routes");
 function routes(db) {
   const r = express.Router();
   r.use(auth(db));
@@ -672,111 +673,233 @@ function routes(db) {
   );
   r.post(
     "/messages",
-    wrap(async (req, res) =>
-      res.json(
-        await mutate(
-          db,
-          req.user,
-          { ...req.body, action: "Message envoyé" },
-          async (c, d) => {
-            const p = req.body.payload || {},
-              text = D.text(p.text, "Message", 5000, true);
-            let recipient = null,
-              thread = null;
-            if (p.threadId) {
-              thread = d.messageThreads.find((t) => D.same(t.id, p.threadId));
-              if (
-                !thread ||
-                !(thread.participants || []).some((id) =>
-                  D.same(id, req.user.id),
-                )
+    wrap(async (req, res) => {
+      let notificationTargets = [],
+        notificationConversation = "",
+        notificationPreview = "Nouveau message";
+      const out = await mutate(
+        db,
+        req.user,
+        { ...req.body, action: "Message envoyé" },
+        async (c, d) => {
+          const p = req.body.payload || {},
+            text = D.text(p.text, "Message", 5000, true);
+          let recipient = null,
+            thread = null,
+            participants = [];
+          if (p.threadId) {
+            thread = d.messageThreads.find((t) => D.same(t.id, p.threadId));
+            if (
+              !thread ||
+              !(thread.participants || []).some((id) =>
+                D.same(id, req.user.id),
               )
-                D.fail("Conversation non autorisée.", 403);
-            } else {
-              recipient = (
-                await c.query(
-                  "SELECT * FROM users WHERE id=$1 AND deleted_at IS NULL AND disabled=false",
-                  [p.recipientId],
-                )
-              ).rows[0];
-              if (!recipient || !D.canContact(req.user, recipient, d))
-                D.fail("Destinataire non autorisé.", 403);
-            }
-            let replyToId = "";
-            if (p.replyToId) {
-              const replied = d.messages.find((m) => D.same(m.id, p.replyToId));
-              if (!replied) D.fail("Message cité introuvable.");
-              const visibleReply = D.viewState(d, req.user).messages.some((m) =>
-                D.same(m.id, replied.id),
-              );
-              if (!visibleReply) D.fail("Message cité non autorisé.", 403);
-              const sameConversation = thread
-                ? D.same(replied.threadId, thread.id)
-                : !replied.threadId &&
-                  ((D.same(replied.senderId, req.user.id) &&
-                    D.same(replied.recipientId, recipient.id)) ||
-                    (D.same(replied.senderId, recipient.id) &&
-                      D.same(replied.recipientId, req.user.id)));
-              if (!sameConversation)
-                D.fail("Le message cité appartient à une autre conversation.", 403);
-              replyToId = replied.id;
-            }
-            let attachment = null;
-            if (p.attachment) {
-              const raw = p.attachment,
-                name = D.text(raw.name, "Nom du fichier", 200),
-                mime = D.text(raw.mime, "Type de fichier", 120),
-                allowed =
-                  /^image\/(jpeg|png|webp|gif)$/.test(mime) ||
-                  /^audio\/(webm|ogg|mpeg|mp4|wav|x-m4a)$/.test(mime) ||
-                  mime === "application/pdf" ||
-                  mime === "text/plain";
-              if (!allowed) D.fail("Type de pièce jointe non autorisé.");
-              if (
-                typeof raw.content !== "string" ||
-                !/^[A-Za-z0-9+/]+={0,2}$/.test(raw.content)
-              )
-                D.fail("Pièce jointe invalide.");
-              const content = Buffer.from(raw.content, "base64");
-              if (!content.length || content.length > 5 * 1024 * 1024)
-                D.fail("Pièce jointe de 5 Mo maximum.");
-              const fileId = randomUUID();
+            )
+              D.fail("Conversation non autorisée.", 403);
+            participants = (
               await c.query(
-                "INSERT INTO file_contents(id,content) VALUES($1,$2)",
-                [fileId, content],
-              );
-              attachment = {
-                fileId,
-                name,
-                mime,
-                size: content.length,
-                kind: mime.startsWith("image/")
-                  ? "image"
-                  : mime.startsWith("audio/")
-                    ? "audio"
-                    : "file",
-              };
+                "SELECT * FROM users WHERE id=ANY($1::int[]) AND deleted_at IS NULL AND disabled=false",
+                [(thread.participants || []).map(Number)],
+              )
+            ).rows;
+            notificationTargets = participants
+              .filter((u) => !D.same(u.id, req.user.id))
+              .map((u) => Number(u.id));
+            notificationConversation = "thread:" + thread.id;
+          } else {
+            recipient = (
+              await c.query(
+                "SELECT * FROM users WHERE id=$1 AND deleted_at IS NULL AND disabled=false",
+                [p.recipientId],
+              )
+            ).rows[0];
+            if (!recipient || !D.canContact(req.user, recipient, d))
+              D.fail("Destinataire non autorisé.", 403);
+            participants = [req.user, recipient];
+            notificationTargets = [Number(recipient.id)];
+            notificationConversation = "direct:" + recipient.id;
+          }
+
+          let replyToId = "";
+          if (p.replyToId) {
+            const replied = d.messages.find((m) => D.same(m.id, p.replyToId));
+            if (!replied) D.fail("Message cité introuvable.");
+            const visibleReply = D.viewState(d, req.user).messages.some((m) =>
+              D.same(m.id, replied.id),
+            );
+            if (!visibleReply) D.fail("Message cité non autorisé.", 403);
+            const sameConversation = thread
+              ? D.same(replied.threadId, thread.id)
+              : !replied.threadId &&
+                ((D.same(replied.senderId, req.user.id) &&
+                  D.same(replied.recipientId, recipient.id)) ||
+                  (D.same(replied.senderId, recipient.id) &&
+                    D.same(replied.recipientId, req.user.id)));
+            if (!sameConversation)
+              D.fail("Le message cité appartient à une autre conversation.", 403);
+            replyToId = replied.id;
+          }
+
+          let forwardedFromId = "";
+          if (p.forwardedFromId) {
+            const source = D.viewState(d, req.user).messages.find((m) =>
+              D.same(m.id, p.forwardedFromId),
+            );
+            if (!source) D.fail("Message à transférer introuvable.", 404);
+            forwardedFromId = source.id;
+          }
+
+          let sharedRef = null;
+          if (p.sharedRef) {
+            const kind = String(p.sharedRef.kind || ""),
+              id = String(p.sharedRef.id || "");
+            if (!["quotes", "invoices", "documents"].includes(kind) || !id)
+              D.fail("Élément partagé invalide.");
+            const senderView = D.viewState(d, req.user);
+            if (!senderView[kind]?.some((x) => D.same(x.id, id)))
+              D.fail("Vous n’avez pas accès à cet élément.", 403);
+            for (const user of participants) {
+              const effective = D.effectiveUser(d, user),
+                view = D.viewState(d, effective);
+              if (!view[kind]?.some((x) => D.same(x.id, id)))
+                D.fail(
+                  "Un destinataire n’a pas accès à l’élément partagé.",
+                  403,
+                );
             }
-            if (!text && !attachment)
-              D.fail("Écrivez un message ou ajoutez une pièce jointe.");
-            const msg = {
-              id: randomUUID(),
-              senderId: req.user.id,
-              recipientId: recipient?.id || null,
-              threadId: thread?.id || "",
-              sender: req.user.name,
-              text,
-              replyToId,
-              attachment,
-              readBy: [String(req.user.id)],
-              createdAt: new Date().toISOString(),
+            const target = d[kind].find((x) => D.same(x.id, id));
+            sharedRef = {
+              kind,
+              id,
+              title:
+                target?.title ||
+                target?.name ||
+                target?.number ||
+                id,
             };
-            d.messages.push(msg);
-            return { id: msg.id };
-          },
-        ),
-      ),
-    ),
+          }
+
+          let encryption = null;
+          if (p.encryption) {
+            const e = p.encryption;
+            if (
+              e.algorithm !== "SGO-E2EE-P256-AESGCM-v1" ||
+              typeof e.iv !== "string" ||
+              typeof e.ciphertext !== "string" ||
+              !e.envelopes ||
+              typeof e.envelopes !== "object" ||
+              e.ciphertext.length > 15000
+            )
+              D.fail("Message chiffré invalide.");
+            const expected = new Set(
+              participants.map((u) => String(u.id)),
+            );
+            for (const id of expected) {
+              const envelope = e.envelopes[id];
+              if (
+                !envelope ||
+                typeof envelope.iv !== "string" ||
+                typeof envelope.ciphertext !== "string" ||
+                envelope.ciphertext.length > 2000
+              )
+                D.fail("Clé de chiffrement manquante pour un participant.");
+            }
+            encryption = {
+              algorithm: e.algorithm,
+              iv: e.iv.slice(0, 100),
+              ciphertext: e.ciphertext,
+              envelopes: e.envelopes,
+              senderId: String(req.user.id),
+            };
+          }
+
+          let attachment = null;
+          if (p.attachment) {
+            const raw = p.attachment,
+              name = D.text(raw.name, "Nom du fichier", 200),
+              requestedMime = D.text(raw.mime, "Type de fichier", 120),
+              encryptedAttachment = !!(encryption && raw.encrypted),
+              mime = encryptedAttachment
+                ? "application/octet-stream"
+                : requestedMime,
+              allowed =
+                encryptedAttachment ||
+                /^image\/(jpeg|png|webp|gif)$/.test(mime) ||
+                /^audio\/(webm|ogg|mpeg|mp4|wav|x-m4a)$/.test(mime) ||
+                mime === "application/pdf" ||
+                mime === "text/plain";
+            if (!allowed) D.fail("Type de pièce jointe non autorisé.");
+            if (
+              typeof raw.content !== "string" ||
+              !/^[A-Za-z0-9+/]+={0,2}$/.test(raw.content)
+            )
+              D.fail("Pièce jointe invalide.");
+            const content = Buffer.from(raw.content, "base64");
+            if (!content.length || content.length > 5 * 1024 * 1024)
+              D.fail("Pièce jointe de 5 Mo maximum.");
+            const fileId = randomUUID();
+            await c.query(
+              "INSERT INTO file_contents(id,content) VALUES($1,$2)",
+              [fileId, content],
+            );
+            attachment = {
+              fileId,
+              name,
+              mime,
+              originalMime: encryptedAttachment ? requestedMime : "",
+              size: content.length,
+              encrypted: encryptedAttachment,
+              kind: requestedMime.startsWith("image/")
+                ? "image"
+                : requestedMime.startsWith("audio/")
+                  ? "audio"
+                  : "file",
+            };
+          }
+          if (!text && !attachment && !sharedRef && !encryption)
+            D.fail("Écrivez un message ou ajoutez une pièce jointe.");
+
+          const msg = {
+            id: randomUUID(),
+            senderId: req.user.id,
+            recipientId: recipient?.id || null,
+            threadId: thread?.id || "",
+            sender: req.user.name,
+            text: encryption ? "" : text,
+            replyToId,
+            forwardedFromId,
+            sharedRef,
+            encryption,
+            attachment,
+            readBy: [String(req.user.id)],
+            createdAt: new Date().toISOString(),
+          };
+          d.messages.push(msg);
+          notificationPreview = encryption
+            ? "🔐 Nouveau message chiffré"
+            : sharedRef
+              ? "📄 " + sharedRef.title
+              : attachment
+                ? attachment.kind === "image"
+                  ? "📷 Photo"
+                  : attachment.kind === "audio"
+                    ? "🎤 Message vocal"
+                    : "📎 " + attachment.name
+                : text.slice(0, 140);
+          return { id: msg.id };
+        },
+      );
+      await notifyUsers(db, notificationTargets, {
+        title: req.user.name,
+        body: notificationPreview || "Nouveau message",
+        url:
+          "/?open=messages&conversation=" +
+          encodeURIComponent(notificationConversation),
+        tag: "message-" + out.result.id,
+        conversationKey: notificationConversation,
+      }).catch(() => {});
+      res.json(out);
+    }),
   );
   r.post(
     "/documents",
