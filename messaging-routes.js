@@ -131,7 +131,7 @@ function routes(db) {
       }
       await db.query(
         `INSERT INTO user_presence(user_id,last_seen,typing_key,typing_until)
-         VALUES($1,NOW(),$2,CASE WHEN $2 IS NULL THEN NULL ELSE NOW()+INTERVAL '6 seconds' END)
+         VALUES($1,NOW(),$2::text,CASE WHEN $2::text IS NULL THEN NULL ELSE NOW()+INTERVAL '6 seconds' END)
          ON CONFLICT(user_id) DO UPDATE SET
            last_seen=NOW(),
            typing_key=EXCLUDED.typing_key,
