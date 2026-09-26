@@ -260,7 +260,14 @@ function viewState(data, u) {
         ? e
         : Object.fromEntries(
             Object.entries(e).filter(
-              ([k]) => !["salary", "vacation", "email", "phone"].includes(k),
+              ([k]) =>
+                ![
+                  "salary",
+                  "salaryPeriod",
+                  "vacation",
+                  "email",
+                  "phone",
+                ].includes(k),
             ),
           ),
     );
@@ -546,6 +553,12 @@ function applyCommand(
         type: text(p.type, "Secteur"),
       };
     } else if (k === "employees") {
+      const salaryPeriod =
+        p.salaryPeriod === undefined ? "monthly" : p.salaryPeriod;
+      if (!["monthly", "hourly"].includes(salaryPeriod))
+        fail("Type de salaire invalide.");
+      if (p.salary == null || String(p.salary).trim() === "")
+        fail("Renseignez le salaire.");
       r = {
         ...r,
         name: text(p.name, "Nom"),
@@ -554,6 +567,7 @@ function applyCommand(
         email: text(p.email, "E-mail"),
         phone: text(p.phone, "Téléphone", 40, true),
         salary: fromCents(cents(p.salary)),
+        salaryPeriod,
         activity: num(p.activity, "Taux", 1, 100),
         vacation: num(p.vacation, "Solde vacances", 0, 366),
         entry: iso(p.entry),

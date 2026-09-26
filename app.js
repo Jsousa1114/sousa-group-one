@@ -867,7 +867,8 @@ const schemas = {
     ["company", "Entreprise", "@companies"],
     ["email", "E-mail", "email"],
     ["phone", "Téléphone", "tel?"],
-    ["salary", "Salaire mensuel CHF", "number"],
+    ["salaryPeriod", "Type de salaire", "salary-period"],
+    ["salary", "Salaire mensuel (CHF/mois)", "number"],
     ["activity", "Taux d’activité %", "number", "100"],
     ["vacation", "Solde de vacances (jours)", "number", "20"],
     ["entry", "Date d’entrée", "date"],
@@ -978,11 +979,13 @@ function field([key, label, type = "text", value = ""]) {
     attr = `id="f_${key}" name="${key}" ${required}`;
   return (
     `<label for="f_${key}">${esc(label)}${optional ? " (facultatif)" : ""}</label>` +
-    (type.startsWith("@")
-      ? `<select ${attr}>${options(type.slice(1), optional)}</select>`
-      : type === "textarea"
-        ? `<textarea ${attr} maxlength="5000">${esc(value)}</textarea>`
-        : `<input ${attr} type="${type}" value="${esc(value || (type === "date" ? today() : ""))}" ${type === "number" ? 'min="0" step="0.01"' : ""} ${type === "password" ? (key === "currentPassword" ? 'autocomplete="current-password"' : 'minlength="12" autocomplete="new-password"') : ""}>`)
+    (type === "salary-period"
+      ? `<select ${attr}><option value="monthly">Salaire mensuel</option><option value="hourly">Salaire horaire</option></select>`
+      : type.startsWith("@")
+        ? `<select ${attr}>${options(type.slice(1), optional)}</select>`
+        : type === "textarea"
+          ? `<textarea ${attr} maxlength="5000">${esc(value)}</textarea>`
+          : `<input ${attr} type="${type}" value="${esc(value || (type === "date" ? today() : ""))}" ${type === "number" ? 'min="0" step="0.01"' : ""} ${type === "password" ? (key === "currentPassword" ? 'autocomplete="current-password"' : 'minlength="12" autocomplete="new-password"') : ""}>`)
   );
 }
 function modal(title, html) {
@@ -1356,7 +1359,7 @@ async function employeeDetail(id) {
   }
   modal(
     "Fiche salarié et compte",
-    `<h3>${esc(e.name)}</h3><p>${esc(e.job || "")} · ${esc(e.email || "")} · ${esc(e.phone || "")}</p><p>${[...new Set([e.company, ...(e.companies || [])])].map((c) => esc(name("companies", c))).join(" · ")}</p>${can(hr) ? `<p>Salaire mensuel : ${money(e.salary)} · Activité : ${esc(e.activity ?? "—")} % · Vacances : ${esc(e.vacation ?? "—")} jours</p><div class="actions">${btn("Entreprises / accès", "employee-companies", id)} ${btn("Supprimer le salarié", "employee-delete", id, "danger")}</div>` : ""}${accountHtml}`,
+    `<h3>${esc(e.name)}</h3><p>${esc(e.job || "")} · ${esc(e.email || "")} · ${esc(e.phone || "")}</p><p>${[...new Set([e.company, ...(e.companies || [])])].map((c) => esc(name("companies", c))).join(" · ")}</p>${can(hr) ? `<p>${e.salaryPeriod === "hourly" ? "Salaire horaire" : "Salaire mensuel"} : ${money(e.salary)}${e.salaryPeriod === "hourly" ? " / heure" : " / mois"} · Activité : ${esc(e.activity ?? "—")} % · Vacances : ${esc(e.vacation ?? "—")} jours</p><div class="actions">${btn("Entreprises / accès", "employee-companies", id)} ${btn("Supprimer le salarié", "employee-delete", id, "danger")}</div>` : ""}${accountHtml}`,
   );
 }
 async function loadAudit() {
@@ -1411,7 +1414,8 @@ function userForm(link) {
     `<fieldset id="newEmployeeFields"><legend>Informations du nouveau salarié</legend>${[
       ["employeeJob", "Fonction"],
       ["employeePhone", "Téléphone", "tel?"],
-      ["employeeSalary", "Salaire mensuel CHF", "number"],
+      ["employeeSalaryPeriod", "Type de salaire", "salary-period"],
+      ["employeeSalary", "Salaire mensuel (CHF/mois)", "number"],
       ["employeeActivity", "Taux d’activité %", "number", "100"],
       ["employeeVacation", "Solde de vacances (jours)", "number", "20"],
       ["employeeEntry", "Date d’entrée", "date"],
@@ -1534,6 +1538,15 @@ function exportData(k) {
   );
 }
 document.addEventListener("change", (e) => {
+  if (["f_salaryPeriod", "f_employeeSalaryPeriod"].includes(e.target.id)) {
+    const amount = $(
+      e.target.id === "f_salaryPeriod" ? "f_salary" : "f_employeeSalary",
+    );
+    amount.labels[0].textContent =
+      e.target.value === "hourly"
+        ? "Salaire horaire (CHF/heure)"
+        : "Salaire mensuel (CHF/mois)";
+  }
   if (
     $("entityForm")?.dataset.kind === "user" &&
     [
@@ -1970,6 +1983,7 @@ document.addEventListener("submit", async (e) => {
         job: p.employeeJob,
         phone: p.employeePhone,
         salary: p.employeeSalary,
+        salaryPeriod: p.employeeSalaryPeriod,
         activity: p.employeeActivity,
         vacation: p.employeeVacation,
         entry: p.employeeEntry,
