@@ -235,18 +235,30 @@ function routes(db) {
       if (Date.now() - new Date(message.createdAt).getTime() > 15 * 60 * 1000)
         D.fail("La modification est disponible pendant 15 minutes.", 409);
       if (message.system) D.fail("Un message système ne peut pas être modifié.");
-      const text = D.text(req.body?.text, "Message", 5000, true);
-      if (!text && !message.attachment && !message.sharedRef && !message.encryption)
+      const text = D.text(req.body?.text, "Message", 5000, true),
+        encryption = req.body?.encryption || null;
+      if (encryption) {
+        if (
+          encryption.algorithm !== "SGO-E2EE-P256-AESGCM-v1" ||
+          typeof encryption.iv !== "string" ||
+          typeof encryption.ciphertext !== "string" ||
+          !encryption.envelopes ||
+          typeof encryption.envelopes !== "object"
+        )
+          D.fail("Édition chiffrée invalide.");
+      }
+      if (!text && !encryption && !message.attachment && !message.sharedRef)
         D.fail("Le message ne peut pas être vide.");
       await db.query(
-        `INSERT INTO message_overrides(message_id,edited_text,edited_at,deleted_for_all)
-         VALUES($1,$2,NOW(),false)
+        `INSERT INTO message_overrides(message_id,edited_text,edited_encryption,edited_at,deleted_for_all)
+         VALUES($1,$2,$3,NOW(),false)
          ON CONFLICT(message_id) DO UPDATE SET
            edited_text=EXCLUDED.edited_text,
+           edited_encryption=EXCLUDED.edited_encryption,
            edited_at=NOW(),
            deleted_for_all=false,
            deleted_at=NULL`,
-        [String(message.id), text],
+        [String(message.id), encryption ? "" : text, encryption],
       );
       res.json({ ok: true });
     }),
