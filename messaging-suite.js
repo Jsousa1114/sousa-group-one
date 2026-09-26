@@ -24,6 +24,7 @@
     groupCall = null,
     groupInviteId = "",
     groupPollBusy = false,
+    statePollBusy = false,
     searchGeneration = 0,
     e2eeIdentityReady = false,
     e2eeRetryAt = 0;
@@ -199,14 +200,27 @@
     if (!heartbeatTimer)
       heartbeatTimer = setInterval(() => heartbeat(), 20000);
     if (!pollTimer)
-      pollTimer = setInterval(() => {
-        if (!profile()) return;
-        if (core().getPage() === "messages") {
-          refreshPresence(true).then(decoratePresence).catch(() => {});
-          refreshMeta(true).then(decorateMessages).catch(() => {});
+      pollTimer = setInterval(async () => {
+        if (!profile() || statePollBusy) return;
+        statePollBusy = true;
+        try {
+          if (core().getPage() === "messages") {
+            const composer = $("messageText"),
+              modalOpen = !$("modalWrap")?.classList.contains("hidden");
+            if (!composer?.value && !modalOpen)
+              await core().refresh();
+            await Promise.all([
+              refreshPresence(true).then(decoratePresence),
+              refreshMeta(true).then(decorateMessages),
+            ]);
+          }
+          await pollGroupInvites();
+        } catch {
+          // Polling is best-effort; user actions still report their own errors.
+        } finally {
+          statePollBusy = false;
         }
-        pollGroupInvites().catch(() => {});
-      }, 3500);
+      }, 2500);
   }
 
   function prefFor(key) {
@@ -1393,6 +1407,15 @@
       localStorage.setItem("sgo_e2ee_mode", event.target.value);
       if (core().getPage() === "messages") decorateHeaderTools();
     }
+  });
+
+  document.addEventListener("click", (event) => {
+    const chat = event.target.closest("[data-action='chat-select']");
+    if (!chat) return;
+    setTimeout(() => {
+      if (core()?.getPage?.() === "messages" && !$("messageText")?.value)
+        core().refresh().catch(() => {});
+    }, 60);
   });
 
   document.addEventListener("click", async (event) => {
