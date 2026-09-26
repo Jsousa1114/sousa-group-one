@@ -355,6 +355,7 @@ function render() {
     hydrateChatAttachments();
     queueMicrotask(() => markChatRead());
   }
+  queueMicrotask(() => window.SGOMessagingSuite?.afterRender?.());
 }
 function projectRows(list) {
   return table(
@@ -3194,13 +3195,15 @@ document.addEventListener("submit", async (e) => {
   const k = f.dataset.kind;
   try {
     if (formId === "messageForm") {
-      const payload = {
+      let payload = {
         text: p.text || "",
         recipientId: selectedThreadId ? null : selectedRecipient,
         threadId: selectedThreadId || "",
         replyToId: chatReplyToId || "",
         attachment: chatAttachmentDraft,
       };
+      if (window.SGOMessagingSuite?.prepareOutgoingMessage)
+        payload = await window.SGOMessagingSuite.prepareOutgoingMessage(payload);
       const result = await mutate(
         "message",
         payload,
@@ -3422,6 +3425,91 @@ document.addEventListener("keydown", (e) => {
 document.addEventListener("pointerdown", unlockRingtoneAudio, {
   passive: true,
 });
+window.SGOChatCore = {
+  api,
+  mutate,
+  refresh,
+  render,
+  modal,
+  closeModal,
+  toast,
+  notice,
+  esc,
+  same,
+  loadIceServers,
+  startDirectCall,
+  getState: () => state,
+  getProfile: () => profile,
+  getContacts: () => contacts,
+  getPage: () => page,
+  getRevision: () => revision,
+  getConversation: () => {
+    if (!profile) return null;
+    if (selectedThreadId) {
+      const thread = state?.messageThreads?.find((t) =>
+        same(t.id, selectedThreadId),
+      );
+      return thread
+        ? {
+            key: "thread:" + thread.id,
+            type: "thread",
+            id: String(thread.id),
+            thread,
+            participantIds: (thread.participants || []).map(Number),
+          }
+        : null;
+    }
+    if (selectedRecipient) {
+      const contact = contacts.find((c) => same(c.id, selectedRecipient));
+      return contact
+        ? {
+            key: "direct:" + contact.id,
+            type: "direct",
+            id: String(contact.id),
+            contact,
+            participantIds: [Number(profile.id), Number(contact.id)],
+          }
+        : null;
+    }
+    return null;
+  },
+  selectConversation: (key) => {
+    if (String(key).startsWith("thread:")) {
+      selectedThreadId = String(key).slice(7);
+      selectedRecipient = "";
+    } else if (String(key).startsWith("direct:")) {
+      selectedRecipient = String(key).slice(7);
+      selectedThreadId = "";
+    } else return;
+    page = "messages";
+    mobileChatOpen = true;
+    render();
+  },
+  goToMessages: () => {
+    page = "messages";
+    render();
+  },
+  setAttachmentDraft: (value) => {
+    chatAttachmentDraft = value;
+    render();
+  },
+  getAttachmentDraft: () => chatAttachmentDraft,
+  clearReply: () => {
+    chatReplyToId = "";
+  },
+  sendMessage: async (payload) => {
+    const result = await mutate(
+      "message",
+      payload,
+      null,
+      "state/messages",
+      null,
+    );
+    if (result) render();
+    return result;
+  },
+};
+
 document.body.classList.toggle(
   "light",
   localStorage.getItem("sgo_theme") === "light",
@@ -3454,12 +3542,7 @@ setInterval(() => {
   )
     refresh().catch((e) => notice(e.message));
 }, 30000);
-// Remove legacy offline caches. Sensitive application data is never cached by this version.
-if ("serviceWorker" in navigator)
-  navigator.serviceWorker
-    .getRegistrations()
-    .then((rs) => Promise.all(rs.map((r) => r.unregister())))
-    .catch(() => {});
+// Sensitive application data is never cached. The service worker is retained for push notifications.
 if ("caches" in window)
   caches
     .keys()
