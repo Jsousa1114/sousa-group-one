@@ -243,7 +243,7 @@ function routes(db) {
       projectTitle: project.title || project.id,
     };
   }
-  function commandProjectAndText(d, action, result, payload) {
+  function commandProjectAndText(d, action, result, payload, beforeProject = null) {
     let project = null,
       text = "";
     if (action === "create" && reqSafeCollection(payload) === "projects") {
@@ -251,13 +251,28 @@ function routes(db) {
       text = project ? "🏗 Chantier créé : " + project.title : "";
     } else if (action === "project.update") {
       project = d.projects.find((p) => D.same(p.id, result?.id));
-      text = project
-        ? "📌 Chantier mis à jour · " +
-          project.status +
-          " · " +
-          Number(project.progress || 0) +
-          " %"
-        : "";
+      if (project) {
+        const beforeTeam = new Set((beforeProject?.team || []).map(String)),
+          afterTeam = new Set((project.team || []).map(String)),
+          added = [...afterTeam].filter((id) => !beforeTeam.has(id)),
+          removed = [...beforeTeam].filter((id) => !afterTeam.has(id)),
+          changes = [];
+        for (const id of added) {
+          const employee = d.employees.find((e) => D.same(e.id, id));
+          changes.push("👤 " + (employee?.name || id) + " ajouté à l’équipe");
+        }
+        for (const id of removed) {
+          const employee = d.employees.find((e) => D.same(e.id, id));
+          changes.push("👤 " + (employee?.name || id) + " retiré de l’équipe");
+        }
+        text =
+          changes.join(" · ") ||
+          "📌 Chantier mis à jour · " +
+            project.status +
+            " · " +
+            Number(project.progress || 0) +
+            " %";
+      }
     } else if (action === "project.finish") {
       project = d.projects.find((p) => D.same(p.id, result?.id || payload?.id));
       text = project
@@ -320,6 +335,12 @@ function routes(db) {
         },
       };
       const out = await mutate(db, req.user, req.body, async (c, d) => {
+        const beforeProject =
+          req.body.action === "project.update"
+            ? structuredClone(
+                d.projects.find((p) => D.same(p.id, req.body.payload?.id)) || null,
+              )
+            : null;
         const { data, result } = D.applyCommand(d, req.user, req.body);
         if (req.body.action === "employee.delete") {
           if (D.same(req.user.employee_id, result.id))
@@ -365,6 +386,7 @@ function routes(db) {
           req.body.action,
           result,
           bodyForSystem.payload,
+          beforeProject,
         );
         if (event.project && event.text)
           systemPush = await addProjectSystemMessage(
