@@ -49,6 +49,12 @@ let token = sessionStorage.getItem("sgo_session"),
   callStatusTimer = null,
   callCandidateCursor = 0,
   pendingIceCandidates = [],
+  remoteIceQueue = [],
+  callPollBusy = false,
+  callAudioBlocked = false,
+  callEndUiTimer = null,
+  rtcIceServers = null,
+  ringtoneTimer = null,
   mobileChatOpen = false,
   userAccounts = [],
   pending = false,
@@ -831,6 +837,7 @@ function ensureCallOverlay() {
         <button type="button" id="callReject" class="call-control danger hidden" data-action="call-reject" aria-label="Refuser l'appel">✕</button>
         <button type="button" id="callAccept" class="call-control accept hidden" data-action="call-accept" aria-label="Accepter l'appel">📞</button>
         <button type="button" id="callMute" class="call-control hidden" data-action="call-mute" aria-label="Couper le micro">🎙</button>
+        <button type="button" id="callEnableAudio" class="call-control hidden" data-action="call-enable-audio" aria-label="Activer le son">🔊</button>
         <button type="button" id="callHangup" class="call-control danger hidden" data-action="call-hangup" aria-label="Raccrocher">☎</button>
       </div>
       <audio id="remoteCallAudio" autoplay playsinline></audio>
@@ -849,13 +856,68 @@ function setCallUi(name, status, mode = "active") {
   $("callOverlay").classList.remove("hidden");
   $("callAccept").classList.toggle("hidden", mode !== "incoming");
   $("callReject").classList.toggle("hidden", mode !== "incoming");
-  $("callMute").classList.toggle("hidden", mode === "incoming");
-  $("callHangup").classList.toggle("hidden", mode === "incoming");
+  $("callMute").classList.toggle("hidden", mode === "incoming" || mode === "ended");
+  $("callHangup").classList.toggle("hidden", mode === "incoming" || mode === "ended");
   $("callTimer").classList.toggle("hidden", mode !== "connected");
+  $("callEnableAudio").classList.toggle("hidden", !callAudioBlocked || mode === "incoming" || mode === "ended");
 }
 function hideCallUi() {
   $("callOverlay")?.classList.add("hidden");
-  if ($("remoteCallAudio")) $("remoteCallAudio").srcObject = null;
+  if ($("remoteCallAudio")) {
+    $("remoteCallAudio").pause?.();
+    $("remoteCallAudio").srcObject = null;
+  }
+  callAudioBlocked = false;
+}
+function friendlyMediaError(error, purpose = "micro") {
+  if (!error) return "Le microphone est indisponible.";
+  if (error.name === "NotAllowedError" || error.name === "SecurityError")
+    return "Autorisation du microphone refusée. Autorisez le micro dans les réglages du navigateur puis réessayez.";
+  if (error.name === "NotFoundError" || error.name === "DevicesNotFoundError")
+    return "Aucun microphone n’a été détecté sur cet appareil.";
+  if (error.name === "NotReadableError" || error.name === "TrackStartError")
+    return "Le microphone est déjà utilisé ou inaccessible. Fermez les autres applications qui l’utilisent puis réessayez.";
+  return purpose === "vocal"
+    ? "Impossible d’enregistrer le message vocal."
+    : "Impossible d’accéder au microphone.";
+}
+async function playRemoteAudio() {
+  const audio = $("remoteCallAudio");
+  if (!audio?.srcObject) return;
+  try {
+    await audio.play();
+    callAudioBlocked = false;
+    $("callEnableAudio")?.classList.add("hidden");
+  } catch {
+    callAudioBlocked = true;
+    $("callEnableAudio")?.classList.remove("hidden");
+    if ($("callState") && activeCall?.peer?.connectionState === "connected")
+      $("callState").textContent = "En appel · touchez 🔊 pour entendre";
+  }
+}
+function stopRingtone() {
+  clearInterval(ringtoneTimer);
+  ringtoneTimer = null;
+}
+function beepRingtone() {
+  if (ringtoneTimer || !window.AudioContext) return;
+  const beep = () => {
+    try {
+      const ctx = new AudioContext(),
+        osc = ctx.createOscillator(),
+        gain = ctx.createGain();
+      osc.frequency.value = 640;
+      gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.035, ctx.currentTime + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.35);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.36);
+      osc.onended = () => ctx.close().catch(() => {});
+    } catch {}
+  };
+  beep();
+  ringtoneTimer = setInterval(beep, 2200);
 }
 function formatCallTime(seconds) {
   const m = String(Math.floor(seconds / 60)).padStart(2, "0"),
@@ -887,42 +949,78 @@ async function flushIceCandidates() {
   const queued = pendingIceCandidates.splice(0);
   for (const candidate of queued) await postIceCandidate(candidate);
 }
+async function loadIceServers() {
+  if (rtcIceServers) return rtcIceServers;
+  try {
+    const config = await api("state/calls/config");
+    rtcIceServers =
+      Array.isArray(config.iceServers) && config.iceServers.length
+        ? config.iceServers
+        : [{ urls: "stun:stun.l.google.com:19302" }];
+  } catch {
+    rtcIceServers = [{ urls: "stun:stun.l.google.com:19302" }];
+  }
+  return rtcIceServers;
+}
 async function makePeer() {
   if (!navigator.mediaDevices?.getUserMedia || !window.RTCPeerConnection)
     throw new Error("Les appels audio ne sont pas disponibles sur cet appareil.");
-  const stream = await navigator.mediaDevices.getUserMedia({
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
       audio: {
         echoCancellation: true,
         noiseSuppression: true,
         autoGainControl: true,
       },
       video: false,
-    }),
-    peer = new RTCPeerConnection({
-      iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
     });
-  for (const track of stream.getTracks()) peer.addTrack(track, stream);
-  peer.onicecandidate = (e) => {
-    if (e.candidate) postIceCandidate(e.candidate);
-  };
-  peer.ontrack = (e) => {
-    ensureCallOverlay();
-    const audio = $("remoteCallAudio");
-    audio.srcObject = e.streams[0];
-    audio.play().catch(() => {});
-  };
-  peer.onconnectionstatechange = () => {
-    if (!activeCall || activeCall.peer !== peer) return;
-    if (peer.connectionState === "connected") {
-      setCallUi(callDisplayName(activeCall), "En appel", "connected");
-      startCallTimer();
-    } else if (["failed", "closed"].includes(peer.connectionState)) {
-      finishCallLocal("Appel terminé.");
-    } else if (peer.connectionState === "disconnected") {
-      setCallUi(callDisplayName(activeCall), "Connexion interrompue…", "active");
-    }
-  };
-  return { peer, stream };
+    const peer = new RTCPeerConnection({
+      iceServers: await loadIceServers(),
+      iceCandidatePoolSize: 2,
+    });
+    for (const track of stream.getTracks()) peer.addTrack(track, stream);
+    peer.onicecandidate = (e) => {
+      if (e.candidate) postIceCandidate(e.candidate);
+    };
+    peer.ontrack = (e) => {
+      ensureCallOverlay();
+      const audio = $("remoteCallAudio");
+      audio.srcObject = e.streams[0] || new MediaStream([e.track]);
+      playRemoteAudio();
+    };
+    peer.onconnectionstatechange = () => {
+      if (!activeCall || activeCall.peer !== peer) return;
+      if (peer.connectionState === "connected") {
+        setCallUi(callDisplayName(activeCall), "En appel", "connected");
+        startCallTimer();
+        playRemoteAudio();
+      } else if (peer.connectionState === "failed") {
+        endCurrentCall(true).catch(() => finishCallLocal("Connexion impossible."));
+      } else if (peer.connectionState === "disconnected") {
+        setCallUi(callDisplayName(activeCall), "Reconnexion…", "active");
+      }
+    };
+    return { peer, stream };
+  } catch (error) {
+    stream?.getTracks().forEach((track) => track.stop());
+    const e = new Error(
+      error?.message?.includes("appareil")
+        ? error.message
+        : friendlyMediaError(error),
+    );
+    e.name = error?.name || "MediaError";
+    throw e;
+  }
+}
+async function flushRemoteIceCandidates() {
+  if (!activeCall?.peer?.remoteDescription) return;
+  const queued = remoteIceQueue.splice(0);
+  for (const candidate of queued) {
+    try {
+      await activeCall.peer.addIceCandidate(candidate);
+    } catch {}
+  }
 }
 async function receiveRemoteCandidates() {
   if (!activeCall?.id || !activeCall.peer) return;
@@ -934,6 +1032,10 @@ async function receiveRemoteCandidates() {
   );
   for (const row of out.candidates || []) {
     callCandidateCursor = Math.max(callCandidateCursor, Number(row.id) || 0);
+    if (!activeCall.peer.remoteDescription) {
+      remoteIceQueue.push(row.candidate);
+      continue;
+    }
     try {
       await activeCall.peer.addIceCandidate(row.candidate);
     } catch {}
@@ -947,6 +1049,7 @@ function stopCallMedia() {
   } catch {}
   clearInterval(callStatusTimer);
   callStatusTimer = null;
+  stopRingtone();
 }
 function finishCallLocal(message = "Appel terminé.") {
   stopCallMedia();
@@ -955,10 +1058,14 @@ function finishCallLocal(message = "Appel terminé.") {
   incomingCall = null;
   callCandidateCursor = 0;
   pendingIceCandidates = [];
+  remoteIceQueue = [];
+  callPollBusy = false;
+  callAudioBlocked = false;
+  clearTimeout(callEndUiTimer);
   setCallUi(name, message, "ended");
   if ($("callMute")) $("callMute").classList.add("hidden");
   if ($("callHangup")) $("callHangup").classList.add("hidden");
-  setTimeout(() => {
+  callEndUiTimer = setTimeout(() => {
     if (!activeCall && !incomingCall) hideCallUi();
   }, 1800);
 }
@@ -973,19 +1080,20 @@ async function startAudioCall(contactId) {
     throw new Error("Un appel est déjà en cours.");
   const contact = contacts.find((c) => same(c.id, contactId));
   if (!contact) throw new Error("Contact introuvable.");
+  clearTimeout(callEndUiTimer);
   setCallUi(contact.name, "Préparation de l’appel…", "active");
-  const { peer, stream } = await makePeer();
-  activeCall = {
-    id: "",
-    callerId: profile.id,
-    calleeId: contact.id,
-    callerName: profile.name,
-    calleeName: contact.name,
-    peer,
-    stream,
-    answerApplied: false,
-  };
   try {
+    const { peer, stream } = await makePeer();
+    activeCall = {
+      id: "",
+      callerId: profile.id,
+      calleeId: contact.id,
+      callerName: profile.name,
+      calleeName: contact.name,
+      peer,
+      stream,
+      answerApplied: false,
+    };
     const offer = await peer.createOffer({ offerToReceiveAudio: true });
     await peer.setLocalDescription(offer);
     const out = await api("state/calls/start", {
@@ -994,23 +1102,32 @@ async function startAudioCall(contactId) {
     });
     activeCall.id = out.id;
     callCandidateCursor = 0;
+    remoteIceQueue = [];
     await flushIceCandidates();
     setCallUi(contact.name, "Appel en cours…", "active");
   } catch (e) {
-    finishCallLocal("Appel impossible.");
+    finishCallLocal(
+      e.name === "NotAllowedError" || e.name === "SecurityError"
+        ? "Microphone refusé."
+        : "Appel impossible.",
+    );
     throw e;
   }
 }
 async function acceptIncomingCall() {
   if (!incomingCall) return;
   const call = incomingCall;
+  stopRingtone();
+  clearTimeout(callEndUiTimer);
   setCallUi(call.callerName, "Connexion…", "active");
-  const { peer, stream } = await makePeer();
-  activeCall = { ...call, peer, stream, answerApplied: true };
-  incomingCall = null;
-  callCandidateCursor = 0;
   try {
+    const { peer, stream } = await makePeer();
+    activeCall = { ...call, peer, stream, answerApplied: true };
+    incomingCall = null;
+    callCandidateCursor = 0;
+    remoteIceQueue = [];
     await peer.setRemoteDescription(call.offer);
+    await flushRemoteIceCandidates();
     const answer = await peer.createAnswer();
     await peer.setLocalDescription(answer);
     await api("state/calls/" + encodeURIComponent(call.id) + "/answer", {
@@ -1019,18 +1136,28 @@ async function acceptIncomingCall() {
     await flushIceCandidates();
     setCallUi(call.callerName, "Connexion…", "active");
   } catch (e) {
-    await endCurrentCall(true);
+    await api("state/calls/" + encodeURIComponent(call.id) + "/reject", {}).catch(() => {});
+    activeCall = null;
+    incomingCall = null;
+    finishCallLocal(
+      e.name === "NotAllowedError" || e.name === "SecurityError"
+        ? "Microphone refusé."
+        : "Appel impossible.",
+    );
     throw e;
   }
 }
 async function rejectIncomingCall() {
   if (!incomingCall) return;
+  stopRingtone();
   const id = incomingCall.id;
   await api("state/calls/" + encodeURIComponent(id) + "/reject", {}).catch(() => {});
   finishCallLocal("Appel refusé.");
 }
 async function pollCallState() {
-  if (!token) return;
+  if (!token || callPollBusy) return;
+  callPollBusy = true;
+  try {
   if (activeCall?.id) {
     try {
       const out = await api("state/calls/" + encodeURIComponent(activeCall.id)),
@@ -1053,6 +1180,7 @@ async function pollCallState() {
       ) {
         await activeCall.peer.setRemoteDescription(call.answer);
         activeCall.answerApplied = true;
+        await flushRemoteIceCandidates();
         setCallUi(call.calleeName, "Connexion…", "active");
       }
       await receiveRemoteCandidates();
@@ -1080,8 +1208,12 @@ async function pollCallState() {
     ) {
       incomingCall = call;
       setCallUi(call.callerName, "Appel audio entrant", "incoming");
+      beepRingtone();
     }
   } catch {}
+  } finally {
+    callPollBusy = false;
+  }
 }
 function messagesView() {
   const threads = state.messageThreads || [];
@@ -2454,6 +2586,7 @@ document.addEventListener("click", async (e) => {
     else if (a === "call-accept") await acceptIncomingCall();
     else if (a === "call-reject") await rejectIncomingCall();
     else if (a === "call-hangup") await endCurrentCall(true);
+    else if (a === "call-enable-audio") await playRemoteAudio();
     else if (a === "call-mute") {
       if (!activeCall?.stream) return;
       const tracks = activeCall.stream.getAudioTracks(),
@@ -2506,38 +2639,80 @@ document.addEventListener("click", async (e) => {
       } else {
         if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder)
           throw new Error("Enregistrement vocal non disponible sur cet appareil.");
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true }),
-          chunks = [],
-          recorder = new MediaRecorder(stream);
-        chatRecorder = recorder;
-        recorder.ondataavailable = (event) => {
-          if (event.data.size) chunks.push(event.data);
-        };
-        recorder.onstop = async () => {
-          stream.getTracks().forEach((track) => track.stop());
-          const blob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
-          if (blob.size > 5 * 1024 * 1024) {
-            notice("Message vocal trop volumineux (5 Mo maximum).");
-            return;
-          }
-          const content = await new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve(String(reader.result).split(",")[1]);
-            reader.onerror = reject;
-            reader.readAsDataURL(blob);
+        let stream;
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true,
+            },
           });
-          chatAttachmentDraft = {
-            name: "message-vocal-" + Date.now() + ".webm",
-            mime: (blob.type || "audio/webm").split(";")[0],
-            content,
-            kind: "audio",
+          const preferred = [
+              "audio/webm;codecs=opus",
+              "audio/mp4",
+              "audio/webm",
+              "audio/ogg;codecs=opus",
+            ].find((type) => MediaRecorder.isTypeSupported?.(type)),
+            chunks = [],
+            recorder = preferred
+              ? new MediaRecorder(stream, { mimeType: preferred })
+              : new MediaRecorder(stream);
+          chatRecorder = recorder;
+          recorder.ondataavailable = (event) => {
+            if (event.data.size) chunks.push(event.data);
           };
+          recorder.onerror = () => {
+            stream.getTracks().forEach((track) => track.stop());
+            chatRecorder = null;
+            notice("L’enregistrement vocal a été interrompu.");
+            render();
+          };
+          recorder.onstop = async () => {
+            stream.getTracks().forEach((track) => track.stop());
+            const mime = (recorder.mimeType || preferred || "audio/webm").split(";")[0],
+              blob = new Blob(chunks, { type: mime });
+            chatRecorder = null;
+            if (!blob.size) {
+              notice("Aucun son n’a été enregistré.");
+              render();
+              return;
+            }
+            if (blob.size > 5 * 1024 * 1024) {
+              notice("Message vocal trop volumineux (5 Mo maximum).");
+              render();
+              return;
+            }
+            const content = await new Promise((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onload = () => resolve(String(reader.result).split(",")[1]);
+              reader.onerror = reject;
+              reader.readAsDataURL(blob);
+            });
+            const extension =
+              mime.includes("mp4") || mime.includes("m4a")
+                ? "m4a"
+                : mime.includes("ogg")
+                  ? "ogg"
+                  : mime.includes("mpeg")
+                    ? "mp3"
+                    : "webm";
+            chatAttachmentDraft = {
+              name: "message-vocal-" + Date.now() + "." + extension,
+              mime,
+              content,
+              kind: "audio",
+            };
+            render();
+          };
+          recorder.start(250);
+          b.textContent = "■";
+          b.classList.add("recording");
+        } catch (e) {
+          stream?.getTracks().forEach((track) => track.stop());
           chatRecorder = null;
-          render();
-        };
-        recorder.start();
-        b.textContent = "■";
-        b.classList.add("recording");
+          throw new Error(friendlyMediaError(e, "vocal"));
+        }
       }
     } else if (a === "close-modal") closeModal();
     else if (a === "open-side") {
@@ -3170,9 +3345,12 @@ if (token)
       $("loginError").textContent = e.message;
     });
 setInterval(() => {
-  if (token && profile && document.visibilityState !== "hidden")
+  if (token && profile) pollCallState();
+}, 1500);
+document.addEventListener("visibilitychange", () => {
+  if (token && profile && document.visibilityState === "visible")
     pollCallState();
-}, 2500);
+});
 setInterval(() => {
   if (
     token &&
