@@ -837,3 +837,42 @@ test("identity documents are restricted to HR in employee companies", () => {
     1,
   );
 });
+
+test("project deletion respects roles, company boundaries and linked records", () => {
+  const d = fixture();
+  const result = command(d, admin, "project.delete", { id: "p1" });
+  assert.equal(
+    result.data.projects.some((p) => p.id === "p1"),
+    false,
+  );
+  for (const user of [
+    employee,
+    client,
+    { ...admin, role: "hr" },
+    { ...admin, role: "manager", company: "moving" },
+  ])
+    assert.throws(
+      () => command(fixture(), user, "project.delete", { id: "p1" }),
+      /non autorisée/,
+    );
+  for (const kind of [
+    "time",
+    "clocks",
+    "planning",
+    "documents",
+    "quotes",
+    "invoices",
+    "expenses",
+  ]) {
+    const state = fixture();
+    state[kind].push({ id: "linked", project: "p1" });
+    assert.throws(
+      () => command(state, admin, "project.delete", { id: "p1" }),
+      /données liées/,
+    );
+    assert.equal(
+      state.projects.some((p) => p.id === "p1"),
+      true,
+    );
+  }
+});
