@@ -40,6 +40,7 @@ let token = sessionStorage.getItem("sgo_session"),
   page = "dashboard",
   company = "",
   selectedRecipient = "",
+  mobileChatOpen = false,
   userAccounts = [],
   pending = false,
   lastFocus;
@@ -177,6 +178,7 @@ function clearSession() {
   contacts = [];
   userAccounts = [];
   selectedRecipient = "";
+  mobileChatOpen = false;
   company = "";
   page = "dashboard";
   revision = 0;
@@ -310,6 +312,8 @@ function render() {
   )
     loadUsers();
   if (page === "audit") loadAudit();
+  if (page === "messages" && $("messageThread"))
+    $("messageThread").scrollTop = $("messageThread").scrollHeight;
 }
 function projectRows(list) {
   return table(
@@ -668,18 +672,115 @@ function documentsView() {
     )
   );
 }
+function chatAvatar(person, extra = "") {
+  const label = person?.name || "—",
+    photo = person?.photo || "";
+  return photo
+    ? `<img class="chat-avatar ${esc(extra)}" src="${esc(photo)}" alt="" width="48" height="48" loading="lazy">`
+    : `<span class="chat-avatar chat-avatar-initial ${esc(extra)}" aria-hidden="true">${esc(label.slice(0, 1).toUpperCase())}</span>`;
+}
+function chatTime(value) {
+  return value
+    ? new Date(value).toLocaleTimeString("fr-CH", {
+        timeZone: "Europe/Zurich",
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    : "";
+}
+function chatDate(value) {
+  return new Date(value).toLocaleDateString("fr-CH", {
+    timeZone: "Europe/Zurich",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
+}
 function messagesView() {
   if (!contacts.length)
     return '<article class="card empty">Aucun destinataire disponible. Un administrateur doit créer et activer les comptes des interlocuteurs.</article>';
   if (!contacts.some((c) => same(c.id, selectedRecipient)))
     selectedRecipient = String(contacts[0].id);
-  const list = state.messages.filter(
-    (m) =>
-      same(m.senderId, selectedRecipient) ||
-      same(m.recipientId, selectedRecipient),
-  );
-  return `<article class="card"><label for="recipient">Conversation avec</label><select id="recipient">${contacts.map((c) => `<option value="${c.id}" ${same(c.id, selectedRecipient) ? "selected" : ""}>${esc(c.name)} · ${esc(roles[c.role])}</option>`).join("")}</select><div class="messages">${list.map((m) => `<div class="message ${same(m.senderId, profile.id) ? "mine" : ""}">${personListName({ name: m.sender }, same(m.senderId, profile.id) ? profile.photo : contacts.find((c) => same(c.id, m.senderId))?.photo)}<p class="prewrap">${esc(m.text)}</p><small>${esc(new Date(m.createdAt).toLocaleString("fr-CH"))}</small>${deleteRecordButton("messages", m)}</div>`).join("") || '<p class="muted">Aucun message.</p>'}</div><form id="messageForm"><label for="messageText">Message</label><textarea id="messageText" name="text" maxlength="5000" required></textarea><p id="formError" class="error" role="alert"></p><button type="submit" class="btn primary">Envoyer</button></form></article>`;
+  const conversations = contacts
+      .map((contact) => {
+        const messages = state.messages
+          .filter(
+            (m) =>
+              (same(m.senderId, profile.id) &&
+                same(m.recipientId, contact.id)) ||
+              (same(m.senderId, contact.id) &&
+                same(m.recipientId, profile.id)),
+          )
+          .sort(
+            (a, b) => new Date(a.createdAt) - new Date(b.createdAt),
+          );
+        return { contact, messages, last: messages.at(-1) };
+      })
+      .sort(
+        (a, b) =>
+          (b.last ? new Date(b.last.createdAt).getTime() : 0) -
+            (a.last ? new Date(a.last.createdAt).getTime() : 0) ||
+          a.contact.name.localeCompare(b.contact.name, "fr"),
+      ),
+    active =
+      conversations.find((c) => same(c.contact.id, selectedRecipient)) ||
+      conversations[0],
+    list = active.messages;
+  let day = "";
+  const bubbles =
+    list
+      .map((m) => {
+        const currentDay = chatDate(m.createdAt),
+          separator =
+            currentDay !== day
+              ? `<div class="chat-day"><span>${esc(currentDay)}</span></div>`
+              : "";
+        day = currentDay;
+        const mine = same(m.senderId, profile.id);
+        return (
+          separator +
+          `<div class="message ${mine ? "mine" : "theirs"}"><p class="prewrap">${esc(m.text)}</p><div class="message-meta"><time datetime="${esc(m.createdAt)}">${esc(chatTime(m.createdAt))}</time>${mine ? '<span class="message-check" title="Envoyé">✓</span>' : ""}</div><div class="message-delete">${deleteRecordButton("messages", m)}</div></div>`
+        );
+      })
+      .join("") ||
+    '<div class="chat-empty"><span>💬</span><p>Aucun message dans cette conversation.</p><small>Envoyez le premier message ci-dessous.</small></div>';
+  return `<section class="whatsapp-chat ${mobileChatOpen ? "mobile-chat-open" : ""}">
+    <aside class="chat-sidebar">
+      <div class="chat-sidebar-head"><div><h3>Discussions</h3><span>${contacts.length} contact${contacts.length > 1 ? "s" : ""}</span></div></div>
+      <label class="chat-search" for="conversationSearch"><span aria-hidden="true">⌕</span><input id="conversationSearch" type="search" autocomplete="off" placeholder="Rechercher une discussion" aria-label="Rechercher une discussion"></label>
+      <div id="conversationList" class="chat-conversations">
+        ${conversations
+          .map(({ contact, last }) => {
+            const preview = last
+                ? `${same(last.senderId, profile.id) ? "Vous : " : ""}${last.text}`
+                : "Commencer une conversation",
+              search = `${contact.name} ${roles[contact.role] || contact.role} ${preview}`.toLowerCase();
+            return `<button type="button" class="chat-contact ${same(contact.id, selectedRecipient) ? "active" : ""}" data-action="chat-select" data-id="${esc(contact.id)}" data-search="${esc(search)}">
+              ${chatAvatar(contact)}
+              <span class="chat-contact-body">
+                <span class="chat-contact-top"><b>${esc(contact.name)}</b><time>${last ? esc(chatTime(last.createdAt)) : ""}</time></span>
+                <span class="chat-contact-bottom"><span class="chat-preview">${esc(preview.slice(0, 82))}</span><small>${esc(roles[contact.role] || contact.role)}</small></span>
+              </span>
+            </button>`;
+          })
+          .join("")}
+      </div>
+    </aside>
+    <section class="chat-main-panel">
+      <header class="chat-header">
+        <button type="button" class="chat-back" data-action="chat-back" aria-label="Retour aux discussions">←</button>
+        ${chatAvatar(active.contact)}
+        <div class="chat-header-person"><strong>${esc(active.contact.name)}</strong><span>${esc(roles[active.contact.role] || active.contact.role)}</span></div>
+      </header>
+      <div id="messageThread" class="messages chat-thread" role="log" aria-live="polite" aria-label="Messages avec ${esc(active.contact.name)}">${bubbles}</div>
+      <form id="messageForm" class="chat-composer">
+        <div class="chat-compose-field"><textarea id="messageText" name="text" rows="1" maxlength="5000" required placeholder="Écrire un message" aria-label="Écrire un message"></textarea><p id="formError" class="error" role="alert"></p></div>
+        <button type="submit" class="chat-send" aria-label="Envoyer le message" title="Envoyer">➤</button>
+      </form>
+    </section>
+  </section>`;
 }
+
 function reportsView() {
   const months = new Map();
   for (const p of visible("payments")) {
@@ -1879,6 +1980,7 @@ document.addEventListener("click", async (e) => {
   const nav = e.target.closest("[data-page]");
   if (nav) {
     page = nav.dataset.page;
+    if (page === "messages") mobileChatOpen = false;
     render();
     $("sidebar").classList.remove("open");
     $("backdrop").classList.add("hidden");
@@ -1889,7 +1991,14 @@ document.addEventListener("click", async (e) => {
   const a = b.dataset.action,
     id = b.dataset.id;
   try {
-    if (a === "close-modal") closeModal();
+    if (a === "chat-select") {
+      selectedRecipient = String(id);
+      mobileChatOpen = true;
+      render();
+    } else if (a === "chat-back") {
+      mobileChatOpen = false;
+      render();
+    } else if (a === "close-modal") closeModal();
     else if (a === "open-side") {
       $("sidebar").classList.add("open");
       $("backdrop").classList.remove("hidden");
@@ -2406,6 +2515,12 @@ document.addEventListener("submit", async (e) => {
 document.addEventListener("input", (e) => {
   if (e.target.closest(".invoice-line") || e.target.name === "depositPercent")
     financeTotals();
+  if (e.target.id === "conversationSearch") {
+    const q = e.target.value.trim().toLowerCase();
+    document.querySelectorAll(".chat-contact").forEach((row) => {
+      row.hidden = !!q && !row.dataset.search.includes(q);
+    });
+  }
 });
 document.addEventListener("change", (e) => {
   if (["f_company", "f_clientId"].includes(e.target.id)) filterFinanceClient();
@@ -2416,6 +2531,16 @@ document.addEventListener("change", (e) => {
     loadBillingSettings();
 });
 document.addEventListener("keydown", (e) => {
+  if (
+    e.target.id === "messageText" &&
+    e.key === "Enter" &&
+    !e.shiftKey &&
+    !e.isComposing
+  ) {
+    e.preventDefault();
+    e.target.form?.requestSubmit();
+    return;
+  }
   if ($("modalWrap").classList.contains("hidden")) return;
   if (e.key === "Escape") closeModal();
   if (e.key === "Tab") {
