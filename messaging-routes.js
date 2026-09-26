@@ -225,6 +225,58 @@ function routes(db) {
     }),
   );
 
+  r.post(
+    "/messages/:id/edit",
+    wrap(async (req, res) => {
+      const ctx = await context(req.user),
+        message = visibleMessage(ctx, req.params.id);
+      if (!D.same(message.senderId, req.user.id))
+        D.fail("Vous pouvez uniquement modifier vos propres messages.", 403);
+      if (Date.now() - new Date(message.createdAt).getTime() > 15 * 60 * 1000)
+        D.fail("La modification est disponible pendant 15 minutes.", 409);
+      if (message.system) D.fail("Un message système ne peut pas être modifié.");
+      const text = D.text(req.body?.text, "Message", 5000, true);
+      if (!text && !message.attachment && !message.sharedRef && !message.encryption)
+        D.fail("Le message ne peut pas être vide.");
+      await db.query(
+        `INSERT INTO message_overrides(message_id,edited_text,edited_at,deleted_for_all)
+         VALUES($1,$2,NOW(),false)
+         ON CONFLICT(message_id) DO UPDATE SET
+           edited_text=EXCLUDED.edited_text,
+           edited_at=NOW(),
+           deleted_for_all=false,
+           deleted_at=NULL`,
+        [String(message.id), text],
+      );
+      res.json({ ok: true });
+    }),
+  );
+  r.post(
+    "/messages/:id/delete-for-all",
+    wrap(async (req, res) => {
+      const ctx = await context(req.user),
+        message = visibleMessage(ctx, req.params.id);
+      if (!D.same(message.senderId, req.user.id) && req.user.role !== "admin")
+        D.fail("Vous pouvez uniquement supprimer vos propres messages.", 403);
+      if (
+        req.user.role !== "admin" &&
+        Date.now() - new Date(message.createdAt).getTime() > 60 * 60 * 1000
+      )
+        D.fail("La suppression pour tous est disponible pendant 1 heure.", 409);
+      if (message.system && req.user.role !== "admin")
+        D.fail("Un message système ne peut pas être supprimé.", 403);
+      await db.query(
+        `INSERT INTO message_overrides(message_id,deleted_for_all,deleted_at)
+         VALUES($1,true,NOW())
+         ON CONFLICT(message_id) DO UPDATE SET
+           deleted_for_all=true,
+           deleted_at=NOW()`,
+        [String(message.id)],
+      );
+      res.json({ ok: true });
+    }),
+  );
+
   r.get(
     "/message-meta",
     wrap(async (req, res) => {
