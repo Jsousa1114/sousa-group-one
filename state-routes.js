@@ -158,6 +158,20 @@ function routes(db) {
                 "Ce client possède un compte de connexion lié. Supprimez ou dissociez ce compte avant de supprimer le client.",
               );
           }
+          if (req.body.action === "record.delete") {
+            if (req.body.payload?.kind === "companies") {
+              const accounts = await c.query(
+                "SELECT id FROM users WHERE company=$1 AND deleted_at IS NULL",
+                [String(result.id)],
+              );
+              if (accounts.rows.length)
+                D.fail("Cette entreprise possède encore des comptes liés.");
+            }
+            if (req.body.payload?.kind === "documents")
+              await c.query("DELETE FROM file_contents WHERE id=$1", [
+                String(result.id),
+              ]);
+          }
           Object.assign(d, data);
           return result;
         }),

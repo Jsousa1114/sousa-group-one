@@ -1146,3 +1146,36 @@ test("employee dossier updates persist without changing linked login email", asy
   );
   assert.equal(denied.status, 403);
 });
+
+test("deleting a document removes stored bytes transactionally", async () => {
+  const uploaded = await call(
+    "state/documents",
+    admin,
+    payload(await rev(), {
+      payload: {
+        company: "home",
+        project: "p1",
+        name: "delete-test.txt",
+        mime: "text/plain",
+        content: Buffer.from("test").toString("base64"),
+      },
+    }),
+  );
+  assert.equal(uploaded.status, 200);
+  const id = uploaded.data.result.id;
+  const removed = await call(
+    "state/command",
+    admin,
+    payload(await rev(), {
+      action: "record.delete",
+      payload: { kind: "documents", id },
+    }),
+  );
+  assert.equal(removed.status, 200);
+  assert.equal(
+    (await db.query("SELECT id FROM file_contents WHERE id=$1", [id])).rows
+      .length,
+    0,
+  );
+  assert.equal((await call("state/documents/" + id, admin)).status, 404);
+});
