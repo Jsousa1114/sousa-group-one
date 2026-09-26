@@ -83,6 +83,109 @@ async function migrate(db = pool) {
   );
 
   await db.query(
+    `CREATE TABLE IF NOT EXISTS push_subscriptions(
+      id BIGSERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      endpoint TEXT NOT NULL,
+      p256dh TEXT NOT NULL,
+      auth TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(user_id,endpoint)
+    )`,
+  );
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS user_presence(
+      user_id INTEGER PRIMARY KEY,
+      last_seen TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      typing_key TEXT,
+      typing_until TIMESTAMPTZ
+    )`,
+  );
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS conversation_prefs(
+      user_id INTEGER NOT NULL,
+      conversation_key TEXT NOT NULL,
+      pinned BOOLEAN NOT NULL DEFAULT false,
+      archived BOOLEAN NOT NULL DEFAULT false,
+      muted_until TIMESTAMPTZ,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY(user_id,conversation_key)
+    )`,
+  );
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS message_reactions(
+      message_id TEXT NOT NULL,
+      user_id INTEGER NOT NULL,
+      emoji VARCHAR(16) NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY(message_id,user_id,emoji)
+    )`,
+  );
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS message_favorites(
+      message_id TEXT NOT NULL,
+      user_id INTEGER NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY(message_id,user_id)
+    )`,
+  );
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS user_crypto_keys(
+      user_id INTEGER PRIMARY KEY,
+      public_jwk JSONB NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`,
+  );
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS rtc_group_rooms(
+      id TEXT PRIMARY KEY,
+      thread_id TEXT NOT NULL,
+      created_by INTEGER NOT NULL,
+      call_type VARCHAR(12) NOT NULL DEFAULT 'audio',
+      status VARCHAR(20) NOT NULL DEFAULT 'ringing',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      ended_at TIMESTAMPTZ
+    )`,
+  );
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS rtc_group_members(
+      room_id TEXT NOT NULL,
+      user_id INTEGER NOT NULL,
+      joined_at TIMESTAMPTZ,
+      left_at TIMESTAMPTZ,
+      PRIMARY KEY(room_id,user_id)
+    )`,
+  );
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS rtc_group_signals(
+      id BIGSERIAL PRIMARY KEY,
+      room_id TEXT NOT NULL,
+      from_user INTEGER NOT NULL,
+      to_user INTEGER NOT NULL,
+      kind VARCHAR(20) NOT NULL,
+      payload JSONB NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`,
+  );
+  await db.query(
+    `CREATE INDEX IF NOT EXISTS rtc_group_signals_lookup_idx ON rtc_group_signals(room_id,to_user,id)`,
+  );
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS retention_policies(
+      scope TEXT PRIMARY KEY,
+      days INTEGER NOT NULL,
+      updated_by INTEGER,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`,
+  );
+  await db.query(
+    `INSERT INTO retention_policies(scope,days) VALUES
+      ('messages',3650),('call_history',730),('call_signals',7)
+      ON CONFLICT(scope) DO NOTHING`,
+  );
+
+  await db.query(
     "INSERT INTO app_state(id,data) VALUES(1,$1) ON CONFLICT(id) DO NOTHING",
     [JSON.stringify(emptyState())],
   );
