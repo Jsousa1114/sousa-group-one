@@ -711,7 +711,14 @@ function routes(db) {
         await db.query("SELECT data FROM app_state WHERE id=1")
       ).rows[0];
       const visible = D.viewState(row.data, req.user),
-        msg = visible.messages.find((m) => D.same(m.id, req.params.id));
+        msg = visible.messages.find((m) => D.same(m.id, req.params.id)),
+        override = (
+          await db.query(
+            "SELECT deleted_for_all FROM message_overrides WHERE message_id=$1",
+            [req.params.id],
+          )
+        ).rows[0];
+      if (override?.deleted_for_all) D.fail("Pièce jointe supprimée.", 404);
       if (!msg?.attachment?.fileId) D.fail("Pièce jointe introuvable.", 404);
       const file = (
         await db.query("SELECT content FROM file_contents WHERE id=$1", [
