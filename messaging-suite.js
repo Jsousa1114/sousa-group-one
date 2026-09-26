@@ -24,7 +24,9 @@
     groupCall = null,
     groupInviteId = "",
     groupPollBusy = false,
-    searchGeneration = 0;
+    searchGeneration = 0,
+    e2eeIdentityReady = false,
+    e2eeRetryAt = 0;
 
   const core = () => window.SGOChatCore,
     cryptoBox = () => window.SGOMessageCrypto,
@@ -171,7 +173,8 @@
       decrypted.clear();
       metaLoadedAt = presenceLoadedAt = prefsLoadedAt = 0;
       urlHandledFor = null;
-      cryptoBox()?.ensureIdentity?.(core().api).catch(() => {});
+      e2eeIdentityReady = false;
+      e2eeRetryAt = 0;
       ensureServiceWorker()
         .then(() => {
           if ("Notification" in window && Notification.permission === "granted")
@@ -179,6 +182,19 @@
         })
         .catch(() => {});
       heartbeat();
+    }
+    if (
+      !e2eeIdentityReady &&
+      cryptoBox()?.ensureIdentity &&
+      Date.now() >= e2eeRetryAt
+    ) {
+      e2eeRetryAt = Date.now() + 5000;
+      try {
+        await cryptoBox().ensureIdentity(core().api);
+        e2eeIdentityReady = true;
+      } catch (e) {
+        console.warn("E2EE identity registration retry scheduled:", e?.message || e);
+      }
     }
     if (!heartbeatTimer)
       heartbeatTimer = setInterval(() => heartbeat(), 20000);
