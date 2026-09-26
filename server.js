@@ -26,6 +26,7 @@ function createApp(db = pool) {
   });
   app.use("/api/auth", require("./auth-routes").routes(db));
   app.use("/api/state", require("./state-routes").routes(db));
+  app.use("/api/messaging", require("./messaging-routes").routes(db));
   app.get(["/favicon.ico", "/icon.svg"], (req, res) => {
     res.set("Cache-Control", "no-cache");
     res.redirect(302, "/assets/logos/group.png?v=group-20260926");
@@ -34,6 +35,7 @@ function createApp(db = pool) {
     "index.html",
     "app.js",
     "finance.js",
+    "messaging-crypto.js",
     "styles.css",
     "manifest.webmanifest",
     "service-worker.js",
@@ -77,7 +79,18 @@ if (require.main === module) {
       "DATABASE_URL and JWT_SECRET (32+ characters) are required.",
     );
   migrate()
-    .then(() => createApp().listen(process.env.PORT || 3000))
+    .then(() => {
+      const app = createApp();
+      const server = app.listen(process.env.PORT || 3000);
+      const cleanup = async () =>
+        require("./messaging-routes").cleanupRetention(pool).catch((e) =>
+          console.error("Messaging retention cleanup failed", e),
+        );
+      cleanup();
+      const timer = setInterval(cleanup, 6 * 60 * 60 * 1000);
+      timer.unref?.();
+      return server;
+    })
     .catch((e) => {
       console.error(e);
       process.exitCode = 1;
