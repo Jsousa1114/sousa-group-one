@@ -1387,3 +1387,415 @@ test("audio call signaling supports ring, answer, ICE exchange, hangup and rejec
   assert.equal(rejected.status, 200);
   assert.equal(rejected.data.status, "rejected");
 });
+
+
+test("complete messaging suite secures presence, preferences, reactions, E2EE transport, shares, group calls and project events", async () => {
+  const stamp = Date.now(),
+    email = `suite-client-${stamp}@test.invalid`,
+    password = "Messaging-Suite-Test-Password-2026",
+    hash = await bcrypt.hash(password, 4);
+
+  // Fresh business client and fresh login account avoid depending on earlier mutable fixtures.
+  const clientCreated = await call(
+    "state/command",
+    admin,
+    payload(await rev(), {
+      action: "create",
+      collection: "clients",
+      payload: {
+        company: "home",
+        name: "Suite Client",
+        email,
+        phone: "",
+        city: "Lausanne",
+        street: "Rue Test",
+        buildingNumber: "1",
+        zip: "1000",
+        country: "CH",
+        type: "Test",
+      },
+    }),
+  );
+  assert.equal(clientCreated.status, 200, JSON.stringify(clientCreated.data));
+  const suiteClientId = clientCreated.data.result.id,
+    userInsert = await db.query(
+      "INSERT INTO users(email,password_hash,role,name,avatar,company,client_id) VALUES($1,$2,'client','Suite Client','SC','home',$3) RETURNING id",
+      [email, hash, String(suiteClientId)],
+    ),
+    suiteUserId = userInsert.rows[0].id,
+    suiteLogin = await call("auth/login", null, { email, password });
+  assert.equal(suiteLogin.status, 200);
+  const suiteClient = suiteLogin.data.token;
+
+  // Presence / typing.
+  assert.equal(
+    (await call("messaging/presence", suiteClient, { typingKey: null })).status,
+    200,
+  );
+  let presence = await call("messaging/presence", admin);
+  assert.equal(presence.status, 200);
+  assert.ok(
+    presence.data.presence.some(
+      (p) => String(p.userId) === String(suiteUserId) && p.online,
+    ),
+  );
+
+  // Conversation + pin/archive/mute preferences.
+  const group = await call(
+    "state/message-threads",
+    admin,
+    payload(await rev(), {
+      payload: {
+        type: "group",
+        name: "Suite Messaging Group",
+        participants: [suiteUserId],
+      },
+    }),
+  );
+  assert.equal(group.status, 200, JSON.stringify(group.data));
+  const groupId = group.data.result.id,
+    groupKey = "thread:" + groupId;
+  assert.equal(
+    (
+      await call("messaging/preferences", suiteClient, {
+        key: groupKey,
+        pinned: true,
+        archived: true,
+        mutedUntil: new Date(Date.now() + 3600000).toISOString(),
+      })
+    ).status,
+    200,
+  );
+  const prefs = await call("messaging/preferences", suiteClient);
+  assert.ok(
+    prefs.data.preferences.some(
+      (p) => p.key === groupKey && p.pinned && p.archived && p.mutedUntil,
+    ),
+  );
+
+  // Public E2EE keys are available to participants of a visible group.
+  const adminPublic = {
+      kty: "EC",
+      crv: "P-256",
+      x: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      y: "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+      ext: true,
+    },
+    clientPublic = {
+      kty: "EC",
+      crv: "P-256",
+      x: "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
+      y: "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD",
+      ext: true,
+    };
+  assert.equal(
+    (await call("messaging/crypto/key", admin, { publicJwk: adminPublic })).status,
+    200,
+  );
+  assert.equal(
+    (await call("messaging/crypto/key", suiteClient, { publicJwk: clientPublic }))
+      .status,
+    200,
+  );
+  const clientKeys = await call(
+    "messaging/crypto/keys?ids=" + encodeURIComponent(String((await call("state", admin)).data.profile.id)),
+    suiteClient,
+  );
+  assert.equal(clientKeys.status, 200);
+  assert.ok(clientKeys.data.keys.length >= 1);
+
+  // E2EE transport: server stores ciphertext, never the plaintext.
+  const envelopes = {
+      [String((await call("state", admin)).data.profile.id)]: {
+        iv: "AAAAAAAAAAAAAAAA",
+        ciphertext: "BBBBBBBBBBBBBBBBBBBBBBBB",
+      },
+      [String(suiteUserId)]: {
+        iv: "CCCCCCCCCCCCCCCC",
+        ciphertext: "DDDDDDDDDDDDDDDDDDDDDDDD",
+      },
+    },
+    encryptedSent = await call(
+      "state/messages",
+      admin,
+      payload(await rev(), {
+        payload: {
+          threadId: groupId,
+          text: "",
+          encryption: {
+            algorithm: "SGO-E2EE-P256-AESGCM-v1",
+            iv: "EEEEEEEEEEEEEEEE",
+            ciphertext: "FFFFFFFFFFFFFFFFFFFFFFFF",
+            envelopes,
+          },
+        },
+      }),
+    );
+  assert.equal(encryptedSent.status, 200, JSON.stringify(encryptedSent.data));
+  const encryptedId = encryptedSent.data.result.id,
+    rawState = (await db.query("SELECT data FROM app_state WHERE id=1")).rows[0]
+      .data,
+    rawMessage = rawState.messages.find((m) => m.id === encryptedId);
+  assert.equal(rawMessage.text, "");
+  assert.equal(rawMessage.encryption.ciphertext, "FFFFFFFFFFFFFFFFFFFFFFFF");
+  assert.equal(JSON.stringify(rawMessage).includes("secret plaintext"), false);
+
+  // Reactions and favorites are per-user metadata.
+  assert.equal(
+    (
+      await call(
+        "messaging/messages/" + encryptedId + "/reaction",
+        suiteClient,
+        { emoji: "✅" },
+      )
+    ).status,
+    200,
+  );
+  assert.equal(
+    (
+      await call(
+        "messaging/messages/" + encryptedId + "/favorite",
+        suiteClient,
+        {},
+      )
+    ).status,
+    200,
+  );
+  const meta = await call("messaging/message-meta", suiteClient);
+  assert.ok(
+    meta.data.reactions.some(
+      (r) => r.messageId === encryptedId && r.emoji === "✅",
+    ),
+  );
+  assert.ok(meta.data.favorites.includes(encryptedId));
+
+  // Plain message edit then delete-for-all, including attachment purge.
+  const attachmentSent = await call(
+    "state/messages",
+    admin,
+    payload(await rev(), {
+      payload: {
+        threadId: groupId,
+        text: "Texte avant modification",
+        attachment: {
+          name: "suite.txt",
+          mime: "text/plain",
+          content: Buffer.from("suite attachment").toString("base64"),
+        },
+      },
+    }),
+  );
+  assert.equal(attachmentSent.status, 200);
+  const editableId = attachmentSent.data.result.id;
+  assert.equal(
+    (
+      await call("messaging/messages/" + editableId + "/edit", admin, {
+        text: "Texte modifié",
+      })
+    ).status,
+    200,
+  );
+  let suiteState = await call("state", suiteClient);
+  assert.equal(
+    suiteState.data.data.messages.find((m) => m.id === editableId).text,
+    "Texte modifié",
+  );
+  assert.equal(
+    (
+      await call(
+        "messaging/messages/" + editableId + "/delete-for-all",
+        admin,
+        {},
+      )
+    ).status,
+    200,
+  );
+  suiteState = await call("state", suiteClient);
+  assert.equal(
+    suiteState.data.data.messages.find((m) => m.id === editableId).deletedForAll,
+    true,
+  );
+  assert.equal(
+    (
+      await fetch(url + "/api/state/messages/" + editableId + "/attachment", {
+        headers: { Authorization: "Bearer " + suiteClient },
+      })
+    ).status,
+    404,
+  );
+
+  // Create and issue a visible quote, then share its reference in chat.
+  const quote = await call(
+    "state/command",
+    admin,
+    payload(await rev(), {
+      action: "create",
+      collection: "quotes",
+      payload: {
+        company: "home",
+        clientId: suiteClientId,
+        title: "Devis partagé dans le chat",
+        date: "2026-09-27",
+        valid: "2026-10-27",
+        lines: [
+          {
+            description: "Prestation chat",
+            quantity: 1,
+            unitPrice: 120,
+            vatRate: 0,
+          },
+        ],
+      },
+    }),
+  );
+  assert.equal(quote.status, 200);
+  const quoteId = quote.data.result.id;
+  assert.equal(
+    (
+      await call(
+        "state/command",
+        admin,
+        payload(await rev(), {
+          action: "quote.issue",
+          payload: { id: quoteId },
+        }),
+      )
+    ).status,
+    200,
+  );
+  const shared = await call(
+    "state/messages",
+    admin,
+    payload(await rev(), {
+      payload: {
+        threadId: groupId,
+        text: "Voici le devis",
+        sharedRef: { kind: "quotes", id: quoteId },
+      },
+    }),
+  );
+  assert.equal(shared.status, 200, JSON.stringify(shared.data));
+  suiteState = await call("state", suiteClient);
+  assert.equal(
+    suiteState.data.data.messages.find((m) => m.id === shared.data.result.id)
+      .sharedRef.id,
+    quoteId,
+  );
+
+  // Group-call signaling lifecycle.
+  const room = await call("messaging/group-calls", admin, {
+    threadId: groupId,
+    callType: "video",
+  });
+  assert.equal(room.status, 200, JSON.stringify(room.data));
+  const roomId = room.data.id;
+  let pendingGroups = await call("messaging/group-calls/pending", suiteClient);
+  assert.ok(pendingGroups.data.rooms.some((r) => r.id === roomId));
+  assert.equal(
+    (
+      await call(
+        "messaging/group-calls/" + roomId + "/join",
+        suiteClient,
+        {},
+      )
+    ).status,
+    200,
+  );
+  assert.equal(
+    (
+      await call(
+        "messaging/group-calls/" + roomId + "/signal",
+        admin,
+        {
+          toUser: suiteUserId,
+          kind: "offer",
+          payload: { type: "offer", sdp: "suite-group-offer" },
+        },
+      )
+    ).status,
+    200,
+  );
+  const groupSignals = await call(
+    "messaging/group-calls/" + roomId + "/signals?after=0",
+    suiteClient,
+  );
+  assert.equal(groupSignals.status, 200);
+  assert.equal(groupSignals.data.signals[0].kind, "offer");
+  assert.equal(
+    (await call("messaging/group-calls/" + roomId + "/end", admin, {})).status,
+    200,
+  );
+
+  // Direct video call appears correctly in history.
+  const directVideo = await call("state/calls/start", admin, {
+    recipientId: suiteUserId,
+    callType: "video",
+    offer: {
+      type: "offer",
+      sdp: "v=0\r\no=suite-video 1 1 IN IP4 127.0.0.1\r\ns=video",
+    },
+  });
+  assert.equal(directVideo.status, 200);
+  await call("state/calls/" + directVideo.data.id + "/reject", suiteClient, {});
+  const history = await call("messaging/calls/history", admin);
+  assert.ok(
+    history.data.direct.some(
+      (c) => c.id === directVideo.data.id && c.callType === "video",
+    ),
+  );
+
+  // Project creation must create a project discussion and system activity.
+  const project = await call(
+    "state/command",
+    admin,
+    payload(await rev(), {
+      action: "create",
+      collection: "projects",
+      payload: {
+        company: "home",
+        clientId: suiteClientId,
+        title: "Projet auto-chat Suite",
+        address: "Lausanne",
+        start: "2026-09-28",
+        end: "2026-10-10",
+        budget: 500,
+        team: [],
+        description: "Test système",
+      },
+    }),
+  );
+  assert.equal(project.status, 200, JSON.stringify(project.data));
+  const projectId = project.data.result.id;
+  suiteState = await call("state", suiteClient);
+  const projectThread = suiteState.data.data.messageThreads.find(
+    (t) => t.type === "project" && String(t.projectId) === String(projectId),
+  );
+  assert.ok(projectThread, "project thread should be created automatically");
+  assert.ok(
+    suiteState.data.data.messages.some(
+      (m) =>
+        String(m.threadId) === String(projectThread.id) &&
+        m.system &&
+        /Chantier créé/i.test(m.text),
+    ),
+  );
+
+  // Typing on visible group is allowed and retention is admin-only.
+  assert.equal(
+    (
+      await call("messaging/presence", suiteClient, {
+        typingKey: groupKey,
+      })
+    ).status,
+    200,
+  );
+  presence = await call("messaging/presence", admin);
+  assert.ok(
+    presence.data.presence.some(
+      (p) =>
+        String(p.userId) === String(suiteUserId) && p.typingKey === groupKey,
+    ),
+  );
+  assert.equal((await call("messaging/retention", suiteClient)).status, 403);
+  assert.equal((await call("messaging/retention", admin)).status, 200);
+});
