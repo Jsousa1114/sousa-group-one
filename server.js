@@ -10,7 +10,7 @@ function createApp(db = pool) {
       "X-Content-Type-Options": "nosniff",
       "Referrer-Policy": "same-origin",
       "Content-Security-Policy":
-        "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob: data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+        "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob: data:; media-src 'self' blob:; worker-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
     });
     if (req.path.startsWith("/api")) res.set("Cache-Control", "no-store");
     next();
