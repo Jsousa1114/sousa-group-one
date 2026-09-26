@@ -843,6 +843,199 @@ function routes(db) {
       ),
     ),
   );
+  async function expireCalls(c) {
+    await c.query(
+      "UPDATE rtc_calls SET status='missed',ended_at=NOW(),updated_at=NOW() WHERE status='ringing' AND created_at < NOW() - INTERVAL '90 seconds'",
+    );
+    await c.query(
+      "UPDATE rtc_calls SET status='ended',ended_at=NOW(),updated_at=NOW() WHERE status='accepted' AND updated_at < NOW() - INTERVAL '6 hours'",
+    );
+  }
+  async function callRow(c, id, userId) {
+    const row = (
+      await c.query(
+        "SELECT * FROM rtc_calls WHERE id=$1 AND (caller_id=$2 OR callee_id=$2)",
+        [id, userId],
+      )
+    ).rows[0];
+    if (!row) D.fail("Appel introuvable.", 404);
+    return row;
+  }
+  r.get(
+    "/calls/pending",
+    wrap(async (req, res) => {
+      await expireCalls(db);
+      const active = (
+        await db.query(
+          "SELECT * FROM rtc_calls WHERE (caller_id=$1 OR callee_id=$1) AND status IN ('ringing','accepted') ORDER BY created_at DESC LIMIT 1",
+          [req.user.id],
+        )
+      ).rows[0];
+      res.json({
+        call: active
+          ? {
+              id: active.id,
+              callerId: active.caller_id,
+              calleeId: active.callee_id,
+              callerName: active.caller_name,
+              calleeName: active.callee_name,
+              status: active.status,
+              offer: active.offer,
+              answer: active.answer,
+              createdAt: active.created_at,
+              updatedAt: active.updated_at,
+            }
+          : null,
+      });
+    }),
+  );
+  r.post(
+    "/calls/start",
+    wrap(async (req, res) => {
+      await expireCalls(db);
+      const p = req.body || {},
+        recipient = (
+          await db.query(
+            "SELECT * FROM users WHERE id=$1 AND deleted_at IS NULL AND disabled=false",
+            [p.recipientId],
+          )
+        ).rows[0];
+      if (!recipient || !D.canContact(req.user, recipient, (await db.query("SELECT data FROM app_state WHERE id=1")).rows[0]?.data))
+        D.fail("Destinataire non autorisé.", 403);
+      if (D.same(recipient.id, req.user.id))
+        D.fail("Vous ne pouvez pas vous appeler vous-même.");
+      if (
+        !p.offer ||
+        p.offer.type !== "offer" ||
+        typeof p.offer.sdp !== "string" ||
+        p.offer.sdp.length > 100000
+      )
+        D.fail("Offre d’appel invalide.");
+      const busy = (
+        await db.query(
+          "SELECT id FROM rtc_calls WHERE status IN ('ringing','accepted') AND (caller_id=ANY($1::int[]) OR callee_id=ANY($1::int[])) LIMIT 1",
+          [[Number(req.user.id), Number(recipient.id)]],
+        )
+      ).rows[0];
+      if (busy) D.fail("Un des correspondants est déjà en appel.", 409);
+      const id = randomUUID();
+      await db.query(
+        "INSERT INTO rtc_calls(id,caller_id,callee_id,caller_name,callee_name,status,offer) VALUES($1,$2,$3,$4,$5,'ringing',$6)",
+        [id, req.user.id, recipient.id, req.user.name, recipient.name, p.offer],
+      );
+      res.json({ id, status: "ringing" });
+    }),
+  );
+  r.get(
+    "/calls/:id",
+    wrap(async (req, res) => {
+      await expireCalls(db);
+      const call = await callRow(db, req.params.id, req.user.id);
+      res.json({
+        call: {
+          id: call.id,
+          callerId: call.caller_id,
+          calleeId: call.callee_id,
+          callerName: call.caller_name,
+          calleeName: call.callee_name,
+          status: call.status,
+          offer: call.offer,
+          answer: call.answer,
+          createdAt: call.created_at,
+          updatedAt: call.updated_at,
+        },
+      });
+    }),
+  );
+  r.post(
+    "/calls/:id/answer",
+    wrap(async (req, res) => {
+      const call = await callRow(db, req.params.id, req.user.id);
+      if (!D.same(call.callee_id, req.user.id) || call.status !== "ringing")
+        D.fail("Cet appel ne peut plus être accepté.", 409);
+      const answer = req.body?.answer;
+      if (
+        !answer ||
+        answer.type !== "answer" ||
+        typeof answer.sdp !== "string" ||
+        answer.sdp.length > 100000
+      )
+        D.fail("Réponse d’appel invalide.");
+      await db.query(
+        "UPDATE rtc_calls SET status='accepted',answer=$1,updated_at=NOW() WHERE id=$2",
+        [answer, call.id],
+      );
+      res.json({ id: call.id, status: "accepted" });
+    }),
+  );
+  r.post(
+    "/calls/:id/reject",
+    wrap(async (req, res) => {
+      const call = await callRow(db, req.params.id, req.user.id);
+      if (!D.same(call.callee_id, req.user.id) || call.status !== "ringing")
+        D.fail("Cet appel ne peut plus être refusé.", 409);
+      await db.query(
+        "UPDATE rtc_calls SET status='rejected',ended_at=NOW(),updated_at=NOW() WHERE id=$1",
+        [call.id],
+      );
+      res.json({ id: call.id, status: "rejected" });
+    }),
+  );
+  r.post(
+    "/calls/:id/end",
+    wrap(async (req, res) => {
+      const call = await callRow(db, req.params.id, req.user.id);
+      if (!["ringing", "accepted"].includes(call.status))
+        return res.json({ id: call.id, status: call.status });
+      await db.query(
+        "UPDATE rtc_calls SET status='ended',ended_at=NOW(),updated_at=NOW() WHERE id=$1",
+        [call.id],
+      );
+      res.json({ id: call.id, status: "ended" });
+    }),
+  );
+  r.post(
+    "/calls/:id/candidates",
+    wrap(async (req, res) => {
+      const call = await callRow(db, req.params.id, req.user.id);
+      if (!["ringing", "accepted"].includes(call.status))
+        D.fail("Appel terminé.", 409);
+      const candidate = req.body?.candidate;
+      if (
+        !candidate ||
+        typeof candidate.candidate !== "string" ||
+        candidate.candidate.length > 10000
+      )
+        D.fail("Candidat réseau invalide.");
+      await db.query(
+        "INSERT INTO rtc_ice_candidates(call_id,sender_id,candidate) VALUES($1,$2,$3)",
+        [call.id, req.user.id, candidate],
+      );
+      res.json({ ok: true });
+    }),
+  );
+  r.get(
+    "/calls/:id/candidates",
+    wrap(async (req, res) => {
+      await callRow(db, req.params.id, req.user.id);
+      const after = Math.max(0, Number(req.query.after) || 0),
+        rows = (
+          await db.query(
+            "SELECT id,sender_id,candidate FROM rtc_ice_candidates WHERE call_id=$1 AND id>$2 ORDER BY id ASC LIMIT 200",
+            [req.params.id, after],
+          )
+        ).rows;
+      res.json({
+        candidates: rows
+          .filter((row) => !D.same(row.sender_id, req.user.id))
+          .map((row) => ({
+            id: Number(row.id),
+            senderId: row.sender_id,
+            candidate: row.candidate,
+          })),
+      });
+    }),
+  );
   r.get(
     "/documents/:id",
     wrap(async (req, res) => {
