@@ -1017,3 +1017,39 @@ test("record deletion isolates companies, attachments, and message participants"
     0,
   );
 });
+
+test("client editing preserves identity, company and issued snapshots", () => {
+  const d = fixture();
+  Object.assign(d.clients[0], { email: "old@test.invalid", city: "Nyon" });
+  d.invoices = [
+    {
+      id: "inv",
+      clientId: "c1",
+      customer: { name: "Original", email: "old@test.invalid" },
+    },
+  ];
+  const out = command(d, admin, "client.update", {
+    id: "c1",
+    name: "Updated",
+    email: "new@test.invalid",
+    street: "Rue 1",
+    zip: "1000",
+    city: "Lausanne",
+    country: "ch",
+    company: "moving",
+  });
+  assert.equal(out.result.name, "Updated");
+  assert.equal(out.result.company, "home");
+  assert.equal(out.result.country, "CH");
+  assert.equal(out.data.projects[0].clientId, "c1");
+  assert.equal(out.data.invoices[0].customer.name, "Original");
+  for (const u of [client, employee, { ...admin, company: "moving" }])
+    assert.throws(
+      () => command(d, u, "client.update", { id: "c1", name: "Denied" }),
+      /non autorisée/,
+    );
+  assert.throws(
+    () => command(d, admin, "client.update", { id: "c1", email: "invalid" }),
+    /E-mail invalide/,
+  );
+});

@@ -1016,3 +1016,24 @@ test("employee dossier edits profile and assigns tools from the same screen", as
     h.close();
   }
 });
+
+test("client edit is prefilled and saves contact changes from the list", async () => {
+  const h = await setup("admin", false, false, (d) => {
+    Object.assign(d.clients[0], {
+      email: "contact@test.invalid",
+      city: "Nyon",
+    });
+  });
+  try {
+    click(h, '[data-page="clients"]');
+    click(h, '[data-action="client-edit"]');
+    assert.equal(h.w.document.getElementById("f_city").value, "Nyon");
+    fill(h, "city", "Lausanne");
+    submit(h);
+    await flush();
+    await flush();
+    assert.match(h.w.document.body.textContent, /Lausanne/);
+  } finally {
+    h.close();
+  }
+});

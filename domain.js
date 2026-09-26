@@ -1047,6 +1047,28 @@ function applyCommand(
       }
       result = { id: r.id };
     }
+  } else if (action === "client.update") {
+    const r = ref(d, "clients", p.id);
+    if (
+      !privileged(u, access.clients) ||
+      !(r.company ? inCompany(u, r.company) : u.company === "group")
+    )
+      fail("Modification du client non autorisée.", 403);
+    const value = { ...r, ...p };
+    const email = text(value.email, "E-mail", 255);
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) fail("E-mail invalide.");
+    Object.assign(r, {
+      name: text(value.name, "Nom"),
+      email,
+      phone: text(value.phone, "Téléphone", 40, true),
+      street: text(value.street, "Rue", 200, true),
+      buildingNumber: text(value.buildingNumber, "Numéro", 20, true),
+      zip: text(value.zip, "Code postal", 20, true),
+      city: text(value.city, "Ville"),
+      country: text(value.country || "CH", "Pays", 2).toUpperCase(),
+      type: text(value.type, "Type", 80, true),
+    });
+    result = r;
   } else if (action === "client.delete") {
     const client = ref(d, "clients", p.id);
     if (
