@@ -506,6 +506,31 @@ function routes(db) {
               uploadedBy: req.user.id,
               visibility: p.visibility === "client" ? "client" : "team",
             };
+            if (p.category === "identity") {
+              if (
+                !m.employeeId ||
+                m.project ||
+                m.clientId ||
+                p.visibility === "client"
+              )
+                D.fail(
+                  "Les pièces d’identité doivent être liées uniquement à un salarié.",
+                );
+              if (
+                ![
+                  "Carte d’identité",
+                  "Passeport",
+                  "Permis de conduire",
+                  "Permis de séjour",
+                  "Autre justificatif",
+                ].includes(p.documentType)
+              )
+                D.fail("Type de justificatif invalide.");
+              m.category = "identity";
+              m.documentType = p.documentType;
+              m.description = D.text(p.description, "Description", 200, true);
+              m.visibility = "hr";
+            }
             if (m.visibility === "client" && !D.privileged(req.user, D.OPS))
               D.fail(
                 "Seuls les responsables peuvent partager avec le client.",
@@ -545,6 +570,25 @@ function routes(db) {
             const bytes = Buffer.from(p.content, "base64");
             if (!bytes.length || bytes.length > 5 * 1024 * 1024)
               D.fail("Fichier vide ou supérieur à 5 Mo.");
+            if (m.category === "identity") {
+              const valid =
+                mime === "application/pdf"
+                  ? bytes.subarray(0, 5).toString() === "%PDF-"
+                  : mime === "image/jpeg"
+                    ? bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255
+                    : mime === "image/png"
+                      ? bytes
+                          .subarray(0, 8)
+                          .equals(
+                            Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+                          )
+                      : mime === "image/webp"
+                        ? bytes.subarray(0, 4).toString() === "RIFF" &&
+                          bytes.subarray(8, 12).toString() === "WEBP"
+                        : false;
+              if (!valid)
+                D.fail("Choisissez une photo JPG, PNG, WebP ou un PDF valide.");
+            }
             m.mime = mime;
             m.size = bytes.length;
             await c.query(

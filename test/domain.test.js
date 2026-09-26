@@ -693,6 +693,9 @@ test("employee profile edits preserve identity, scope and account linkage", () =
     street: "Rue 1",
     city: "Nyon",
     photo,
+    nationality: "Portugaise",
+    residencePermit: "C",
+    residencePermitExpiry: "2029-01-01",
     notes: "Private",
     company: "moving",
     companies: ["moving"],
@@ -700,6 +703,9 @@ test("employee profile edits preserve identity, scope and account linkage", () =
   assert.equal(r.company, "home");
   assert.equal(r.name, "Updated");
   assert.equal(r.photo, photo);
+  assert.equal(r.nationality, "Portugaise");
+  assert.equal(r.residencePermit, "C");
+  assert.equal(r.residencePermitExpiry, "2029-01-01");
   assert.equal(r.companies, undefined);
   assert.throws(
     () => command(d, employee, "employee.update", { id: "e1", name: "Self" }),
@@ -797,4 +803,37 @@ test("employee equipment assignments validate scope, exclusivity, history and re
   }).data;
   assert.equal(d.tools[0].employeeId, "");
   assert.equal(d.tools[0].assignmentHistory.length, 2);
+});
+
+test("identity documents are restricted to HR in employee companies", () => {
+  const d = fixture();
+  d.employees[0].nationality = "Portugaise";
+  d.documents = [
+    {
+      id: "identity1",
+      employeeId: "e1",
+      company: "home",
+      category: "identity",
+      visibility: "hr",
+    },
+  ];
+  assert.equal(D.viewState(d, admin).documents.length, 1);
+  assert.equal(D.viewState(d, employee).documents.length, 0);
+  assert.equal(
+    D.viewState(d, { ...admin, role: "manager" }).documents.length,
+    0,
+  );
+  assert.equal(
+    D.viewState(d, { ...admin, role: "manager" }).employees[0].nationality,
+    undefined,
+  );
+  assert.equal(
+    D.viewState(d, { ...admin, role: "hr", company: "moving" }).documents
+      .length,
+    0,
+  );
+  assert.equal(
+    D.viewState(d, { ...admin, role: "hr", company: "home" }).documents.length,
+    1,
+  );
 });
