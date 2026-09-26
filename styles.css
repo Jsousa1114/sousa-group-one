@@ -2331,3 +2331,17 @@ td {
     width: 210px;
   }
 }
+
+.nav-unread {
+  display: inline-grid;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  place-items: center;
+  margin-left: 6px;
+  border-radius: 999px;
+  background: var(--green);
+  color: #fff;
+  font-size: .52rem;
+  font-weight: 800;
+}
