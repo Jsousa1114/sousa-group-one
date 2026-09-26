@@ -3444,6 +3444,7 @@ window.SGOChatCore = {
   same,
   loadIceServers,
   startDirectCall,
+  hasDirectCall: () => !!(activeCall || incomingCall),
   documentModal,
   authFetch: (path, options = {}) =>
     fetch(path, {
