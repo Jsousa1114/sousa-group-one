@@ -764,3 +764,31 @@ test("new client and account commit together with private access and full rollba
   );
   assert.equal(await rev(), before);
 });
+
+test("editing employee companies without a new password preserves login credentials", async () => {
+  const body = {
+    name: "Membership edit", email: "membership-edit@test.invalid",
+    password: "Membership-Strong-Password", company: "home", role: "employee",
+    isEmployee: "yes", employeeCompanies: ["home"],
+    newEmployee: { job: "Technicien", salary: 5000, activity: 100, vacation: 20, entry: "2026-09-24" },
+  };
+  const created = await call("state/users", admin, payload(await rev(), { payload: body }));
+  assert.equal(created.status, 200);
+  const id = created.data.result.id;
+  const before = (await db.query("SELECT password_hash FROM users WHERE id=$1", [id])).rows[0].password_hash;
+  const edit = { ...body, id, employeeId: created.data.result.employeeId, employeeCompanies: ["home", "tech"] };
+  delete edit.newEmployee;
+  delete edit.password;
+  const saved = await call("state/users", admin, payload(await rev(), { payload: edit }));
+  assert.equal(saved.status, 200, JSON.stringify(saved.data));
+  assert.equal((await db.query("SELECT password_hash FROM users WHERE id=$1", [id])).rows[0].password_hash, before);
+  const login = await call("auth/login", null, { email: body.email, password: body.password });
+  assert.equal(login.status, 200);
+  assert.deepEqual((await call("state", login.data.token)).data.profile.companies, ["home", "tech"]);
+  const invalid = await call("state/users", admin, payload(await rev(), { payload: { ...edit, password: "short" } }));
+  assert.equal(invalid.status, 400);
+  const changed = await call("state/users", admin, payload(await rev(), { payload: { ...edit, password: "Replacement-Strong-Password" } }));
+  assert.equal(changed.status, 200);
+  assert.equal((await call("auth/login", null, { email: body.email, password: body.password })).status, 401);
+  assert.equal((await call("auth/login", null, { email: body.email, password: "Replacement-Strong-Password" })).status, 200);
+});

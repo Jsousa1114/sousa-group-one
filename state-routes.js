@@ -189,9 +189,9 @@ function routes(db) {
               role = p.role;
             if (!D.ROLES.includes(role)) D.fail("Rôle invalide.");
             const email = D.text(p.email, "E-mail", 255).toLowerCase(),
-              password = D.text(p.password, "Mot de passe", 200);
+              password = D.text(p.password, "Mot de passe", 200, Boolean(p.id));
             if (
-              password.length < 12 ||
+              ((!p.id || password) && password.length < 12) ||
               !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
             )
               D.fail(
@@ -322,10 +322,10 @@ function routes(db) {
               )
                 D.fail("Vous ne pouvez pas retirer vos propres droits.");
               await c.query(
-                "UPDATE users SET email=$1,password_hash=$2,role=$3,name=$4,company=$5,employee_id=$6,client_id=$7,disabled=false,session_version=session_version+1 WHERE id=$8",
+                "UPDATE users SET email=$1,password_hash=COALESCE($2,password_hash),role=$3,name=$4,company=$5,employee_id=$6,client_id=$7,disabled=false,session_version=session_version+1 WHERE id=$8",
                 [
                   email,
-                  await bcrypt.hash(password, 12),
+                  password ? await bcrypt.hash(password, 12) : null,
                   role,
                   D.text(p.name, "Nom", 160),
                   company,
