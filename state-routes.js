@@ -1269,7 +1269,14 @@ function routes(db) {
           username: process.env.RTC_TURN_USERNAME,
           credential: process.env.RTC_TURN_CREDENTIAL,
         });
-      res.set("Cache-Control", "no-store").json({ iceServers });
+      res.set("Cache-Control", "no-store").json({
+        iceServers,
+        turnAvailable: iceServers.some((server) =>
+          (Array.isArray(server.urls) ? server.urls : [server.urls]).some(
+            (url) => String(url || "").startsWith("turn:") || String(url || "").startsWith("turns:"),
+          ),
+        ),
+      });
     }),
   );
   r.get(
