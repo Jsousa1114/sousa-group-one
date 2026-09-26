@@ -64,6 +64,9 @@ async function migrate(db = pool) {
     )`,
   );
   await db.query(
+    "ALTER TABLE rtc_calls ADD COLUMN IF NOT EXISTS call_type VARCHAR(12) NOT NULL DEFAULT 'audio'",
+  );
+  await db.query(
     `CREATE INDEX IF NOT EXISTS rtc_calls_callee_status_idx ON rtc_calls(callee_id,status,created_at DESC)`,
   );
   await db.query(
