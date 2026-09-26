@@ -297,10 +297,15 @@ function render() {
   $("userName").textContent = profile.name + " · " + roles[profile.role];
   $("nav").innerHTML = Object.entries(menus)
     .filter(([k, [, rs]]) => rs.includes(profile.role) && k !== "users")
-    .map(
-      ([k, [label]]) =>
-        `<button class="nav-item ${page === k ? "active" : ""}" data-page="${k}">${esc(label)}</button>`,
-    )
+    .map(([k, [label]]) => {
+      const unread =
+        k === "messages"
+          ? state.messages.filter(
+              (m) => !same(m.senderId, profile.id) && !chatRead(m),
+            ).length
+          : 0;
+      return `<button class="nav-item ${page === k ? "active" : ""}" data-page="${k}">${esc(label)}${unread ? ` <span class="nav-unread">${unread > 99 ? "99+" : unread}</span>` : ""}</button>`;
+    })
     .join("");
   $("companyFilter").innerHTML =
     '<option value="">Toutes mes données</option>' +
@@ -783,14 +788,14 @@ async function markChatRead() {
     if (e.status !== 409) notice(e.message);
   }
 }
-function threadForm(type = "group") {
+function threadForm(type = "group", projectId = "") {
   const projects = visible("projects");
   modal(
     type === "project" ? "Discussion de chantier" : "Nouveau groupe",
     `<form id="entityForm" data-kind="message.thread">
       <label>Nom<input name="name" maxlength="120" required placeholder="${type === "project" ? "Discussion chantier" : "Nom du groupe"}"></label>
       <label>Type<select name="type"><option value="group" ${type === "group" ? "selected" : ""}>Groupe</option><option value="project" ${type === "project" ? "selected" : ""}>Chantier</option></select></label>
-      <label>Chantier<select name="projectId"><option value="">Aucun</option>${projects.map((p) => `<option value="${esc(p.id)}">${esc(p.title)}</option>`).join("")}</select></label>
+      <label>Chantier<select name="projectId"><option value="">Aucun</option>${projects.map((p) => `<option value="${esc(p.id)}" ${same(p.id, projectId) ? "selected" : ""}>${esc(p.title)}</option>`).join("")}</select></label>
       <fieldset class="chat-participants"><legend>Participants</legend>${contacts.map((c) => `<label><input type="checkbox" name="participants" value="${esc(c.id)}"> ${esc(c.name)} · ${esc(roles[c.role] || c.role)}</label>`).join("")}</fieldset>
       <p id="formError" class="error" role="alert"></p>
       <div class="form-actions">${btn("Annuler", "close-modal")}<button type="submit" class="btn primary">Créer</button></div>
@@ -1573,7 +1578,7 @@ function projectModal(id) {
         .filter((i) => find("invoices", i))
         .map((i) => btn("Ouvrir la facture " + i, "invoice", i))
         .join(" ") +
-      `<p>${esc(p.description)}</p><p>${esc(p.address)}</p><p>${date(p.start)} – ${date(p.end)} · ${esc(p.progress)} %</p><p>Équipe : ${(p.team || []).map((id) => esc(name("employees", id))).join(", ") || "Non affectée"}</p>${p.budget !== undefined ? `<p>Budget ${money(p.budget)} · Coûts ${money(p.cost)}</p>` : ""}${can(ops) ? btn("Modifier le suivi", "project-edit", id) + " " + btn("Supprimer le chantier", "project-delete", id, "danger") : ""}<h4 class="spaced">Documents et photos</h4>${table(
+      `<p>${esc(p.description)}</p><p>${esc(p.address)}</p><p>${date(p.start)} – ${date(p.end)} · ${esc(p.progress)} %</p><p>Équipe : ${(p.team || []).map((id) => esc(name("employees", id))).join(", ") || "Non affectée"}</p>${p.budget !== undefined ? `<p>Budget ${money(p.budget)} · Coûts ${money(p.cost)}</p>` : ""}${can(ops) ? btn("Modifier le suivi", "project-edit", id) + " " + btn("Supprimer le chantier", "project-delete", id, "danger") : ""} ${(() => { const thread = (state.messageThreads || []).find((t) => same(t.projectId, id)); return thread ? btn("Ouvrir la discussion", "chat-open-project", thread.id, "primary") : can(ops) ? btn("Créer la discussion chantier", "chat-create-project", id) : ""; })()}<h4 class="spaced">Documents et photos</h4>${table(
         ["Fichier", ""],
         state.documents
           .filter((x) => same(x.project, id))
@@ -2166,7 +2171,17 @@ document.addEventListener("click", async (e) => {
       render();
     } else if (a === "chat-new-group") threadForm("group");
     else if (a === "chat-new-project") threadForm("project");
-    else if (a === "chat-reply") {
+    else if (a === "chat-open-project") {
+      page = "messages";
+      selectedThreadId = String(id);
+      selectedRecipient = "";
+      mobileChatOpen = true;
+      closeModal();
+      render();
+    } else if (a === "chat-create-project") {
+      closeModal();
+      threadForm("project", String(id));
+    } else if (a === "chat-reply") {
       chatReplyToId = String(id);
       render();
       $("messageText")?.focus();
@@ -2220,7 +2235,7 @@ document.addEventListener("click", async (e) => {
           });
           chatAttachmentDraft = {
             name: "message-vocal-" + Date.now() + ".webm",
-            mime: blob.type || "audio/webm",
+            mime: (blob.type || "audio/webm").split(";")[0],
             content,
             kind: "audio",
           };
@@ -2638,6 +2653,7 @@ document.addEventListener("submit", async (e) => {
       if (result) {
         chatReplyToId = "";
         chatAttachmentDraft = null;
+        render();
       }
       return result;
     }
@@ -2655,6 +2671,7 @@ document.addEventListener("submit", async (e) => {
         selectedThreadId = String(result.id);
         selectedRecipient = "";
         mobileChatOpen = true;
+        render();
       }
       return result;
     }
