@@ -727,6 +727,17 @@ test("employee dossier combines personal details and account without a separate 
     assert.match(body.textContent, /employee@test.invalid/);
     assert.ok(body.querySelector('[data-action="edit-user"]'));
     assert.ok(body.querySelector('[data-action="delete-user"]'));
+    click(h, '#modalBody [data-action="edit-user"]');
+    assert.equal(h.w.document.getElementById("f_password").required, false);
+    assert.equal(h.w.document.getElementById("f_password").value, "");
+    h.w.document.querySelector('[name="employeeCompanies"][value="tech"]').checked = true;
+    assert.equal(h.w.document.getElementById("entityForm").checkValidity(), true);
+    submit(h);
+    await flush();
+    const update = h.requests.findLast((r) => r.url.endsWith("/users") && r.opts.method === "POST");
+    assert.deepEqual(JSON.parse(update.opts.body).payload.employeeCompanies, ["home", "tech"]);
+    assert.equal(JSON.parse(update.opts.body).payload.password, "");
+
   } finally {
     h.close();
   }

@@ -1845,6 +1845,10 @@ document.addEventListener("click", async (e) => {
     else if (a === "edit-user") {
       const u = userAccounts.find((x) => same(x.id, id));
       userForm();
+      $("f_password").required = false;
+      $("f_password").labels[0].textContent =
+        "Nouveau mot de passe (facultatif, 12 caractères minimum)";
+      $("f_password").placeholder = "Laisser vide pour conserver le mot de passe";
       $("f_name").value = u.name;
       $("f_email").value = u.email;
       $("f_company").value = u.company;
