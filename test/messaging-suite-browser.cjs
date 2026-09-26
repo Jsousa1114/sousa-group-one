@@ -157,7 +157,9 @@ async function noOverflow(page, label) {
       assert.equal(diagnostics.identity, "ok", JSON.stringify(diagnostics));
     }
     await waitKeys();
+    console.log("STEP 1 identities and E2EE keys ready");
 
+    console.log("STEP 2 start direct E2EE message");
     // Direct E2EE message: auto mode must encrypt once both keys exist.
     const adminClient = admin.page.locator(".chat-contact").filter({ hasText: "Client Suite" });
     await adminClient.click();
@@ -184,6 +186,7 @@ async function noOverflow(page, label) {
     await mobileDirect.click();
     await client.page.locator(".encrypted-text").filter({ hasText: secret }).waitFor({ timeout: 10000 });
     await noOverflow(client.page, "mobile E2EE direct chat");
+    console.log("STEP 3 E2EE decrypted on recipient");
 
     // Reaction and favorite from UI.
     const received = client.page.locator('[data-message-id="' + stored.id + '"]');
@@ -212,7 +215,9 @@ async function noOverflow(page, label) {
       await new Promise((r) => setTimeout(r, 100));
     }
     assert.equal(metaOk, true, "reaction and favorite should persist");
+    console.log("STEP 4 reactions and favorites persisted");
 
+    console.log("STEP 5 start direct video call");
     // Direct video call with fake camera/micro.
     await admin.page.locator('[data-action="call-video"]').click();
     await admin.page.locator("#callOverlay:not(.hidden)").waitFor();
@@ -236,7 +241,9 @@ async function noOverflow(page, label) {
     await client.page.locator("#callCamera").click();
     await admin.page.locator("#callHangup").click();
     await client.page.locator("#callState").filter({ hasText: /terminé/i }).waitFor({ timeout: 8000 });
+    console.log("STEP 6 direct video call completed");
 
+    console.log("STEP 7 start group audio call");
     // Group audio call via visible thread.
     await admin.page.locator(".chat-back").click().catch(() => {});
     const adminGroup = admin.page.locator(".chat-contact").filter({ hasText: "Equipe Suite" });
@@ -261,11 +268,13 @@ async function noOverflow(page, label) {
     );
     await admin.page.locator('[data-suite-action="group-hangup"]').click();
     await admin.page.locator("#groupCallOverlay").waitFor({ state: "hidden" });
+    console.log("STEP 8 group call completed");
 
     // Mobile tools still fit at 390 and 320 with the expanded suite.
     await noOverflow(client.page, "390px expanded suite");
     await client.page.setViewportSize({ width: 320, height: 700 });
     await noOverflow(client.page, "320px expanded suite");
+    console.log("STEP 9 mobile layout verified");
 
     // Search modal and archive/settings tools exist.
     await client.page.locator('[data-suite-action="search"]').first().click().catch(async () => {
@@ -274,6 +283,7 @@ async function noOverflow(page, label) {
     });
     await client.page.locator("#suiteGlobalSearch").fill(secret.slice(0, 12));
     await client.page.locator("#suiteSearchResults button").first().waitFor({ timeout: 8000 });
+    console.log("STEP 10 search verified");
 
     assert.deepEqual(admin.errors, [], "admin page errors: " + admin.errors.join("\n"));
     assert.deepEqual(client.errors, [], "client page errors: " + client.errors.join("\n"));
