@@ -914,3 +914,106 @@ test("client deletion protects linked records and company access", () => {
     );
   }
 });
+
+test("record deletion updates payments, project costs/hours and vacation balances", () => {
+  const d = fixture();
+  d.invoices = [
+    {
+      id: "i1",
+      company: "home",
+      clientId: "c1",
+      amount: 100,
+      paid: 50,
+      status: "Partiellement payée",
+    },
+  ];
+  d.payments = [{ id: "pay", company: "home", invoice: "i1", amount: 50 }];
+  let out = command(d, admin, "record.delete", {
+    kind: "payments",
+    id: "pay",
+  }).data;
+  assert.equal(out.invoices[0].paid, 0);
+  assert.equal(out.invoices[0].status, "Émise");
+  d.projects[0].cost = 30;
+  d.expenses = [{ id: "ex", company: "home", project: "p1", amount: 20 }];
+  out = command(d, admin, "record.delete", { kind: "expenses", id: "ex" }).data;
+  assert.equal(out.projects[0].cost, 10);
+  d.time = [
+    {
+      id: "t1",
+      project: "p1",
+      employeeId: "e1",
+      hours: 2,
+      status: "À valider",
+    },
+    { id: "t2", project: "p1", employeeId: "e1", hours: 3, status: "Validé" },
+  ];
+  out = command(d, employee, "record.delete", { kind: "time", id: "t1" }).data;
+  assert.equal(out.projects[0].hours, 3);
+  assert.throws(
+    () => command(d, employee, "record.delete", { kind: "time", id: "t2" }),
+    /non validées/,
+  );
+  d.absences = [
+    {
+      id: "a",
+      employeeId: "e1",
+      status: "Approuvée",
+      type: "Vacances",
+      days: 2,
+    },
+  ];
+  out = command(d, admin, "record.delete", { kind: "absences", id: "a" }).data;
+  assert.equal(out.employees[0].vacation, 22);
+});
+test("record deletion isolates companies, attachments, and message participants", () => {
+  const d = fixture();
+  d.tools = [{ id: "tool", company: "home", employeeId: "e1" }];
+  assert.throws(
+    () => command(d, admin, "record.delete", { kind: "tools", id: "tool" }),
+    /attribution/,
+  );
+  d.inventory = [{ id: "stock", company: "moving" }];
+  assert.throws(
+    () =>
+      command(d, { ...admin, company: "home" }, "record.delete", {
+        kind: "inventory",
+        id: "stock",
+      }),
+    /Accès refusé/,
+  );
+  assert.throws(
+    () => command(d, admin, "record.delete", { kind: "projects", id: "p1" }),
+    /non autorisée/,
+  );
+  assert.throws(
+    () => command(d, admin, "record.delete", { kind: "companies", id: "home" }),
+    /données liées/,
+  );
+  d.messages = [
+    { id: "m", senderId: admin.id, recipientId: employee.id, text: "hello" },
+  ];
+  const out = command(d, employee, "record.delete", {
+    kind: "messages",
+    id: "m",
+  }).data;
+  assert.equal(D.viewState(out, employee).messages.length, 0);
+  assert.equal(D.viewState(out, admin).messages.length, 1);
+  assert.throws(
+    () => command(d, client, "record.delete", { kind: "messages", id: "m" }),
+    /Accès refusé/,
+  );
+  d.documents = [
+    { id: "doc", employeeId: "e1", company: "home", uploadedBy: admin.id },
+  ];
+  assert.throws(
+    () =>
+      command(d, employee, "record.delete", { kind: "documents", id: "doc" }),
+    /Seul l’auteur/,
+  );
+  assert.equal(
+    command(d, admin, "record.delete", { kind: "documents", id: "doc" }).data
+      .documents.length,
+    0,
+  );
+});

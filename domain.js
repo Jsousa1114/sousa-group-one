@@ -424,7 +424,9 @@ function viewState(data, u) {
     );
   v.documents = d.documents.filter((r) => canDocument(d, u, r));
   v.messages = d.messages.filter(
-    (r) => same(r.senderId, u.id) || same(r.recipientId, u.id),
+    (r) =>
+      (same(r.senderId, u.id) || same(r.recipientId, u.id)) &&
+      !(r.hiddenFor || []).some((id) => same(id, u.id)),
   );
   v.clocks = d.clocks.filter((r) => same(r.userId, u.id));
   return v;
@@ -917,6 +919,134 @@ function applyCommand(
     result = quoteProject(d, q, now);
   } else if (action === "project.finish") {
     result = finishProject(d, u, ref(d, "projects", p.id), now);
+  } else if (action === "record.delete") {
+    const k = p.kind;
+    const allowed = {
+      companies: STAFF,
+      inventory: OPS,
+      suppliers: OPS,
+      vehicles: OPS,
+      tools: OPS,
+      maintenance: OPS,
+      payments: FIN,
+      expenses: [...OPS, "accounting"],
+      time: [...HR, "manager", "employee"],
+      absences: [...HR, "employee"],
+      documents: [...OPS, "hr", "accounting", "employee"],
+      messages: ROLES,
+    };
+    if (!allowed[k] || !privileged(u, allowed[k]))
+      fail("Suppression non autorisée.", 403);
+    const r = ref(d, k, p.id);
+    if (!viewState(d, u)[k].some((x) => same(x.id, r.id)))
+      fail("Accès refusé.", 403);
+    if (k === "messages") {
+      r.hiddenFor = [...new Set([...(r.hiddenFor || []), u.id])];
+      result = { id: r.id };
+    } else {
+      if (k === "companies") {
+        if (r.id === "group") fail("Le groupe ne peut pas être supprimé.");
+        if (
+          COLLECTIONS.filter((c) => c !== k).some((c) =>
+            d[c].some(
+              (x) =>
+                same(x.company, r.id) || (x.companies || []).includes(r.id),
+            ),
+          )
+        )
+          fail("Cette entreprise contient encore des données liées.");
+      }
+      if (
+        ["tools", "vehicles"].includes(k) &&
+        (r.employeeId || r.assignmentHistory?.length)
+      )
+        fail(
+          "Cet équipement possède une attribution ou un historique à conserver.",
+        );
+      if (
+        k === "suppliers" &&
+        d.expenses.some(
+          (x) =>
+            (same(x.supplier, r.id) || x.supplier === r.name) &&
+            same(x.company, r.company),
+        )
+      )
+        fail("Ce fournisseur est lié à des dépenses.");
+      if (
+        k === "documents" &&
+        !privileged(u, r.employeeId ? HR : [...OPS, "accounting"]) &&
+        !same(r.uploadedBy, u.id)
+      )
+        fail(
+          "Seul l’auteur ou un responsable du dossier peut supprimer ce document.",
+          403,
+        );
+      if (
+        k === "time" &&
+        u.role === "employee" &&
+        (r.status !== "À valider" || !same(r.employeeId, u.employee_id))
+      )
+        fail("Seules vos heures non validées peuvent être supprimées.", 403);
+      if (
+        k === "absences" &&
+        u.role === "employee" &&
+        (r.status !== "En attente" || !same(r.employeeId, u.employee_id))
+      )
+        fail("Seules vos demandes en attente peuvent être supprimées.", 403);
+      if (
+        ["time", "expenses"].includes(k) &&
+        r.project &&
+        d.invoices.some(
+          (i) =>
+            !i.deletedAt && same(i.project, r.project) && i.completionSnapshot,
+        )
+      )
+        fail(
+          "Cette donnée est liée à une facturation de chantier. Elle doit être conservée.",
+        );
+      if (
+        k === "absences" &&
+        r.status === "Approuvée" &&
+        r.type === "Vacances"
+      ) {
+        const e = ref(d, "employees", r.employeeId);
+        if (!employeeCompanies(e).every((c) => inCompany(u, c)))
+          fail("Accès RH à toutes les entreprises du salarié requis.", 403);
+        e.vacation = Number(e.vacation || 0) + Number(r.days || 0);
+      }
+      d[k] = d[k].filter((x) => !same(x.id, r.id));
+      if (k === "payments") {
+        const inv = ref(d, "invoices", r.invoice);
+        inv.paid = fromCents(
+          Math.max(
+            0,
+            Math.round(Number(inv.paid || 0) * 100) -
+              Math.round(r.amount * 100),
+          ),
+        );
+        inv.status =
+          inv.paid >= inv.amount
+            ? "Payée"
+            : inv.paid > 0
+              ? "Partiellement payée"
+              : "Émise";
+      }
+      if (k === "time" && r.project)
+        ref(d, "projects", r.project).hours = d.time
+          .filter((t) => same(t.project, r.project))
+          .reduce((sum, t) => sum + Number(t.hours || 0), 0);
+      if (k === "expenses" && r.project) {
+        const project = ref(d, "projects", r.project);
+        project.cost = fromCents(
+          Math.max(
+            0,
+            Math.round(Number(project.cost || 0) * 100) -
+              Math.round(r.amount * 100),
+          ),
+        );
+      }
+      result = { id: r.id };
+    }
   } else if (action === "client.delete") {
     const client = ref(d, "clients", p.id);
     if (

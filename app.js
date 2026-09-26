@@ -401,9 +401,11 @@ function timeView() {
         esc(t.break) + " min",
         Number(t.hours).toFixed(2),
         badge(t.status),
-        can([...hr, "manager"]) && t.status !== "Validé"
+        (can([...hr, "manager"]) && t.status !== "Validé"
           ? btn("Valider", "time.approve", t.id)
-          : "",
+          : "") +
+          " " +
+          deleteRecordButton("time", t),
       ]),
     )
   );
@@ -562,11 +564,13 @@ function absenceView() {
         date(a.to),
         esc(a.days),
         badge(a.status),
-        can(hr) && a.status === "En attente"
+        (can(hr) && a.status === "En attente"
           ? btn("Approuver", "absence.approve", a.id) +
             " " +
             btn("Refuser", "absence.reject", a.id)
-          : "",
+          : "") +
+          " " +
+          deleteRecordButton("absences", a),
       ]),
     )
   );
@@ -621,7 +625,17 @@ function financeView(k) {
               : r.status,
           ),
           btn("Ouvrir", quote ? "quote" : "invoice", r.id) +
-            (r.archivedAt ? " · Archivé" : ""),
+            (r.archivedAt ? " · Archivé" : "") +
+            (can(fin)
+              ? " " +
+                (r.status === "Brouillon"
+                  ? btn("Supprimer", "finance-delete", k + ":" + r.id, "danger")
+                  : btn(
+                      r.archivedAt ? "Restaurer" : "Archiver",
+                      "finance-archive",
+                      k + ":" + r.id,
+                    ))
+              : ""),
         ]),
     )
   );
@@ -647,7 +661,9 @@ function documentsView() {
         ),
         Math.ceil(d.size / 1024) + " Ko",
         date(d.createdAt),
-        btn("Télécharger", "download", d.id),
+        btn("Télécharger", "download", d.id) +
+          " " +
+          deleteRecordButton("documents", d),
       ]),
     )
   );
@@ -662,7 +678,7 @@ function messagesView() {
       same(m.senderId, selectedRecipient) ||
       same(m.recipientId, selectedRecipient),
   );
-  return `<article class="card"><label for="recipient">Conversation avec</label><select id="recipient">${contacts.map((c) => `<option value="${c.id}" ${same(c.id, selectedRecipient) ? "selected" : ""}>${esc(c.name)} · ${esc(roles[c.role])}</option>`).join("")}</select><div class="messages">${list.map((m) => `<div class="message ${same(m.senderId, profile.id) ? "mine" : ""}">${personListName({ name: m.sender }, same(m.senderId, profile.id) ? profile.photo : contacts.find((c) => same(c.id, m.senderId))?.photo)}<p class="prewrap">${esc(m.text)}</p><small>${esc(new Date(m.createdAt).toLocaleString("fr-CH"))}</small></div>`).join("") || '<p class="muted">Aucun message.</p>'}</div><form id="messageForm"><label for="messageText">Message</label><textarea id="messageText" name="text" maxlength="5000" required></textarea><p id="formError" class="error" role="alert"></p><button type="submit" class="btn primary">Envoyer</button></form></article>`;
+  return `<article class="card"><label for="recipient">Conversation avec</label><select id="recipient">${contacts.map((c) => `<option value="${c.id}" ${same(c.id, selectedRecipient) ? "selected" : ""}>${esc(c.name)} · ${esc(roles[c.role])}</option>`).join("")}</select><div class="messages">${list.map((m) => `<div class="message ${same(m.senderId, profile.id) ? "mine" : ""}">${personListName({ name: m.sender }, same(m.senderId, profile.id) ? profile.photo : contacts.find((c) => same(c.id, m.senderId))?.photo)}<p class="prewrap">${esc(m.text)}</p><small>${esc(new Date(m.createdAt).toLocaleString("fr-CH"))}</small>${deleteRecordButton("messages", m)}</div>`).join("") || '<p class="muted">Aucun message.</p>'}</div><form id="messageForm"><label for="messageText">Message</label><textarea id="messageText" name="text" maxlength="5000" required></textarea><p id="formError" class="error" role="alert"></p><button type="submit" class="btn primary">Envoyer</button></form></article>`;
 }
 function reportsView() {
   const months = new Map();
@@ -791,6 +807,42 @@ const columns = {
     ["amount", "Valeur annuelle"],
   ],
 };
+const recordDeleteRoles = {
+  companies: ["admin", "direction"],
+  inventory: ops,
+  suppliers: ops,
+  vehicles: ops,
+  tools: ops,
+  maintenance: ops,
+  payments: fin,
+  expenses: [...ops, "accounting"],
+  time: [...hr, "manager", "employee"],
+  absences: [...hr, "employee"],
+  documents: [...ops, "hr", "accounting", "employee"],
+  messages: Object.keys(roles),
+};
+function deleteRecordButton(kind, r) {
+  if (!recordDeleteRoles[kind] || !can(recordDeleteRoles[kind])) return "";
+  if (kind === "companies" && r.id === "group") return "";
+  if (
+    profile.role === "employee" &&
+    kind === "time" &&
+    r.status !== "À valider"
+  )
+    return "";
+  if (
+    profile.role === "employee" &&
+    kind === "absences" &&
+    r.status !== "En attente"
+  )
+    return "";
+  return btn(
+    kind === "messages" ? "Supprimer pour moi" : "Supprimer",
+    "record-delete",
+    kind + ":" + r.id,
+    "danger",
+  );
+}
 function personListName(person, photo = "") {
   const label = person.name || "—";
   return `<span class="person-list-name">${photo ? `<img class="person-list-photo" src="${esc(photo)}" alt="" width="40" height="40" loading="lazy">` : `<span class="person-list-photo person-list-initial" aria-hidden="true">${esc(label.slice(0, 1).toUpperCase())}</span>`}<span>${esc(label)}</span></span>`;
@@ -807,6 +859,9 @@ function genericPage(k) {
     table(
       [
         ...cols.map((c) => c[1]),
+        ...(recordDeleteRoles[k] && can(recordDeleteRoles[k])
+          ? ["Actions"]
+          : []),
         ...(k === "employees" ? ["Fiche et compte"] : []),
         ...(k === "clients" && can(createRoles.clients) ? ["Actions"] : []),
       ],
@@ -832,6 +887,9 @@ function genericPage(k) {
                         ? personListName(r, r.photo)
                         : esc(r[f] ?? "—"),
         ),
+        ...(recordDeleteRoles[k] && can(recordDeleteRoles[k])
+          ? [deleteRecordButton(k, r)]
+          : []),
         ...(k === "employees"
           ? [
               btn("Ouvrir la fiche", "employee-detail", r.id) +
@@ -1245,7 +1303,12 @@ function projectModal(id) {
         ["Fichier", ""],
         state.documents
           .filter((x) => same(x.project, id))
-          .map((d) => [esc(d.name), btn("Télécharger", "download", d.id)]),
+          .map((d) => [
+            esc(d.name),
+            btn("Télécharger", "download", d.id) +
+              " " +
+              deleteRecordButton("documents", d),
+          ]),
       )}`,
   );
 }
@@ -1433,7 +1496,9 @@ async function employeeDetail(id) {
               esc(d.documentType),
               esc(d.name) + (d.description ? `<br>${esc(d.description)}` : ""),
               date(d.createdAt.slice(0, 10)),
-              btn("Télécharger", "download", d.id),
+              btn("Télécharger", "download", d.id) +
+                " " +
+                deleteRecordButton("documents", d),
             ]),
           )}</details>`
         : ""
@@ -1487,7 +1552,12 @@ async function employeeDetail(id) {
       ]),
     )}${table(
       ["Document", ""],
-      docs.map((d) => [esc(d.name), btn("Télécharger", "download", d.id)]),
+      docs.map((d) => [
+        esc(d.name),
+        btn("Télécharger", "download", d.id) +
+          " " +
+          deleteRecordButton("documents", d),
+      ]),
     )}</details>
     ${accountHtml ? `<details><summary>Compte de connexion</summary>${accountHtml}</details>` : ""}`,
   );
@@ -1876,6 +1946,24 @@ document.addEventListener("click", async (e) => {
         page = "projects";
         render();
         projectModal(project.id);
+      }
+    } else if (a === "record-delete") {
+      const split = id.indexOf(":"),
+        kind = id.slice(0, split),
+        rid = id.slice(split + 1);
+      const record = find(kind, rid);
+      const prompt =
+        kind === "messages"
+          ? "Masquer ce message pour vous ? Il restera visible pour votre interlocuteur."
+          : `Supprimer définitivement cet élément (${record?.name || record?.title || record?.id || rid}) ? Cette action est irréversible. Les totaux associés seront mis à jour. La suppression peut être bloquée si l’élément est lié à d’autres données.`;
+      if (record && confirm(prompt)) {
+        const result = await mutate("record.delete", { kind, id: rid });
+        if (result)
+          toast(
+            kind === "messages"
+              ? "Message supprimé pour vous."
+              : "Élément supprimé.",
+          );
       }
     } else if (a === "client-delete") {
       const client = find("clients", id);
