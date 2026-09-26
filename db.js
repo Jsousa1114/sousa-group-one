@@ -38,6 +38,40 @@ async function migrate(db = pool) {
     `CREATE TABLE IF NOT EXISTS file_contents(id TEXT PRIMARY KEY,content BYTEA NOT NULL)`,
   );
   await db.query(
+    `CREATE TABLE IF NOT EXISTS rtc_calls(
+      id TEXT PRIMARY KEY,
+      caller_id INTEGER NOT NULL,
+      callee_id INTEGER NOT NULL,
+      caller_name VARCHAR(160) NOT NULL,
+      callee_name VARCHAR(160) NOT NULL,
+      status VARCHAR(20) NOT NULL DEFAULT 'ringing',
+      offer JSONB NOT NULL,
+      answer JSONB,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      ended_at TIMESTAMPTZ
+    )`,
+  );
+  await db.query(
+    `CREATE INDEX IF NOT EXISTS rtc_calls_callee_status_idx ON rtc_calls(callee_id,status,created_at DESC)`,
+  );
+  await db.query(
+    `CREATE INDEX IF NOT EXISTS rtc_calls_caller_status_idx ON rtc_calls(caller_id,status,created_at DESC)`,
+  );
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS rtc_ice_candidates(
+      id BIGSERIAL PRIMARY KEY,
+      call_id TEXT NOT NULL,
+      sender_id INTEGER NOT NULL,
+      candidate JSONB NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`,
+  );
+  await db.query(
+    `CREATE INDEX IF NOT EXISTS rtc_ice_call_idx ON rtc_ice_candidates(call_id,id)`,
+  );
+
+  await db.query(
     "INSERT INTO app_state(id,data) VALUES(1,$1) ON CONFLICT(id) DO NOTHING",
     [JSON.stringify(emptyState())],
   );
