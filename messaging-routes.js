@@ -533,7 +533,7 @@ function routes(db) {
       );
       for (const userId of participants)
         await db.query(
-          "INSERT INTO rtc_group_members(room_id,user_id,joined_at) VALUES($1,$2,CASE WHEN $2=$3 THEN NOW() ELSE NULL END)",
+          "INSERT INTO rtc_group_members(room_id,user_id,joined_at) VALUES($1,$2::int,CASE WHEN $2::int=$3::int THEN NOW() ELSE NULL END)",
           [id, userId, req.user.id],
         );
       await notifyUsers(
