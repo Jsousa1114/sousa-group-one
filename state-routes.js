@@ -148,6 +148,16 @@ function routes(db) {
               [String(result.id)],
             );
           }
+          if (req.body.action === "client.delete") {
+            const accounts = await c.query(
+              "SELECT id FROM users WHERE client_id=$1 AND deleted_at IS NULL",
+              [String(result.id)],
+            );
+            if (accounts.rows.length)
+              D.fail(
+                "Ce client possède un compte de connexion lié. Supprimez ou dissociez ce compte avant de supprimer le client.",
+              );
+          }
           Object.assign(d, data);
           return result;
         }),

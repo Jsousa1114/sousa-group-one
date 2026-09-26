@@ -216,6 +216,52 @@ test("messaging contacts expose profile photos without HR fields", async () => {
     false,
   );
 });
+test("client deletion rejects linked accounts atomically and deletes an unused client", async () => {
+  const created = await call(
+    "state/command",
+    admin,
+    payload(await rev(), {
+      action: "create",
+      collection: "clients",
+      payload: {
+        name: "Temporary",
+        company: "home",
+        email: "temporary@test.invalid",
+        city: "Nyon",
+      },
+    }),
+  );
+  assert.equal(created.status, 200);
+  const id = created.data.result.id;
+  await db.query("UPDATE users SET client_id=$1 WHERE email='c@test.invalid'", [
+    id,
+  ]);
+  const before = await rev();
+  const denied = await call(
+    "state/command",
+    admin,
+    payload(before, { action: "client.delete", payload: { id } }),
+  );
+  assert.equal(denied.status, 400);
+  assert.match(denied.data.error, /compte de connexion/);
+  assert.equal(await rev(), before);
+  assert.ok(
+    (await call("state", admin)).data.data.clients.some((c) => c.id === id),
+  );
+  await db.query(
+    "UPDATE users SET client_id='c1' WHERE email='c@test.invalid'",
+  );
+  const removed = await call(
+    "state/command",
+    admin,
+    payload(await rev(), { action: "client.delete", payload: { id } }),
+  );
+  assert.equal(removed.status, 200);
+  assert.equal(
+    (await call("state", admin)).data.data.clients.some((c) => c.id === id),
+    false,
+  );
+});
 test("concurrent edits reject stale revision without data loss, idempotent retry", async () => {
   const v = await rev(),
     b = payload(v, {
