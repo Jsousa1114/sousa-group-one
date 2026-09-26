@@ -850,6 +850,9 @@ function routes(db) {
     await c.query(
       "UPDATE rtc_calls SET status='ended',ended_at=NOW(),updated_at=NOW() WHERE status='accepted' AND updated_at < NOW() - INTERVAL '6 hours'",
     );
+    await c.query(
+      "DELETE FROM rtc_ice_candidates WHERE created_at < NOW() - INTERVAL '24 hours'",
+    );
   }
   async function callRow(c, id, userId) {
     const row = (
@@ -861,6 +864,29 @@ function routes(db) {
     if (!row) D.fail("Appel introuvable.", 404);
     return row;
   }
+  r.get(
+    "/calls/config",
+    wrap(async (req, res) => {
+      const iceServers = [
+        { urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] },
+      ];
+      const turnUrls = String(process.env.RTC_TURN_URLS || "")
+        .split(",")
+        .map((v) => v.trim())
+        .filter(Boolean);
+      if (
+        turnUrls.length &&
+        process.env.RTC_TURN_USERNAME &&
+        process.env.RTC_TURN_CREDENTIAL
+      )
+        iceServers.push({
+          urls: turnUrls,
+          username: process.env.RTC_TURN_USERNAME,
+          credential: process.env.RTC_TURN_CREDENTIAL,
+        });
+      res.set("Cache-Control", "no-store").json({ iceServers });
+    }),
+  );
   r.get(
     "/calls/pending",
     wrap(async (req, res) => {
@@ -900,7 +926,10 @@ function routes(db) {
             [p.recipientId],
           )
         ).rows[0];
-      if (!recipient || !D.canContact(req.user, recipient, (await db.query("SELECT data FROM app_state WHERE id=1")).rows[0]?.data))
+      const appData = (
+        await db.query("SELECT data FROM app_state WHERE id=1")
+      ).rows[0]?.data;
+      if (!recipient || !D.canContact(req.user, recipient, appData))
         D.fail("Destinataire non autorisé.", 403);
       if (D.same(recipient.id, req.user.id))
         D.fail("Vous ne pouvez pas vous appeler vous-même.");
@@ -918,6 +947,13 @@ function routes(db) {
         )
       ).rows[0];
       if (busy) D.fail("Un des correspondants est déjà en appel.", 409);
+      const recent = (
+        await db.query(
+          "SELECT id FROM rtc_calls WHERE caller_id=$1 AND callee_id=$2 AND created_at > NOW() - INTERVAL '3 seconds' LIMIT 1",
+          [req.user.id, recipient.id],
+        )
+      ).rows[0];
+      if (recent) D.fail("Patientez quelques secondes avant de rappeler.", 429);
       const id = randomUUID();
       await db.query(
         "INSERT INTO rtc_calls(id,caller_id,callee_id,caller_name,callee_name,status,offer) VALUES($1,$2,$3,$4,$5,'ringing',$6)",
@@ -978,6 +1014,7 @@ function routes(db) {
         "UPDATE rtc_calls SET status='rejected',ended_at=NOW(),updated_at=NOW() WHERE id=$1",
         [call.id],
       );
+      await db.query("DELETE FROM rtc_ice_candidates WHERE call_id=$1", [call.id]);
       res.json({ id: call.id, status: "rejected" });
     }),
   );
@@ -991,6 +1028,7 @@ function routes(db) {
         "UPDATE rtc_calls SET status='ended',ended_at=NOW(),updated_at=NOW() WHERE id=$1",
         [call.id],
       );
+      await db.query("DELETE FROM rtc_ice_candidates WHERE call_id=$1", [call.id]);
       res.json({ id: call.id, status: "ended" });
     }),
   );
