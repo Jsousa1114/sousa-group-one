@@ -104,8 +104,30 @@ function routes(db) {
       );
       const contactPhoto = (u) =>
         employeePhotos.get(String(u.employee_id)) || "";
+      const view = D.viewState(row.data, req.user);
+      if (view.messages.length) {
+        const reads = (
+          await db.query(
+            "SELECT message_id,user_id FROM message_reads WHERE message_id = ANY($1::text[])",
+            [view.messages.map((m) => String(m.id))],
+          )
+        ).rows;
+        const byMessage = new Map();
+        for (const read of reads) {
+          const key = String(read.message_id);
+          if (!byMessage.has(key)) byMessage.set(key, []);
+          byMessage.get(key).push(String(read.user_id));
+        }
+        for (const message of view.messages)
+          message.readBy = [
+            ...new Set([
+              ...(message.readBy || []).map(String),
+              ...(byMessage.get(String(message.id)) || []),
+            ]),
+          ];
+      }
       res.set("Cache-Control", "no-store").json({
-        data: D.viewState(row.data, req.user),
+        data: view,
         revision: row.revision,
         contacts: users
           .filter(
@@ -503,10 +525,11 @@ function routes(db) {
       res
         .set({
           "Content-Type": msg.attachment.mime || "application/octet-stream",
-          "Content-Disposition": `inline; filename="${encodeURIComponent(
+          "Content-Disposition": `inline; filename*=UTF-8''${encodeURIComponent(
             msg.attachment.name || "fichier",
-          )}"`,
+          )}`,
           "Cache-Control": "private, no-store",
+          "X-Content-Type-Options": "nosniff",
         })
         .send(Buffer.from(file.content));
     }),
@@ -551,6 +574,16 @@ function routes(db) {
               const project = D.ref(d, "projects", p.projectId);
               if (!D.canProject(d, req.user, project))
                 D.fail("Accès chantier refusé.", 403);
+              for (const user of rows) {
+                if (D.same(user.id, req.user.id)) continue;
+                const effective = D.effectiveUser(d, user);
+                if (!D.canProject(d, effective, project))
+                  D.fail(
+                    "Un participant sélectionné n’a pas accès à ce chantier : " +
+                      user.name,
+                    403,
+                  );
+              }
               projectId = String(project.id);
             }
             const thread = {
@@ -578,50 +611,41 @@ function routes(db) {
   );
   r.post(
     "/messages/read",
-    wrap(async (req, res) =>
-      res.json(
-        await mutate(
-          db,
-          req.user,
-          { ...req.body, action: "Messages lus" },
-          async (c, d) => {
-            const p = req.body.payload || {},
-              now = new Date().toISOString();
-            let changed = 0;
-            for (const msg of d.messages) {
-              const direct =
-                  p.recipientId &&
-                  !msg.threadId &&
-                  D.same(msg.senderId, p.recipientId) &&
-                  D.same(msg.recipientId, req.user.id),
-                threaded =
-                  p.threadId &&
-                  D.same(msg.threadId, p.threadId) &&
-                  !D.same(msg.senderId, req.user.id);
-              if (!direct && !threaded) continue;
-              if (threaded) {
-                const thread = d.messageThreads.find((t) =>
-                  D.same(t.id, msg.threadId),
-                );
-                if (
-                  !thread ||
-                  !(thread.participants || []).some((id) =>
-                    D.same(id, req.user.id),
-                  )
-                )
-                  continue;
-              }
-              msg.readBy = [
-                ...new Set([...(msg.readBy || []).map(String), String(req.user.id)]),
-              ];
-              if (direct) msg.readAt = now;
-              changed++;
-            }
-            return { changed };
-          },
-        ),
-      ),
-    ),
+    wrap(async (req, res) => {
+      const p = req.body?.payload || {},
+        row = (
+          await db.query("SELECT data,revision FROM app_state WHERE id=1")
+        ).rows[0],
+        visible = D.viewState(row.data, req.user);
+      let messages = [];
+      if (p.threadId) {
+        const thread = visible.messageThreads.find((t) =>
+          D.same(t.id, p.threadId),
+        );
+        if (!thread) D.fail("Conversation non autorisée.", 403);
+        messages = visible.messages.filter(
+          (m) =>
+            D.same(m.threadId, p.threadId) &&
+            !D.same(m.senderId, req.user.id),
+        );
+      } else if (p.recipientId) {
+        messages = visible.messages.filter(
+          (m) =>
+            !m.threadId &&
+            D.same(m.senderId, p.recipientId) &&
+            D.same(m.recipientId, req.user.id),
+        );
+      } else D.fail("Conversation requise.");
+      let changed = 0;
+      for (const message of messages) {
+        const inserted = await db.query(
+          "INSERT INTO message_reads(message_id,user_id) VALUES($1,$2) ON CONFLICT DO NOTHING RETURNING message_id",
+          [String(message.id), req.user.id],
+        );
+        if (inserted.rows.length) changed++;
+      }
+      res.json({ result: { changed }, revision: row.revision });
+    }),
   );
   r.post(
     "/messages",
@@ -663,6 +687,15 @@ function routes(db) {
                 D.same(m.id, replied.id),
               );
               if (!visibleReply) D.fail("Message cité non autorisé.", 403);
+              const sameConversation = thread
+                ? D.same(replied.threadId, thread.id)
+                : !replied.threadId &&
+                  ((D.same(replied.senderId, req.user.id) &&
+                    D.same(replied.recipientId, recipient.id)) ||
+                    (D.same(replied.senderId, recipient.id) &&
+                      D.same(replied.recipientId, req.user.id)));
+              if (!sameConversation)
+                D.fail("Le message cité appartient à une autre conversation.", 403);
               replyToId = replied.id;
             }
             let attachment = null;
