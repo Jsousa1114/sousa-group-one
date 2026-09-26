@@ -843,6 +843,10 @@ function ensureCallOverlay() {
   overlay.innerHTML = `
     <div class="call-card">
       <div class="call-avatar" id="callAvatar">☎</div>
+      <div id="callVideoStage" class="call-video-stage hidden">
+        <video id="remoteCallVideo" autoplay playsinline muted></video>
+        <video id="localCallVideo" autoplay playsinline muted></video>
+      </div>
       <h3 id="callName">Appel</h3>
       <p id="callState">Connexion…</p>
       <div class="call-timer hidden" id="callTimer">00:00</div>
@@ -850,6 +854,7 @@ function ensureCallOverlay() {
         <button type="button" id="callReject" class="call-control danger hidden" data-action="call-reject" aria-label="Refuser l'appel">✕</button>
         <button type="button" id="callAccept" class="call-control accept hidden" data-action="call-accept" aria-label="Accepter l'appel">📞</button>
         <button type="button" id="callMute" class="call-control hidden" data-action="call-mute" aria-label="Couper le micro">🎙</button>
+        <button type="button" id="callCamera" class="call-control hidden" data-action="call-camera" aria-label="Couper la caméra">📹</button>
         <button type="button" id="callEnableAudio" class="call-control hidden" data-action="call-enable-audio" aria-label="Activer le son">🔊</button>
         <button type="button" id="callHangup" class="call-control danger hidden" data-action="call-hangup" aria-label="Raccrocher">☎</button>
       </div>
@@ -869,9 +874,14 @@ function setCallUi(name, status, mode = "active") {
   $("callOverlay").classList.remove("hidden");
   $("callAccept").classList.toggle("hidden", mode !== "incoming");
   $("callReject").classList.toggle("hidden", mode !== "incoming");
+  const call = activeCall || incomingCall,
+    isVideo = call?.callType === "video";
   $("callMute").classList.toggle("hidden", mode === "incoming" || mode === "ended");
+  $("callCamera").classList.toggle("hidden", !isVideo || mode === "incoming" || mode === "ended");
   $("callHangup").classList.toggle("hidden", mode === "incoming" || mode === "ended");
   $("callTimer").classList.toggle("hidden", mode !== "connected");
+  $("callVideoStage").classList.toggle("hidden", !isVideo);
+  $("callAvatar").classList.toggle("hidden", isVideo);
   $("callEnableAudio").classList.toggle("hidden", !callAudioBlocked || mode === "incoming" || mode === "ended");
 }
 function hideCallUi() {
@@ -880,6 +890,11 @@ function hideCallUi() {
     $("remoteCallAudio").pause?.();
     $("remoteCallAudio").srcObject = null;
   }
+  for (const id of ["remoteCallVideo", "localCallVideo"])
+    if ($(id)) {
+      $(id).pause?.();
+      $(id).srcObject = null;
+    }
   callAudioBlocked = false;
 }
 function friendlyMediaError(error, purpose = "micro") {
@@ -987,9 +1002,9 @@ async function loadIceServers() {
   }
   return rtcIceServers;
 }
-async function makePeer() {
+async function makePeer(callType = "audio") {
   if (!navigator.mediaDevices?.getUserMedia || !window.RTCPeerConnection)
-    throw new Error("Les appels audio ne sont pas disponibles sur cet appareil.");
+    throw new Error("Les appels ne sont pas disponibles sur cet appareil.");
   let stream;
   try {
     stream = await navigator.mediaDevices.getUserMedia({
@@ -998,8 +1013,20 @@ async function makePeer() {
         noiseSuppression: true,
         autoGainControl: true,
       },
-      video: false,
+      video:
+        callType === "video"
+          ? {
+              facingMode: "user",
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+            }
+          : false,
     });
+    if (callType === "video") {
+      ensureCallOverlay();
+      $("localCallVideo").srcObject = stream;
+      $("localCallVideo").play().catch(() => {});
+    }
     const peer = new RTCPeerConnection({
       iceServers: await loadIceServers(),
       iceCandidatePoolSize: 2,
@@ -1010,8 +1037,13 @@ async function makePeer() {
     };
     peer.ontrack = (e) => {
       ensureCallOverlay();
-      const audio = $("remoteCallAudio");
-      audio.srcObject = e.streams[0] || new MediaStream([e.track]);
+      const remoteStream = e.streams[0] || new MediaStream([e.track]),
+        audio = $("remoteCallAudio");
+      audio.srcObject = remoteStream;
+      if (callType === "video") {
+        $("remoteCallVideo").srcObject = remoteStream;
+        $("remoteCallVideo").play().catch(() => {});
+      }
       playRemoteAudio();
     };
     peer.onconnectionstatechange = () => {
@@ -1100,7 +1132,7 @@ async function endCurrentCall(send = true) {
     await api("state/calls/" + encodeURIComponent(id) + "/end", {}).catch(() => {});
   finishCallLocal();
 }
-async function startAudioCall(contactId) {
+async function startDirectCall(contactId, callType = "audio") {
   if (chatRecorder?.state === "recording") cancelChatRecording();
   if (activeCall || incomingCall)
     throw new Error("Un appel est déjà en cours.");
@@ -1109,9 +1141,10 @@ async function startAudioCall(contactId) {
   clearTimeout(callEndUiTimer);
   setCallUi(contact.name, "Préparation de l’appel…", "active");
   try {
-    const { peer, stream } = await makePeer();
+    const { peer, stream } = await makePeer(callType);
     activeCall = {
       id: "",
+      callType,
       callerId: profile.id,
       calleeId: contact.id,
       callerName: profile.name,
@@ -1120,10 +1153,14 @@ async function startAudioCall(contactId) {
       stream,
       answerApplied: false,
     };
-    const offer = await peer.createOffer({ offerToReceiveAudio: true });
+    const offer = await peer.createOffer({
+      offerToReceiveAudio: true,
+      offerToReceiveVideo: callType === "video",
+    });
     await peer.setLocalDescription(offer);
     const out = await api("state/calls/start", {
       recipientId: contact.id,
+      callType,
       offer: peer.localDescription,
     });
     activeCall.id = out.id;
@@ -1140,6 +1177,12 @@ async function startAudioCall(contactId) {
     throw e;
   }
 }
+async function startAudioCall(contactId) {
+  return startDirectCall(contactId, "audio");
+}
+async function startVideoCall(contactId) {
+  return startDirectCall(contactId, "video");
+}
 async function acceptIncomingCall() {
   if (!incomingCall) return;
   const call = incomingCall;
@@ -1147,8 +1190,8 @@ async function acceptIncomingCall() {
   clearTimeout(callEndUiTimer);
   setCallUi(call.callerName, "Connexion…", "active");
   try {
-    const { peer, stream } = await makePeer();
-    activeCall = { ...call, peer, stream, answerApplied: true };
+    const { peer, stream } = await makePeer(call.callType || "audio");
+    activeCall = { ...call, callType: call.callType || "audio", peer, stream, answerApplied: true };
     incomingCall = null;
     callCandidateCursor = 0;
     remoteIceQueue = [];
@@ -1231,7 +1274,11 @@ async function pollCallState() {
       same(call.calleeId, profile.id)
     ) {
       incomingCall = call;
-      setCallUi(call.callerName, "Appel audio entrant", "incoming");
+      setCallUi(
+        call.callerName,
+        call.callType === "video" ? "Appel vidéo entrant" : "Appel audio entrant",
+        "incoming",
+      );
       beepRingtone();
     }
   } catch {}
@@ -1359,7 +1406,7 @@ function messagesView() {
       <header class="chat-header">
         <button type="button" class="chat-back" data-action="chat-back" aria-label="Retour aux discussions">←</button>
         ${active.kind === "direct" ? chatAvatar(active.contact) : `<span class="chat-avatar chat-avatar-initial chat-group-avatar">${active.thread.type === "project" ? "🏗" : "👥"}</span>`}
-        <div class="chat-header-person"><strong>${esc(active.title)}</strong><span>${esc(active.subtitle)}</span></div>${active.kind === "direct" ? `<button type="button" class="chat-call-button" data-action="call-start" data-id="${esc(active.contact.id)}" aria-label="Appeler ${esc(active.title)}" title="Appel audio">📞</button>` : ""}
+        <div class="chat-header-person"><strong>${esc(active.title)}</strong><span>${esc(active.subtitle)}</span></div>${active.kind === "direct" ? `<div class="chat-call-actions"><button type="button" class="chat-call-button" data-action="call-start" data-id="${esc(active.contact.id)}" aria-label="Appeler ${esc(active.title)}" title="Appel audio">📞</button><button type="button" class="chat-call-button" data-action="call-video" data-id="${esc(active.contact.id)}" aria-label="Appel vidéo ${esc(active.title)}" title="Appel vidéo">📹</button></div>` : ""}
       </header>
       <div id="messageThread" class="messages chat-thread" role="log" aria-live="polite" aria-label="Messages avec ${esc(active.title)}">${bubbles}</div>
       <div id="chatReplyBar" class="chat-reply-bar ${chatReplyToId ? "" : "hidden"}">
@@ -2609,11 +2656,20 @@ document.addEventListener("click", async (e) => {
       mobileChatOpen = false;
       render();
     } else if (a === "call-start") await startAudioCall(id);
+    else if (a === "call-video") await startVideoCall(id);
     else if (a === "call-accept") await acceptIncomingCall();
     else if (a === "call-reject") await rejectIncomingCall();
     else if (a === "call-hangup") await endCurrentCall(true);
     else if (a === "call-enable-audio") await playRemoteAudio();
-    else if (a === "call-mute") {
+    else if (a === "call-camera") {
+      if (!activeCall?.stream) return;
+      const tracks = activeCall.stream.getVideoTracks(),
+        disabled = tracks.length && tracks.every((track) => !track.enabled);
+      tracks.forEach((track) => (track.enabled = disabled));
+      b.classList.toggle("muted", !disabled);
+      b.textContent = disabled ? "📹" : "🚫";
+      b.title = disabled ? "Couper la caméra" : "Réactiver la caméra";
+    } else if (a === "call-mute") {
       if (!activeCall?.stream) return;
       const tracks = activeCall.stream.getAudioTracks(),
         muted = tracks.every((track) => !track.enabled);
