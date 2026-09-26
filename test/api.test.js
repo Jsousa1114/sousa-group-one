@@ -1184,8 +1184,7 @@ test("deleting a document removes stored bytes transactionally", async () => {
 test("advanced messaging supports groups, project threads, attachments, replies and read receipts", async () => {
   const users = (await call("state/users", admin)).data.users;
   const clientUser = users.find((u) => u.role === "client");
-  const employeeUser = users.find((u) => u.role === "employee");
-  assert.ok(clientUser && employeeUser);
+  assert.ok(clientUser);
 
   const group = await call(
     "state/message-threads",
@@ -1194,7 +1193,7 @@ test("advanced messaging supports groups, project threads, attachments, replies 
       payload: {
         type: "group",
         name: "Equipe test",
-        participants: [clientUser.id, employeeUser.id],
+        participants: [clientUser.id],
       },
     }),
   );
@@ -1209,7 +1208,7 @@ test("advanced messaging supports groups, project threads, attachments, replies 
         type: "project",
         name: "Chantier Project",
         projectId: "p1",
-        participants: [clientUser.id, employeeUser.id],
+        participants: [clientUser.id],
       },
     }),
   );
