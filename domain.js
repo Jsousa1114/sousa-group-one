@@ -917,6 +917,25 @@ function applyCommand(
     result = quoteProject(d, q, now);
   } else if (action === "project.finish") {
     result = finishProject(d, u, ref(d, "projects", p.id), now);
+  } else if (action === "project.delete") {
+    const project = ref(d, "projects", p.id);
+    if (!privileged(u, OPS) || !canProject(d, u, project))
+      fail("Suppression du chantier non autorisée.", 403);
+    const linked = COLLECTIONS.filter((k) => k !== "projects").some((k) =>
+      d[k].some((r) => same(r.project, project.id)),
+    );
+    if (
+      linked ||
+      project.quoteId ||
+      project.invoiceIds?.length ||
+      Number(project.hours) > 0 ||
+      Number(project.cost) > 0
+    )
+      fail(
+        "Ce chantier contient des données liées (heures, planning, documents, devis, factures ou dépenses). Sa suppression est bloquée pour les conserver.",
+      );
+    d.projects = d.projects.filter((r) => !same(r.id, project.id));
+    result = { id: project.id };
   } else if (action === "project.update") {
     if (!privileged(u, OPS)) fail("Accès refusé.", 403);
     const r = ref(d, "projects", p.id);

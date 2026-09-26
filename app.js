@@ -1236,7 +1236,7 @@ function projectModal(id) {
         .filter((i) => find("invoices", i))
         .map((i) => btn("Ouvrir la facture " + i, "invoice", i))
         .join(" ") +
-      `<p>${esc(p.description)}</p><p>${esc(p.address)}</p><p>${date(p.start)} – ${date(p.end)} · ${esc(p.progress)} %</p><p>Équipe : ${(p.team || []).map((id) => esc(name("employees", id))).join(", ") || "Non affectée"}</p>${p.budget !== undefined ? `<p>Budget ${money(p.budget)} · Coûts ${money(p.cost)}</p>` : ""}${can(ops) ? btn("Modifier le suivi", "project-edit", id) : ""}<h4 class="spaced">Documents et photos</h4>${table(
+      `<p>${esc(p.description)}</p><p>${esc(p.address)}</p><p>${date(p.start)} – ${date(p.end)} · ${esc(p.progress)} %</p><p>Équipe : ${(p.team || []).map((id) => esc(name("employees", id))).join(", ") || "Non affectée"}</p>${p.budget !== undefined ? `<p>Budget ${money(p.budget)} · Coûts ${money(p.cost)}</p>` : ""}${can(ops) ? btn("Modifier le suivi", "project-edit", id) + " " + btn("Supprimer le chantier", "project-delete", id, "danger") : ""}<h4 class="spaced">Documents et photos</h4>${table(
         ["Fichier", ""],
         state.documents
           .filter((x) => same(x.project, id))
@@ -1871,6 +1871,17 @@ document.addEventListener("click", async (e) => {
         page = "projects";
         render();
         projectModal(project.id);
+      }
+    } else if (a === "project-delete") {
+      const project = find("projects", id);
+      if (
+        project &&
+        confirm(
+          `Supprimer définitivement le chantier « ${project.title} » ? Cette action est irréversible. La suppression sera refusée si des heures, documents ou autres données y sont liés.`,
+        )
+      ) {
+        const result = await mutate("project.delete", { id });
+        if (result) toast("Chantier supprimé.");
       }
     } else if (a === "project-finish") {
       if (
