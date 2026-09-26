@@ -6,7 +6,8 @@
     KEY_ID = "e2ee-p256-v1",
     enc = new TextEncoder(),
     dec = new TextDecoder(),
-    publicCache = new Map();
+    publicCache = new Map(),
+    registeredPublicKey = false;
 
   const b64u = (bytes) => {
     let s = "";
@@ -99,7 +100,10 @@
       };
       await idbSet(KEY_ID, saved);
     }
-    await api("messaging/crypto/key", { publicJwk: saved.publicJwk });
+    if (!registeredPublicKey) {
+      await api("messaging/crypto/key", { publicJwk: saved.publicJwk });
+      registeredPublicKey = true;
+    }
     return saved;
   }
   async function publicKeys(api, ids) {
