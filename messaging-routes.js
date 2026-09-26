@@ -291,6 +291,10 @@ function routes(db) {
            deleted_at=NOW()`,
         [String(message.id)],
       );
+      if (message.attachment?.fileId)
+        await db.query("DELETE FROM file_contents WHERE id=$1", [
+          String(message.attachment.fileId),
+        ]);
       res.json({ ok: true });
     }),
   );
@@ -395,7 +399,11 @@ function routes(db) {
             [id],
           )
         ).rows[0];
-        if (u && D.canContact(ctx.user, u, ctx.data)) permitted.push(id);
+        const inVisibleThread = ctx.view.messageThreads.some((t) =>
+          (t.participants || []).some((participantId) => D.same(participantId, id)),
+        );
+        if (u && (D.canContact(ctx.user, u, ctx.data) || inVisibleThread))
+          permitted.push(id);
       }
       if (!permitted.length) return res.json({ keys: [] });
       const rows = (
