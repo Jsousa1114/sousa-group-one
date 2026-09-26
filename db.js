@@ -38,6 +38,69 @@ async function migrate(db = pool) {
     `CREATE TABLE IF NOT EXISTS file_contents(id TEXT PRIMARY KEY,content BYTEA NOT NULL)`,
   );
   await db.query(
+    `CREATE TABLE IF NOT EXISTS push_subscriptions(
+      id BIGSERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      endpoint TEXT NOT NULL UNIQUE,
+      subscription JSONB NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`,
+  );
+  await db.query(
+    `CREATE INDEX IF NOT EXISTS push_subscriptions_user_idx ON push_subscriptions(user_id)`,
+  );
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS user_presence(
+      user_id INTEGER PRIMARY KEY,
+      last_seen TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      online BOOLEAN NOT NULL DEFAULT false,
+      typing_target TEXT,
+      typing_updated_at TIMESTAMPTZ
+    )`,
+  );
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS conversation_settings(
+      user_id INTEGER NOT NULL,
+      conversation_key TEXT NOT NULL,
+      pinned BOOLEAN NOT NULL DEFAULT false,
+      archived BOOLEAN NOT NULL DEFAULT false,
+      muted_until TIMESTAMPTZ,
+      PRIMARY KEY(user_id,conversation_key)
+    )`,
+  );
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS message_reactions(
+      message_id TEXT NOT NULL,
+      user_id INTEGER NOT NULL,
+      emoji VARCHAR(16) NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY(message_id,user_id,emoji)
+    )`,
+  );
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS message_stars(
+      message_id TEXT NOT NULL,
+      user_id INTEGER NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY(message_id,user_id)
+    )`,
+  );
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS messaging_retention(
+      id INTEGER PRIMARY KEY DEFAULT 1,
+      message_days INTEGER,
+      call_days INTEGER NOT NULL DEFAULT 365,
+      attachment_days INTEGER,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_by INTEGER
+    )`,
+  );
+  await db.query(
+    `INSERT INTO messaging_retention(id,message_days,call_days,attachment_days)
+     VALUES(1,NULL,365,NULL) ON CONFLICT(id) DO NOTHING`,
+  );
+  await db.query(
     `CREATE TABLE IF NOT EXISTS message_reads(
       message_id TEXT NOT NULL,
       user_id INTEGER NOT NULL,
