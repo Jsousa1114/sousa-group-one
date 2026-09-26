@@ -106,25 +106,48 @@ function routes(db) {
         employeePhotos.get(String(u.employee_id)) || "";
       const view = D.viewState(row.data, req.user);
       if (view.messages.length) {
-        const reads = (
-          await db.query(
-            "SELECT message_id,user_id FROM message_reads WHERE message_id = ANY($1::text[])",
-            [view.messages.map((m) => String(m.id))],
-          )
-        ).rows;
-        const byMessage = new Map();
+        const ids = view.messages.map((m) => String(m.id)),
+          [readsResult, overridesResult] = await Promise.all([
+            db.query(
+              "SELECT message_id,user_id FROM message_reads WHERE message_id = ANY($1::text[])",
+              [ids],
+            ),
+            db.query(
+              "SELECT message_id,edited_text,edited_at,deleted_for_all,deleted_at FROM message_overrides WHERE message_id = ANY($1::text[])",
+              [ids],
+            ),
+          ]),
+          reads = readsResult.rows,
+          overrides = new Map(
+            overridesResult.rows.map((x) => [String(x.message_id), x]),
+          ),
+          byMessage = new Map();
         for (const read of reads) {
           const key = String(read.message_id);
           if (!byMessage.has(key)) byMessage.set(key, []);
           byMessage.get(key).push(String(read.user_id));
         }
-        for (const message of view.messages)
+        for (const message of view.messages) {
           message.readBy = [
             ...new Set([
               ...(message.readBy || []).map(String),
               ...(byMessage.get(String(message.id)) || []),
             ]),
           ];
+          const override = overrides.get(String(message.id));
+          if (override?.edited_at && !override.deleted_for_all) {
+            message.text = override.edited_text || "";
+            message.editedAt = override.edited_at;
+          }
+          if (override?.deleted_for_all) {
+            message.text = "";
+            message.attachment = null;
+            message.sharedRef = null;
+            message.encryption = null;
+            message.deletedForAll = true;
+            message.deletedAt = override.deleted_at;
+          }
+        }
       }
       res.set("Cache-Control", "no-store").json({
         data: view,
