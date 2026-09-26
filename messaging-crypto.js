@@ -111,8 +111,25 @@
       missing = unique.filter((id) => !publicCache.has(String(id)));
     if (missing.length) {
       const out = await api("messaging/crypto/keys?ids=" + missing.join(","));
-      for (const item of out.keys || [])
-        publicCache.set(String(item.userId), item.publicJwk);
+      for (const item of out.keys || []) {
+        const id = String(item.userId),
+          pinKey = "peer-public-jwk:" + id,
+          pinned = await idbGet(pinKey),
+          current = JSON.stringify({
+            kty: item.publicJwk.kty,
+            crv: item.publicJwk.crv,
+            x: item.publicJwk.x,
+            y: item.publicJwk.y,
+          });
+        if (pinned && pinned !== current)
+          throw new Error(
+            "SECURITY_KEY_CHANGED:" +
+              id +
+              ":La clé de sécurité de ce contact a changé. Vérifiez son appareil avant de reprendre les messages chiffrés.",
+          );
+        if (!pinned) await idbSet(pinKey, current);
+        publicCache.set(id, item.publicJwk);
+      }
     }
     return Object.fromEntries(
       unique
@@ -249,11 +266,25 @@
     return new Blob([plain], { type: mime || "application/octet-stream" });
   }
 
+  async function fingerprint(jwk) {
+    const data = enc.encode(
+      [jwk.kty, jwk.crv, jwk.x, jwk.y].map((v) => String(v || "")).join("|"),
+    );
+    const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", data));
+    return [...digest]
+      .slice(0, 16)
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("")
+      .match(/.{1,4}/g)
+      .join(" ");
+  }
+
   window.SGOMessageCrypto = {
     ensureIdentity: identity,
     readiness,
     encryptPayload,
     decryptText,
     decryptAttachment,
+    fingerprint,
   };
 })();
