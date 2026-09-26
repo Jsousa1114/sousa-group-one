@@ -982,6 +982,10 @@ function routes(db) {
               iv: e.iv.slice(0, 100),
               ciphertext: e.ciphertext,
               envelopes: e.envelopes,
+              attachmentIv:
+                typeof e.attachmentIv === "string"
+                  ? e.attachmentIv.slice(0, 100)
+                  : "",
               senderId: String(req.user.id),
             };
           }
