@@ -941,3 +941,58 @@ test("standalone employee creation supports hourly salary and shows its unit", a
     h.close();
   }
 });
+
+test("employee dossier edits profile and assigns tools from the same screen", async () => {
+  const h = await setup("admin", false, false, (d) => {
+    Object.assign(d.employees[0], {
+      job: "Tech",
+      salary: 5000,
+      activity: 100,
+      entry: "2026-01-01",
+    });
+    d.tools = [{ id: "t1", name: "Drill", serial: "ABC", company: "home" }];
+    d.vehicles = [
+      {
+        id: "v1",
+        plate: "VD 123",
+        brand: "Van",
+        model: "One",
+        company: "home",
+        km: 100,
+      },
+    ];
+  });
+  try {
+    click(h, '[data-page="employees"]');
+    click(h, '[data-action="employee-detail"]');
+    await flush();
+    await flush();
+    click(h, '[data-action="employee-edit"]');
+    fill(h, "city", "Nyon");
+    fill(h, "street", "Rue 1");
+    fill(h, "phone", "+41 00 000 00 00");
+    assert.equal(h.w.document.getElementById("f_birthDate").value, "");
+    submit(h);
+    await flush();
+    await flush();
+    await flush();
+    assert.match(
+      h.w.document.getElementById("modalBody").textContent,
+      /Rue 1, Nyon/,
+    );
+    click(h, '[data-action="employee-assets"]');
+    h.w.document.querySelector('[name="tools"]').checked = true;
+    h.w.document.querySelector('[name="vehicles"]').checked = true;
+    submit(h);
+    await flush();
+    await flush();
+    await flush();
+    assert.match(h.w.document.getElementById("modalBody").textContent, /Drill/);
+    assert.match(
+      h.w.document.getElementById("modalBody").textContent,
+      /VD 123/,
+    );
+  } finally {
+    h.close();
+  }
+});

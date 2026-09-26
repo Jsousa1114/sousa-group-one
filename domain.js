@@ -80,6 +80,46 @@ function effectiveUser(data, u) {
 const employeeInCompany = (e, c) =>
   !e.deletedAt && employeeCompanies(e).includes(c);
 const privileged = (u, roles) => roles.includes(u.role);
+function employeeProfile(p) {
+  const out = {};
+  for (const key of [
+    "street",
+    "zip",
+    "city",
+    "country",
+    "emergencyName",
+    "emergencyPhone",
+    "contractType",
+    "notes",
+  ])
+    out[key] = text(p[key], key, key === "notes" ? 2000 : 200, true);
+  out.birthDate = p.birthDate ? iso(p.birthDate) : "";
+  out.endDate = p.endDate ? iso(p.endDate) : "";
+  if (out.endDate && p.entry && out.endDate < p.entry)
+    fail("La fin du contrat précède la date d’entrée.");
+  out.photo = p.photo || "";
+  if (out.photo) {
+    if (
+      typeof out.photo !== "string" ||
+      out.photo.length > 350000 ||
+      !/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(
+        out.photo,
+      )
+    )
+      fail("Photo invalide ou trop volumineuse.");
+    const bytes = Buffer.from(out.photo.split(",")[1], "base64");
+    const valid = out.photo.startsWith("data:image/jpeg;")
+      ? bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255
+      : out.photo.startsWith("data:image/png;")
+        ? bytes
+            .subarray(0, 8)
+            .equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+        : bytes.toString("ascii", 0, 4) === "RIFF" &&
+          bytes.toString("ascii", 8, 12) === "WEBP";
+    if (!valid) fail("Format de photo invalide.");
+  }
+  return out;
+}
 function emptyState() {
   return Object.fromEntries(
     COLLECTIONS.map((k) => [
@@ -267,6 +307,16 @@ function viewState(data, u) {
                   "vacation",
                   "email",
                   "phone",
+                  "street",
+                  "zip",
+                  "city",
+                  "country",
+                  "birthDate",
+                  "emergencyName",
+                  "emergencyPhone",
+                  "notes",
+                  "contractType",
+                  "endDate",
                 ].includes(k),
             ),
           ),
@@ -344,7 +394,11 @@ function viewState(data, u) {
     v[k] = d[k].filter(
       (r) =>
         (privileged(u, [...OPS, "accounting"]) ||
-          (u.role === "employee" && ["inventory", "tools"].includes(k)) ||
+          (u.role === "hr" && ["tools", "vehicles"].includes(k)) ||
+          (u.role === "employee" &&
+            (k === "inventory" ||
+              (["tools", "vehicles"].includes(k) &&
+                same(r.employeeId, u.employee_id)))) ||
           (u.role === "client" &&
             k === "maintenance" &&
             same(r.clientId, u.client_id))) &&
@@ -572,6 +626,7 @@ function applyCommand(
         vacation: num(p.vacation, "Solde vacances", 0, 366),
         entry: iso(p.entry),
         status: "Actif",
+        ...employeeProfile(p),
       };
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(r.email)) fail("E-mail invalide.");
     } else if (k === "clients") {
@@ -860,6 +915,73 @@ function applyCommand(
     r.team = p.team;
     if (p.status === "Terminé") finishProject(d, u, r, now);
     result = r;
+  } else if (action === "employee.update" || action === "employee.assets") {
+    const e = ref(d, "employees", p.id);
+    if (
+      !privileged(u, HR) ||
+      !employeeCompanies(e).every((c) => inCompany(u, c))
+    )
+      fail("Accès RH à toutes les entreprises du salarié requis.", 403);
+    if (e.deletedAt) fail("Salarié supprimé.");
+    if (action === "employee.update") {
+      const value = { ...e, ...p, company: e.company };
+      if (value.salary == null || String(value.salary).trim() === "")
+        fail("Renseignez le salaire.");
+      const salaryPeriod = value.salaryPeriod || "monthly";
+      if (!["monthly", "hourly"].includes(salaryPeriod))
+        fail("Type de salaire invalide.");
+      const email = text(value.email, "E-mail", 255);
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) fail("E-mail invalide.");
+      Object.assign(e, {
+        name: text(value.name, "Nom"),
+        job: text(value.job, "Fonction"),
+        email,
+        phone: text(value.phone, "Téléphone", 40, true),
+        salary: fromCents(cents(value.salary)),
+        salaryPeriod,
+        activity: num(value.activity, "Taux", 1, 100),
+        vacation: num(value.vacation, "Solde vacances", 0, 366),
+        entry: iso(value.entry),
+        ...employeeProfile(value),
+      });
+    } else {
+      const selections = {};
+      for (const k of ["tools", "vehicles"]) {
+        if (!Array.isArray(p[k])) fail("Sélection de matériel invalide.");
+        selections[k] = new Set(p[k].map(String));
+        for (const id of selections[k]) {
+          const asset = ref(d, k, id);
+          if (
+            !inCompany(u, asset.company) ||
+            !employeeInCompany(e, asset.company)
+          )
+            fail("Matériel d’une entreprise non autorisée.", 403);
+          if (asset.employeeId && !same(asset.employeeId, e.id))
+            fail("Cet équipement est déjà attribué à un autre salarié.", 409);
+        }
+        for (const asset of d[k].filter((a) => same(a.employeeId, e.id)))
+          if (!inCompany(u, asset.company))
+            fail("Accès à l’entreprise de cet équipement requis.", 403);
+      }
+      for (const k of ["tools", "vehicles"])
+        for (const asset of d[k]) {
+          const next = selections[k].has(String(asset.id))
+            ? e.id
+            : same(asset.employeeId, e.id)
+              ? ""
+              : asset.employeeId;
+          if ((asset.employeeId || "") === (next || "")) continue;
+          asset.assignmentHistory ||= [];
+          asset.assignmentHistory.push({
+            from: asset.employeeId || "",
+            to: next || "",
+            date: now,
+            by: u.id,
+          });
+          asset.employeeId = next;
+        }
+    }
+    result = e;
   } else if (action === "employee.companies" || action === "employee.delete") {
     const e = ref(d, "employees", p.id);
     if (
@@ -898,8 +1020,20 @@ function applyCommand(
         )
       )
         fail("Terminez le pointage avant de retirer son entreprise.");
+      if (
+        [...d.tools, ...d.vehicles].some(
+          (a) => same(a.employeeId, e.id) && !companies.includes(a.company),
+        )
+      )
+        fail(
+          "Restituez les outils et véhicules avant de retirer leur entreprise.",
+        );
       e.companies = companies;
     } else {
+      if ([...d.tools, ...d.vehicles].some((a) => same(a.employeeId, e.id)))
+        fail(
+          "Restituez les outils et véhicules avant de supprimer le salarié.",
+        );
       e.deletedAt = now;
       e.status = "Supprimé";
       d.planning = d.planning.filter(

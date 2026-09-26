@@ -771,6 +771,7 @@ const columns = {
   ],
   vehicles: [
     ["plate", "Plaque"],
+    ["employeeId", "Attribué à"],
     ["brand", "Marque"],
     ["model", "Modèle"],
     ["km", "Kilométrage"],
@@ -779,6 +780,7 @@ const columns = {
   tools: [
     ["name", "Nom"],
     ["serial", "N° série"],
+    ["employeeId", "Attribué à"],
     ["status", "État"],
   ],
   maintenance: [
@@ -810,17 +812,19 @@ function genericPage(k) {
             ? money(r[f])
             : ["date", "next", "service"].includes(f)
               ? date(r[f])
-              : f === "clientId"
-                ? esc(name("clients", r[f]))
-                : f === "company"
-                  ? k === "employees"
-                    ? [...new Set([r.company, ...(r.companies || [])])]
-                        .map((c) => esc(name("companies", c)))
-                        .join(" · ")
-                    : esc(name("companies", r[f]))
-                  : k === "companies" && f === "name"
-                    ? `<span class="company-identity"><img class="company-row-logo" src="${companyLogoPath(r.id)}" alt="" />${esc(r[f])}</span>`
-                    : esc(r[f] ?? "—"),
+              : f === "employeeId"
+                ? esc(r[f] ? name("employees", r[f]) : "Non attribué")
+                : f === "clientId"
+                  ? esc(name("clients", r[f]))
+                  : f === "company"
+                    ? k === "employees"
+                      ? [...new Set([r.company, ...(r.companies || [])])]
+                          .map((c) => esc(name("companies", c)))
+                          .join(" · ")
+                      : esc(name("companies", r[f]))
+                    : k === "companies" && f === "name"
+                      ? `<span class="company-identity"><img class="company-row-logo" src="${companyLogoPath(r.id)}" alt="" />${esc(r[f])}</span>`
+                      : esc(r[f] ?? "—"),
         ),
         ...(k === "employees"
           ? [
@@ -855,6 +859,18 @@ function options(k, blank = false) {
   );
 }
 // Field definitions shared by the creation dialogs; server validation remains authoritative.
+const employeeContactFields = [
+  ["street", "Adresse / rue et numéro", "text?"],
+  ["zip", "Code postal", "text?"],
+  ["city", "Ville", "text?"],
+  ["country", "Pays", "text?"],
+  ["birthDate", "Date de naissance", "date?"],
+  ["emergencyName", "Contact d’urgence", "text?"],
+  ["emergencyPhone", "Téléphone d’urgence", "tel?"],
+  ["contractType", "Type de contrat", "text?"],
+  ["endDate", "Fin du contrat", "date?"],
+  ["notes", "Notes RH", "textarea?"],
+];
 const schemas = {
   companies: [
     ["name", "Nom"],
@@ -872,6 +888,7 @@ const schemas = {
     ["activity", "Taux d’activité %", "number", "100"],
     ["vacation", "Solde de vacances (jours)", "number", "20"],
     ["entry", "Date d’entrée", "date"],
+    ...employeeContactFields,
   ],
   clients: [
     ["name", "Nom"],
@@ -985,7 +1002,7 @@ function field([key, label, type = "text", value = ""]) {
         ? `<select ${attr}>${options(type.slice(1), optional)}</select>`
         : type === "textarea"
           ? `<textarea ${attr} maxlength="5000">${esc(value)}</textarea>`
-          : `<input ${attr} type="${type}" value="${esc(value || (type === "date" ? today() : ""))}" ${type === "number" ? 'min="0" step="0.01"' : ""} ${type === "password" ? (key === "currentPassword" ? 'autocomplete="current-password"' : 'minlength="12" autocomplete="new-password"') : ""}>`)
+          : `<input ${attr} type="${type}" value="${esc(value || (type === "date" && !optional ? today() : ""))}" ${type === "number" ? 'min="0" step="0.01"' : ""} ${type === "password" ? (key === "currentPassword" ? 'autocomplete="current-password"' : 'minlength="12" autocomplete="new-password"') : ""}>`)
   );
 }
 function modal(title, html) {
@@ -1357,10 +1374,150 @@ async function employeeDetail(id) {
       accountHtml = `<p class="error">${esc(err.message)}</p>`;
     }
   }
+  const assignedTools = state.tools.filter((a) => same(a.employeeId, id));
+  const assignedVehicles = state.vehicles.filter((a) => same(a.employeeId, id));
+  const times = state.time.filter((t) => same(t.employeeId, id));
+  const plans = state.planning
+    .filter((t) => same(t.employeeId, id) && t.date >= today())
+    .sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start));
+  const absences = state.absences.filter((t) => same(t.employeeId, id));
+  const projects = state.projects.filter((p) =>
+    (p.team || []).some((eid) => same(eid, id)),
+  );
+  const docs = state.documents.filter((d) => same(d.employeeId, id));
+  const privateInfo = can(hr) || same(profile.employee_id, id);
   modal(
     "Fiche salarié et compte",
-    `<h3>${esc(e.name)}</h3><p>${esc(e.job || "")} · ${esc(e.email || "")} · ${esc(e.phone || "")}</p><p>${[...new Set([e.company, ...(e.companies || [])])].map((c) => esc(name("companies", c))).join(" · ")}</p>${can(hr) ? `<p>${e.salaryPeriod === "hourly" ? "Salaire horaire" : "Salaire mensuel"} : ${money(e.salary)}${e.salaryPeriod === "hourly" ? " / heure" : " / mois"} · Activité : ${esc(e.activity ?? "—")} % · Vacances : ${esc(e.vacation ?? "—")} jours</p><div class="actions">${btn("Entreprises / accès", "employee-companies", id)} ${btn("Supprimer le salarié", "employee-delete", id, "danger")}</div>` : ""}${accountHtml}`,
+    `
+    <div class="employee-header">${e.photo ? `<img class="employee-photo" src="${esc(e.photo)}" alt="Photo de ${esc(e.name)}">` : `<div class="employee-photo employee-placeholder" aria-label="Photo non renseignée">${esc(e.name.slice(0, 1))}</div>`}
+    <div><h3>${esc(e.name)}</h3><p>${esc(e.job || "—")} · ${esc(e.status || "Actif")}</p><p>${[...new Set([e.company, ...(e.companies || [])])].map((c) => esc(name("companies", c))).join(" · ")}</p></div></div>
+    ${can(hr) ? `<div class="actions">${btn("Modifier la fiche", "employee-edit", id, "primary")} ${btn("Entreprises / accès", "employee-companies", id)} ${btn("Supprimer le salarié", "employee-delete", id, "danger")}</div>` : ""}
+    <div class="employee-summary"><article><strong>${assignedTools.length}</strong><span>Outils attribués</span></article><article><strong>${assignedVehicles.length}</strong><span>Véhicules attribués</span></article><article><strong>${times.reduce((sum, t) => sum + Number(t.hours || 0), 0).toFixed(2)} h</strong><span>Heures enregistrées visibles</span></article><article><strong>${projects.length}</strong><span>Chantiers affectés visibles</span></article></div>
+    ${
+      privateInfo
+        ? `<details open><summary>Coordonnées et informations personnelles</summary><dl class="employee-info"><dt>E-mail de contact</dt><dd>${esc(e.email || "—")}</dd><dt>Téléphone</dt><dd>${esc(e.phone || "—")}</dd><dt>Adresse</dt><dd>${esc([e.street, e.zip, e.city, e.country].filter(Boolean).join(", ") || "Non renseignée")}</dd><dt>Date de naissance</dt><dd>${e.birthDate ? date(e.birthDate) : "—"}</dd><dt>Contact d’urgence</dt><dd>${esc([e.emergencyName, e.emergencyPhone].filter(Boolean).join(" · ") || "—")}</dd></dl></details>
+    <details><summary>Contrat et rémunération</summary><p>${e.salaryPeriod === "hourly" ? "Salaire horaire" : "Salaire mensuel"} : ${money(e.salary)}${e.salaryPeriod === "hourly" ? " / heure" : " / mois"}</p><p>Activité : ${esc(e.activity ?? "—")} % · Vacances : ${esc(e.vacation ?? "—")} jours</p><p>Contrat : ${esc(e.contractType || "Non renseigné")} · Entrée : ${e.entry ? date(e.entry) : "—"} · Fin : ${e.endDate ? date(e.endDate) : "—"}</p>${can(hr) && e.notes ? `<p class="employee-notes">${esc(e.notes)}</p>` : ""}</details>`
+        : ""
+    }
+    <details open><summary>Outils et véhicules</summary>${can(hr) ? btn("Gérer les attributions", "employee-assets", id) : ""}<h4>Outils</h4>${table(
+      ["Outil", "N° série", "Entreprise"],
+      assignedTools.map((a) => [
+        esc(a.name),
+        esc(a.serial),
+        esc(name("companies", a.company)),
+      ]),
+    )}<h4>Véhicules</h4>${table(
+      ["Plaque", "Véhicule", "Kilométrage", "Entretien"],
+      assignedVehicles.map((a) => [
+        esc(a.plate),
+        esc([a.brand, a.model].filter(Boolean).join(" ")),
+        esc(a.km),
+        a.service ? date(a.service) : "—",
+      ]),
+    )}</details>
+    <details><summary>Planning, heures et absences</summary><h4>Prochaines affectations</h4>${table(
+      ["Date", "Horaires", "Chantier"],
+      plans.map((p) => [
+        date(p.date),
+        esc(p.start + "–" + p.end),
+        esc(name("projects", p.project)),
+      ]),
+    )}<h4>Heures enregistrées</h4>${table(
+      ["Date", "Chantier", "Heures", "Statut"],
+      times.map((t) => [
+        date((t.startedAt || t.date || "").slice(0, 10)),
+        esc(name("projects", t.project)),
+        esc(t.hours),
+        esc(t.status),
+      ]),
+    )}<h4>Absences</h4>${table(
+      ["Du", "Au", "Type", "Statut"],
+      absences.map((a) => [
+        date(a.from),
+        date(a.to),
+        esc(a.type),
+        esc(a.status),
+      ]),
+    )}</details>
+    <details><summary>Chantiers et documents</summary>${table(
+      ["Chantier", "Statut", ""],
+      projects.map((p) => [
+        esc(p.title),
+        esc(p.status),
+        btn("Ouvrir", "project", p.id),
+      ]),
+    )}${table(
+      ["Document", ""],
+      docs.map((d) => [esc(d.name), btn("Télécharger", "download", d.id)]),
+    )}</details>
+    ${accountHtml ? `<details><summary>Compte de connexion</summary>${accountHtml}</details>` : ""}`,
   );
+}
+function employeeEdit(id) {
+  const e = find("employees", id);
+  formShell(
+    schemas.employees.filter((f) => f[0] !== "company"),
+    "employee.update",
+    `<input type="hidden" name="id" value="${esc(id)}"><fieldset><legend>Photo</legend>${e.photo ? `<img class="employee-photo" src="${esc(e.photo)}" alt="Photo actuelle"><label><input type="checkbox" name="removePhoto"> Retirer la photo actuelle</label>` : ""}<label for="employeePhoto">Photo du salarié</label><input id="employeePhoto" type="file" name="photoFile" accept="image/jpeg,image/png,image/webp"><p>JPG, PNG ou WebP, 5 Mo maximum. La photo sera redimensionnée.</p></fieldset><p class="muted">L’e-mail de contact ne modifie pas l’identifiant du compte de connexion.</p>`,
+    "Modifier la fiche salarié",
+  );
+  for (const [key] of schemas.employees)
+    if (key !== "company" && $("f_" + key))
+      $("f_" + key).value = e[key] ?? (key === "salaryPeriod" ? "monthly" : "");
+  $("f_salary").labels[0].textContent =
+    e.salaryPeriod === "hourly"
+      ? "Salaire horaire (CHF/heure)"
+      : "Salaire mensuel (CHF/mois)";
+}
+function employeeAssets(id) {
+  const e = find("employees", id),
+    companies = [e.company, ...(e.companies || [])];
+  formShell(
+    [],
+    "employee.assets",
+    `<input type="hidden" name="id" value="${esc(id)}"><p>Choisissez les équipements confiés à ${esc(e.name)}. Décochez-les lors de leur restitution.</p>${[
+      "tools",
+      "vehicles",
+    ]
+      .map(
+        (k) =>
+          `<fieldset><legend>${k === "tools" ? "Outils" : "Véhicules"}</legend>${
+            state[k]
+              .filter(
+                (a) => companies.includes(a.company) || same(a.employeeId, id),
+              )
+              .map(
+                (a) =>
+                  `<label class="asset-choice"><input type="checkbox" name="${k}" value="${esc(a.id)}" ${same(a.employeeId, id) ? "checked" : ""} ${a.employeeId && !same(a.employeeId, id) ? "disabled" : ""}> ${esc(k === "tools" ? a.name + " · " + a.serial : a.plate + " · " + a.brand + " " + a.model)} — ${esc(name("companies", a.company))}${a.employeeId && !same(a.employeeId, id) ? " (déjà attribué)" : ""}</label>`,
+              )
+              .join("") ||
+            "<p>Aucun équipement enregistré pour ses entreprises.</p>"
+          }</fieldset>`,
+      )
+      .join("")}`,
+    "Attributions du salarié",
+  );
+}
+async function employeePhoto(file) {
+  if (!file || !file.size) return undefined;
+  if (
+    file.size > 5 * 1024 * 1024 ||
+    !["image/jpeg", "image/png", "image/webp"].includes(file.type)
+  )
+    throw new Error("Choisissez une photo JPG, PNG ou WebP de 5 Mo maximum.");
+  const bitmap = await createImageBitmap(file);
+  try {
+    const ratio = Math.min(1, 320 / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(bitmap.width * ratio));
+    canvas.height = Math.max(1, Math.round(bitmap.height * ratio));
+    canvas
+      .getContext("2d")
+      .drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL("image/jpeg", 0.85);
+  } finally {
+    bitmap.close();
+  }
 }
 async function loadAudit() {
   try {
@@ -1830,6 +1987,8 @@ document.addEventListener("click", async (e) => {
       );
     else if (a === "export") exportData(id);
     else if (a === "employee-detail") await employeeDetail(id);
+    else if (a === "employee-edit") employeeEdit(id);
+    else if (a === "employee-assets") employeeAssets(id);
     else if (a === "user-form") userForm();
     else if (a === "time-add") manualTimeForm();
     else if (a === "employee-companies") {
@@ -1951,6 +2110,17 @@ document.addEventListener("submit", async (e) => {
         "state/messages",
         f,
       );
+    if (k === "employee.update") {
+      const photo = await employeePhoto(data.get("photoFile"));
+      delete p.photoFile;
+      if (photo !== undefined) p.photo = photo;
+      else if (p.removePhoto) p.photo = "";
+      delete p.removePhoto;
+    }
+    if (k === "employee.assets") {
+      p.tools = data.getAll("tools");
+      p.vehicles = data.getAll("vehicles");
+    }
     if (k === "password") {
       await api("auth/password", p);
       clearSession();
@@ -2022,7 +2192,11 @@ document.addEventListener("submit", async (e) => {
       "state/command",
       f,
     );
-    if (result && k === "employees") await employeeDetail(result.id);
+    if (
+      result &&
+      ["employees", "employee.update", "employee.assets"].includes(k)
+    )
+      await employeeDetail(result.id);
     if (result && k === "planning") {
       planningDate = p.date;
       render();
