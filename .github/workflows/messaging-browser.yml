@@ -1,0 +1,32 @@
+name: Test messagerie mobile et appels
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - app.js
+      - styles.css
+      - state-routes.js
+      - db.js
+      - test/messaging-browser.cjs
+      - .github/workflows/messaging-browser.yml
+
+permissions:
+  contents: read
+
+jobs:
+  messaging-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install app and Chromium
+        run: |
+          npm ci
+          npm install --no-save playwright
+          npx playwright install --with-deps chromium
+      - name: Test mobile layout, microphone and WebRTC call flow
+        run: node test/messaging-browser.cjs
