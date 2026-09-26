@@ -6,8 +6,8 @@
     KEY_ID = "e2ee-p256-v1",
     enc = new TextEncoder(),
     dec = new TextDecoder(),
-    publicCache = new Map(),
-    registeredPublicKey = false;
+    publicCache = new Map();
+  let registeredPublicKey = false;
 
   const b64u = (bytes) => {
     let s = "";
