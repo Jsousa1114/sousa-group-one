@@ -782,8 +782,15 @@ async function markChatRead() {
       revision,
       requestId: crypto.randomUUID(),
     });
-    revision = out.revision;
-    await refresh();
+    if (Number.isSafeInteger(out.revision)) revision = out.revision;
+    for (const m of state.messages) {
+      const belongs = payload.threadId
+        ? same(m.threadId, payload.threadId)
+        : !m.threadId && same(m.senderId, payload.recipientId);
+      if (belongs && !same(m.senderId, profile.id))
+        m.readBy = [...new Set([...(m.readBy || []).map(String), String(profile.id)])];
+    }
+    render();
   } catch (e) {
     if (e.status !== 409) notice(e.message);
   }
