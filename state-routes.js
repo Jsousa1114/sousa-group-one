@@ -6,6 +6,7 @@ const { auth, profile } = require("./auth-middleware"),
   { wrap } = require("./auth-routes"),
   { mutate } = require("./db");
 const D = require("./domain");
+const { notifyUsers } = require("./messaging-routes");
 function routes(db) {
   const r = express.Router();
   r.use(auth(db));
@@ -106,25 +107,52 @@ function routes(db) {
         employeePhotos.get(String(u.employee_id)) || "";
       const view = D.viewState(row.data, req.user);
       if (view.messages.length) {
-        const reads = (
-          await db.query(
-            "SELECT message_id,user_id FROM message_reads WHERE message_id = ANY($1::text[])",
-            [view.messages.map((m) => String(m.id))],
-          )
-        ).rows;
-        const byMessage = new Map();
+        const ids = view.messages.map((m) => String(m.id)),
+          [readsResult, overridesResult] = await Promise.all([
+            db.query(
+              "SELECT message_id,user_id FROM message_reads WHERE message_id = ANY($1::text[])",
+              [ids],
+            ),
+            db.query(
+              "SELECT message_id,edited_text,edited_encryption,edited_at,deleted_for_all,deleted_at FROM message_overrides WHERE message_id = ANY($1::text[])",
+              [ids],
+            ),
+          ]),
+          reads = readsResult.rows,
+          overrides = new Map(
+            overridesResult.rows.map((x) => [String(x.message_id), x]),
+          ),
+          byMessage = new Map();
         for (const read of reads) {
           const key = String(read.message_id);
           if (!byMessage.has(key)) byMessage.set(key, []);
           byMessage.get(key).push(String(read.user_id));
         }
-        for (const message of view.messages)
+        for (const message of view.messages) {
           message.readBy = [
             ...new Set([
               ...(message.readBy || []).map(String),
               ...(byMessage.get(String(message.id)) || []),
             ]),
           ];
+          const override = overrides.get(String(message.id));
+          if (override?.edited_at && !override.deleted_for_all) {
+            message.text = override.edited_encryption
+              ? ""
+              : override.edited_text || "";
+            if (override.edited_encryption)
+              message.encryption = override.edited_encryption;
+            message.editedAt = override.edited_at;
+          }
+          if (override?.deleted_for_all) {
+            message.text = "";
+            message.attachment = null;
+            message.sharedRef = null;
+            message.encryption = null;
+            message.deletedForAll = true;
+            message.deletedAt = override.deleted_at;
+          }
+        }
       }
       res.set("Cache-Control", "no-store").json({
         data: view,
@@ -150,55 +178,246 @@ function routes(db) {
         "La sauvegarde complète est désactivée. Utilisez une opération métier.",
     }),
   );
+  async function ensureProjectThread(c, d, project, actor) {
+    if (!project) return null;
+    const team = (project.team || []).map(String),
+      users = (
+        await c.query(
+          `SELECT id,employee_id,client_id FROM users
+           WHERE deleted_at IS NULL AND disabled=false
+             AND (
+               ($1::text[] <> '{}'::text[] AND employee_id=ANY($1::text[]))
+               OR client_id=$2
+               OR id=$3
+             )`,
+          [team, String(project.clientId || ""), actor.id],
+        )
+      ).rows,
+      participantIds = [
+        ...new Set(users.map((u) => String(u.id))),
+      ];
+    if (!participantIds.some((id) => D.same(id, actor.id)))
+      participantIds.push(String(actor.id));
+    let thread = d.messageThreads.find(
+      (t) => t.type === "project" && D.same(t.projectId, project.id),
+    );
+    if (!thread) {
+      thread = {
+        id: randomUUID(),
+        type: "project",
+        name: project.title || "Discussion chantier",
+        participants: participantIds,
+        projectId: String(project.id),
+        createdBy: actor.id,
+        createdAt: new Date().toISOString(),
+      };
+      d.messageThreads.push(thread);
+    } else {
+      thread.name = project.title || thread.name;
+      thread.participants = participantIds;
+    }
+    return thread;
+  }
+  async function addProjectSystemMessage(c, d, project, actor, text) {
+    if (!project || !text) return null;
+    const thread = await ensureProjectThread(c, d, project, actor);
+    if (!thread) return null;
+    const message = {
+      id: randomUUID(),
+      senderId: actor.id,
+      recipientId: null,
+      threadId: thread.id,
+      sender: "Sousa Group One",
+      text,
+      system: true,
+      readBy: [String(actor.id)],
+      createdAt: new Date().toISOString(),
+    };
+    d.messages.push(message);
+    return {
+      messageId: message.id,
+      threadId: thread.id,
+      participants: (thread.participants || [])
+        .map(Number)
+        .filter((id) => !D.same(id, actor.id)),
+      projectTitle: project.title || project.id,
+    };
+  }
+  function commandProjectAndText(d, action, result, payload, beforeProject = null) {
+    let project = null,
+      text = "";
+    if (action === "create" && reqSafeCollection(payload) === "projects") {
+      project = d.projects.find((p) => D.same(p.id, result?.id));
+      text = project ? "🏗 Chantier créé : " + project.title : "";
+    } else if (action === "project.update") {
+      project = d.projects.find((p) => D.same(p.id, result?.id));
+      if (project) {
+        const beforeTeam = new Set((beforeProject?.team || []).map(String)),
+          afterTeam = new Set((project.team || []).map(String)),
+          added = [...afterTeam].filter((id) => !beforeTeam.has(id)),
+          removed = [...beforeTeam].filter((id) => !afterTeam.has(id)),
+          changes = [];
+        for (const id of added) {
+          const employee = d.employees.find((e) => D.same(e.id, id));
+          changes.push("👤 " + (employee?.name || id) + " ajouté à l’équipe");
+        }
+        for (const id of removed) {
+          const employee = d.employees.find((e) => D.same(e.id, id));
+          changes.push("👤 " + (employee?.name || id) + " retiré de l’équipe");
+        }
+        text =
+          changes.join(" · ") ||
+          "📌 Chantier mis à jour · " +
+            project.status +
+            " · " +
+            Number(project.progress || 0) +
+            " %";
+      }
+    } else if (action === "project.finish") {
+      project = d.projects.find((p) => D.same(p.id, result?.id || payload?.id));
+      text = project
+        ? "✅ Chantier terminé · brouillon de facturation préparé"
+        : "";
+    } else if (action === "quote.project") {
+      project = d.projects.find((p) => D.same(p.id, result?.id));
+      text = project ? "🏗 Chantier créé depuis un devis accepté" : "";
+    } else if (
+      ["quote.accept", "quote.decide", "quote.issue", "quote.convert"].includes(action)
+    ) {
+      const doc =
+        d.quotes.find((q) => D.same(q.id, result?.id)) ||
+        d.invoices.find((i) => D.same(i.id, result?.id));
+      project = doc?.project
+        ? d.projects.find((p) => D.same(p.id, doc.project))
+        : null;
+      text =
+        action === "quote.accept" ||
+        (action === "quote.decide" && result?.status === "Accepté")
+          ? "✅ Devis accepté : " + (doc?.id || "")
+          : action === "quote.issue"
+            ? "📄 Devis émis : " + (doc?.id || "")
+            : action === "quote.convert"
+              ? "🧾 Facture créée depuis le devis"
+              : "";
+    } else if (action === "invoice.issue") {
+      const invoice = d.invoices.find((i) => D.same(i.id, result?.id));
+      project = invoice?.project
+        ? d.projects.find((p) => D.same(p.id, invoice.project))
+        : null;
+      text = invoice ? "🧾 Facture émise : " + invoice.id : "";
+    } else if (
+      action === "create" &&
+      reqSafeCollection(payload) === "planning"
+    ) {
+      project = d.projects.find((p) => D.same(p.id, result?.project));
+      const employee = d.employees.find((e) => D.same(e.id, result?.employeeId));
+      text = project
+        ? "📅 Planning · " +
+          (employee?.name || "Salarié") +
+          " · " +
+          (result?.date || "")
+        : "";
+    }
+    return { project, text };
+  }
+  function reqSafeCollection(payload) {
+    return payload?.__collection || "";
+  }
   r.post(
     "/command",
-    wrap(async (req, res) =>
-      res.json(
-        await mutate(db, req.user, req.body, async (c, d) => {
-          const { data, result } = D.applyCommand(d, req.user, req.body);
-          if (req.body.action === "employee.delete") {
-            if (D.same(req.user.employee_id, result.id))
-              D.fail("Vous ne pouvez pas supprimer votre propre fiche.");
-            const protectedAccounts = await c.query(
-              "SELECT id FROM users WHERE employee_id=$1 AND role='admin' AND disabled=false",
-              [String(result.id)],
+    wrap(async (req, res) => {
+      let systemPush = null;
+      const bodyForSystem = {
+        ...(req.body || {}),
+        payload: {
+          ...(req.body?.payload || {}),
+          __collection: req.body?.collection || "",
+        },
+      };
+      const out = await mutate(db, req.user, req.body, async (c, d) => {
+        const beforeProject =
+          req.body.action === "project.update"
+            ? structuredClone(
+                d.projects.find((p) => D.same(p.id, req.body.payload?.id)) || null,
+              )
+            : null;
+        const { data, result } = D.applyCommand(d, req.user, req.body);
+        if (req.body.action === "employee.delete") {
+          if (D.same(req.user.employee_id, result.id))
+            D.fail("Vous ne pouvez pas supprimer votre propre fiche.");
+          const protectedAccounts = await c.query(
+            "SELECT id FROM users WHERE employee_id=$1 AND role='admin' AND disabled=false",
+            [String(result.id)],
+          );
+          if (protectedAccounts.rows.length)
+            D.fail("Retirez d’abord le rôle administrateur du compte lié.");
+          await c.query(
+            "UPDATE users SET disabled=true,session_version=session_version+1 WHERE employee_id=$1",
+            [String(result.id)],
+          );
+        }
+        if (req.body.action === "client.delete") {
+          const accounts = await c.query(
+            "SELECT id FROM users WHERE client_id=$1 AND deleted_at IS NULL",
+            [String(result.id)],
+          );
+          if (accounts.rows.length)
+            D.fail(
+              "Ce client possède un compte de connexion lié. Supprimez ou dissociez ce compte avant de supprimer le client.",
             );
-            if (protectedAccounts.rows.length)
-              D.fail("Retirez d’abord le rôle administrateur du compte lié.");
-            await c.query(
-              "UPDATE users SET disabled=true,session_version=session_version+1 WHERE employee_id=$1",
-              [String(result.id)],
-            );
-          }
-          if (req.body.action === "client.delete") {
+        }
+        if (req.body.action === "record.delete") {
+          if (req.body.payload?.kind === "companies") {
             const accounts = await c.query(
-              "SELECT id FROM users WHERE client_id=$1 AND deleted_at IS NULL",
+              "SELECT id FROM users WHERE company=$1 AND deleted_at IS NULL",
               [String(result.id)],
             );
             if (accounts.rows.length)
-              D.fail(
-                "Ce client possède un compte de connexion lié. Supprimez ou dissociez ce compte avant de supprimer le client.",
-              );
+              D.fail("Cette entreprise possède encore des comptes liés.");
           }
-          if (req.body.action === "record.delete") {
-            if (req.body.payload?.kind === "companies") {
-              const accounts = await c.query(
-                "SELECT id FROM users WHERE company=$1 AND deleted_at IS NULL",
-                [String(result.id)],
-              );
-              if (accounts.rows.length)
-                D.fail("Cette entreprise possède encore des comptes liés.");
-            }
-            if (req.body.payload?.kind === "documents")
-              await c.query("DELETE FROM file_contents WHERE id=$1", [
-                String(result.id),
-              ]);
-          }
-          Object.assign(d, data);
-          return result;
-        }),
-      ),
-    ),
+          if (req.body.payload?.kind === "documents")
+            await c.query("DELETE FROM file_contents WHERE id=$1", [
+              String(result.id),
+            ]);
+        }
+        Object.assign(d, data);
+        const event = commandProjectAndText(
+          d,
+          req.body.action,
+          result,
+          bodyForSystem.payload,
+          beforeProject,
+        );
+        if (event.project && event.text)
+          systemPush = await addProjectSystemMessage(
+            c,
+            d,
+            event.project,
+            req.user,
+            event.text,
+          );
+        else if (
+          req.body.action === "project.update" ||
+          (req.body.action === "create" && req.body.collection === "projects")
+        ) {
+          const project =
+            d.projects.find((p) => D.same(p.id, result?.id)) || null;
+          if (project) await ensureProjectThread(c, d, project, req.user);
+        }
+        return result;
+      });
+      if (systemPush?.participants?.length)
+        await notifyUsers(db, systemPush.participants, {
+          title: systemPush.projectTitle,
+          body: "Nouvelle activité sur le chantier",
+          url:
+            "/?open=messages&conversation=" +
+            encodeURIComponent("thread:" + systemPush.threadId),
+          tag: "project-" + systemPush.messageId,
+          conversationKey: "thread:" + systemPush.threadId,
+        }).catch(() => {});
+      res.json(out);
+    }),
   );
   r.get(
     "/audit",
@@ -514,7 +733,14 @@ function routes(db) {
         await db.query("SELECT data FROM app_state WHERE id=1")
       ).rows[0];
       const visible = D.viewState(row.data, req.user),
-        msg = visible.messages.find((m) => D.same(m.id, req.params.id));
+        msg = visible.messages.find((m) => D.same(m.id, req.params.id)),
+        override = (
+          await db.query(
+            "SELECT deleted_for_all FROM message_overrides WHERE message_id=$1",
+            [req.params.id],
+          )
+        ).rows[0];
+      if (override?.deleted_for_all) D.fail("Pièce jointe supprimée.", 404);
       if (!msg?.attachment?.fileId) D.fail("Pièce jointe introuvable.", 404);
       const file = (
         await db.query("SELECT content FROM file_contents WHERE id=$1", [
@@ -649,111 +875,237 @@ function routes(db) {
   );
   r.post(
     "/messages",
-    wrap(async (req, res) =>
-      res.json(
-        await mutate(
-          db,
-          req.user,
-          { ...req.body, action: "Message envoyé" },
-          async (c, d) => {
-            const p = req.body.payload || {},
-              text = D.text(p.text, "Message", 5000, true);
-            let recipient = null,
-              thread = null;
-            if (p.threadId) {
-              thread = d.messageThreads.find((t) => D.same(t.id, p.threadId));
-              if (
-                !thread ||
-                !(thread.participants || []).some((id) =>
-                  D.same(id, req.user.id),
-                )
+    wrap(async (req, res) => {
+      let notificationTargets = [],
+        notificationConversation = "",
+        notificationPreview = "Nouveau message";
+      const out = await mutate(
+        db,
+        req.user,
+        { ...req.body, action: "Message envoyé" },
+        async (c, d) => {
+          const p = req.body.payload || {},
+            text = D.text(p.text, "Message", 5000, true);
+          let recipient = null,
+            thread = null,
+            participants = [];
+          if (p.threadId) {
+            thread = d.messageThreads.find((t) => D.same(t.id, p.threadId));
+            if (
+              !thread ||
+              !(thread.participants || []).some((id) =>
+                D.same(id, req.user.id),
               )
-                D.fail("Conversation non autorisée.", 403);
-            } else {
-              recipient = (
-                await c.query(
-                  "SELECT * FROM users WHERE id=$1 AND deleted_at IS NULL AND disabled=false",
-                  [p.recipientId],
-                )
-              ).rows[0];
-              if (!recipient || !D.canContact(req.user, recipient, d))
-                D.fail("Destinataire non autorisé.", 403);
-            }
-            let replyToId = "";
-            if (p.replyToId) {
-              const replied = d.messages.find((m) => D.same(m.id, p.replyToId));
-              if (!replied) D.fail("Message cité introuvable.");
-              const visibleReply = D.viewState(d, req.user).messages.some((m) =>
-                D.same(m.id, replied.id),
-              );
-              if (!visibleReply) D.fail("Message cité non autorisé.", 403);
-              const sameConversation = thread
-                ? D.same(replied.threadId, thread.id)
-                : !replied.threadId &&
-                  ((D.same(replied.senderId, req.user.id) &&
-                    D.same(replied.recipientId, recipient.id)) ||
-                    (D.same(replied.senderId, recipient.id) &&
-                      D.same(replied.recipientId, req.user.id)));
-              if (!sameConversation)
-                D.fail("Le message cité appartient à une autre conversation.", 403);
-              replyToId = replied.id;
-            }
-            let attachment = null;
-            if (p.attachment) {
-              const raw = p.attachment,
-                name = D.text(raw.name, "Nom du fichier", 200),
-                mime = D.text(raw.mime, "Type de fichier", 120),
-                allowed =
-                  /^image\/(jpeg|png|webp|gif)$/.test(mime) ||
-                  /^audio\/(webm|ogg|mpeg|mp4|wav|x-m4a)$/.test(mime) ||
-                  mime === "application/pdf" ||
-                  mime === "text/plain";
-              if (!allowed) D.fail("Type de pièce jointe non autorisé.");
-              if (
-                typeof raw.content !== "string" ||
-                !/^[A-Za-z0-9+/]+={0,2}$/.test(raw.content)
-              )
-                D.fail("Pièce jointe invalide.");
-              const content = Buffer.from(raw.content, "base64");
-              if (!content.length || content.length > 5 * 1024 * 1024)
-                D.fail("Pièce jointe de 5 Mo maximum.");
-              const fileId = randomUUID();
+            )
+              D.fail("Conversation non autorisée.", 403);
+            participants = (
               await c.query(
-                "INSERT INTO file_contents(id,content) VALUES($1,$2)",
-                [fileId, content],
-              );
-              attachment = {
-                fileId,
-                name,
-                mime,
-                size: content.length,
-                kind: mime.startsWith("image/")
-                  ? "image"
-                  : mime.startsWith("audio/")
-                    ? "audio"
-                    : "file",
-              };
+                "SELECT * FROM users WHERE id=ANY($1::int[]) AND deleted_at IS NULL AND disabled=false",
+                [(thread.participants || []).map(Number)],
+              )
+            ).rows;
+            notificationTargets = participants
+              .filter((u) => !D.same(u.id, req.user.id))
+              .map((u) => Number(u.id));
+            notificationConversation = "thread:" + thread.id;
+          } else {
+            recipient = (
+              await c.query(
+                "SELECT * FROM users WHERE id=$1 AND deleted_at IS NULL AND disabled=false",
+                [p.recipientId],
+              )
+            ).rows[0];
+            if (!recipient || !D.canContact(req.user, recipient, d))
+              D.fail("Destinataire non autorisé.", 403);
+            participants = [req.user, recipient];
+            notificationTargets = [Number(recipient.id)];
+            notificationConversation = "direct:" + recipient.id;
+          }
+
+          let replyToId = "";
+          if (p.replyToId) {
+            const replied = d.messages.find((m) => D.same(m.id, p.replyToId));
+            if (!replied) D.fail("Message cité introuvable.");
+            const visibleReply = D.viewState(d, req.user).messages.some((m) =>
+              D.same(m.id, replied.id),
+            );
+            if (!visibleReply) D.fail("Message cité non autorisé.", 403);
+            const sameConversation = thread
+              ? D.same(replied.threadId, thread.id)
+              : !replied.threadId &&
+                ((D.same(replied.senderId, req.user.id) &&
+                  D.same(replied.recipientId, recipient.id)) ||
+                  (D.same(replied.senderId, recipient.id) &&
+                    D.same(replied.recipientId, req.user.id)));
+            if (!sameConversation)
+              D.fail("Le message cité appartient à une autre conversation.", 403);
+            replyToId = replied.id;
+          }
+
+          let forwardedFromId = "";
+          if (p.forwardedFromId) {
+            const source = D.viewState(d, req.user).messages.find((m) =>
+              D.same(m.id, p.forwardedFromId),
+            );
+            if (!source) D.fail("Message à transférer introuvable.", 404);
+            forwardedFromId = source.id;
+          }
+
+          let sharedRef = null;
+          if (p.sharedRef) {
+            const kind = String(p.sharedRef.kind || ""),
+              id = String(p.sharedRef.id || "");
+            if (!["quotes", "invoices", "documents"].includes(kind) || !id)
+              D.fail("Élément partagé invalide.");
+            const senderView = D.viewState(d, req.user);
+            if (!senderView[kind]?.some((x) => D.same(x.id, id)))
+              D.fail("Vous n’avez pas accès à cet élément.", 403);
+            for (const user of participants) {
+              const effective = D.effectiveUser(d, user),
+                view = D.viewState(d, effective);
+              if (!view[kind]?.some((x) => D.same(x.id, id)))
+                D.fail(
+                  "Un destinataire n’a pas accès à l’élément partagé.",
+                  403,
+                );
             }
-            if (!text && !attachment)
-              D.fail("Écrivez un message ou ajoutez une pièce jointe.");
-            const msg = {
-              id: randomUUID(),
-              senderId: req.user.id,
-              recipientId: recipient?.id || null,
-              threadId: thread?.id || "",
-              sender: req.user.name,
-              text,
-              replyToId,
-              attachment,
-              readBy: [String(req.user.id)],
-              createdAt: new Date().toISOString(),
+            const target = d[kind].find((x) => D.same(x.id, id));
+            sharedRef = {
+              kind,
+              id,
+              title:
+                target?.title ||
+                target?.name ||
+                target?.number ||
+                id,
             };
-            d.messages.push(msg);
-            return { id: msg.id };
-          },
-        ),
-      ),
-    ),
+          }
+
+          let encryption = null;
+          if (p.encryption) {
+            const e = p.encryption;
+            if (
+              e.algorithm !== "SGO-E2EE-P256-AESGCM-v1" ||
+              typeof e.iv !== "string" ||
+              typeof e.ciphertext !== "string" ||
+              !e.envelopes ||
+              typeof e.envelopes !== "object" ||
+              e.ciphertext.length > 15000
+            )
+              D.fail("Message chiffré invalide.");
+            const expected = new Set(
+              participants.map((u) => String(u.id)),
+            );
+            for (const id of expected) {
+              const envelope = e.envelopes[id];
+              if (
+                !envelope ||
+                typeof envelope.iv !== "string" ||
+                typeof envelope.ciphertext !== "string" ||
+                envelope.ciphertext.length > 2000
+              )
+                D.fail("Clé de chiffrement manquante pour un participant.");
+            }
+            encryption = {
+              algorithm: e.algorithm,
+              iv: e.iv.slice(0, 100),
+              ciphertext: e.ciphertext,
+              envelopes: e.envelopes,
+              attachmentIv:
+                typeof e.attachmentIv === "string"
+                  ? e.attachmentIv.slice(0, 100)
+                  : "",
+              senderId: String(req.user.id),
+            };
+          }
+
+          let attachment = null;
+          if (p.attachment) {
+            const raw = p.attachment,
+              name = D.text(raw.name, "Nom du fichier", 200),
+              requestedMime = D.text(raw.mime, "Type de fichier", 120),
+              encryptedAttachment = !!(encryption && raw.encrypted),
+              mime = encryptedAttachment
+                ? "application/octet-stream"
+                : requestedMime,
+              allowed =
+                encryptedAttachment ||
+                /^image\/(jpeg|png|webp|gif)$/.test(mime) ||
+                /^audio\/(webm|ogg|mpeg|mp4|wav|x-m4a)$/.test(mime) ||
+                mime === "application/pdf" ||
+                mime === "text/plain";
+            if (!allowed) D.fail("Type de pièce jointe non autorisé.");
+            if (
+              typeof raw.content !== "string" ||
+              !/^[A-Za-z0-9+/]+={0,2}$/.test(raw.content)
+            )
+              D.fail("Pièce jointe invalide.");
+            const content = Buffer.from(raw.content, "base64");
+            if (!content.length || content.length > 5 * 1024 * 1024)
+              D.fail("Pièce jointe de 5 Mo maximum.");
+            const fileId = randomUUID();
+            await c.query(
+              "INSERT INTO file_contents(id,content) VALUES($1,$2)",
+              [fileId, content],
+            );
+            attachment = {
+              fileId,
+              name,
+              mime,
+              originalMime: encryptedAttachment ? requestedMime : "",
+              size: content.length,
+              encrypted: encryptedAttachment,
+              kind: requestedMime.startsWith("image/")
+                ? "image"
+                : requestedMime.startsWith("audio/")
+                  ? "audio"
+                  : "file",
+            };
+          }
+          if (!text && !attachment && !sharedRef && !encryption)
+            D.fail("Écrivez un message ou ajoutez une pièce jointe.");
+
+          const msg = {
+            id: randomUUID(),
+            senderId: req.user.id,
+            recipientId: recipient?.id || null,
+            threadId: thread?.id || "",
+            sender: req.user.name,
+            text: encryption ? "" : text,
+            replyToId,
+            forwardedFromId,
+            sharedRef,
+            encryption,
+            attachment,
+            readBy: [String(req.user.id)],
+            createdAt: new Date().toISOString(),
+          };
+          d.messages.push(msg);
+          notificationPreview = encryption
+            ? "🔐 Nouveau message chiffré"
+            : sharedRef
+              ? "📄 " + sharedRef.title
+              : attachment
+                ? attachment.kind === "image"
+                  ? "📷 Photo"
+                  : attachment.kind === "audio"
+                    ? "🎤 Message vocal"
+                    : "📎 " + attachment.name
+                : text.slice(0, 140);
+          return { id: msg.id };
+        },
+      );
+      await notifyUsers(db, notificationTargets, {
+        title: req.user.name,
+        body: notificationPreview || "Nouveau message",
+        url:
+          "/?open=messages&conversation=" +
+          encodeURIComponent(notificationConversation),
+        tag: "message-" + out.result.id,
+        conversationKey: notificationConversation,
+      }).catch(() => {});
+      res.json(out);
+    }),
   );
   r.post(
     "/documents",
@@ -917,7 +1269,14 @@ function routes(db) {
           username: process.env.RTC_TURN_USERNAME,
           credential: process.env.RTC_TURN_CREDENTIAL,
         });
-      res.set("Cache-Control", "no-store").json({ iceServers });
+      res.set("Cache-Control", "no-store").json({
+        iceServers,
+        turnAvailable: iceServers.some((server) =>
+          (Array.isArray(server.urls) ? server.urls : [server.urls]).some(
+            (url) => String(url || "").startsWith("turn:") || String(url || "").startsWith("turns:"),
+          ),
+        ),
+      });
     }),
   );
   r.get(
@@ -939,6 +1298,7 @@ function routes(db) {
               callerName: active.caller_name,
               calleeName: active.callee_name,
               status: active.status,
+              callType: active.call_type || "audio",
               offer: active.offer,
               answer: active.answer,
               createdAt: active.created_at,
@@ -953,6 +1313,7 @@ function routes(db) {
     wrap(async (req, res) => {
       await expireCalls(db);
       const p = req.body || {},
+        callType = p.callType === "video" ? "video" : "audio",
         recipient = (
           await db.query(
             "SELECT * FROM users WHERE id=$1 AND deleted_at IS NULL AND disabled=false",
@@ -982,10 +1343,20 @@ function routes(db) {
       if (busy) D.fail("Un des correspondants est déjà en appel.", 409);
       const id = randomUUID();
       await db.query(
-        "INSERT INTO rtc_calls(id,caller_id,callee_id,caller_name,callee_name,status,offer) VALUES($1,$2,$3,$4,$5,'ringing',$6)",
-        [id, req.user.id, recipient.id, req.user.name, recipient.name, p.offer],
+        "INSERT INTO rtc_calls(id,caller_id,callee_id,caller_name,callee_name,status,offer,call_type) VALUES($1,$2,$3,$4,$5,'ringing',$6,$7)",
+        [id, req.user.id, recipient.id, req.user.name, recipient.name, p.offer, callType],
       );
-      res.json({ id, status: "ringing" });
+      await notifyUsers(db, [Number(recipient.id)], {
+        title: callType === "video" ? "Appel vidéo entrant" : "Appel audio entrant",
+        body: req.user.name + " vous appelle",
+        url:
+          "/?open=messages&conversation=" +
+          encodeURIComponent("direct:" + req.user.id),
+        tag: "call-" + id,
+        conversationKey: "direct:" + req.user.id,
+        directCallId: id,
+      }).catch(() => {});
+      res.json({ id, status: "ringing", callType });
     }),
   );
   r.get(
@@ -1001,6 +1372,7 @@ function routes(db) {
           callerName: call.caller_name,
           calleeName: call.callee_name,
           status: call.status,
+          callType: call.call_type || "audio",
           offer: call.offer,
           answer: call.answer,
           createdAt: call.created_at,

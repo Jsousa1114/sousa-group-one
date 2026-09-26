@@ -355,6 +355,7 @@ function render() {
     hydrateChatAttachments();
     queueMicrotask(() => markChatRead());
   }
+  queueMicrotask(() => window.SGOMessagingSuite?.afterRender?.());
 }
 function projectRows(list) {
   return table(
@@ -743,14 +744,20 @@ function chatRead(m) {
 function chatMessagePreview(m) {
   if (!m) return "Commencer une conversation";
   const prefix = same(m.senderId, profile.id) ? "Vous : " : "";
+  if (m.deletedForAll) return prefix + "🚫 Message supprimé";
+  if (m.system) return "⚙ " + (m.text || "Activité du chantier");
+  if (m.encryption) return prefix + "🔐 Message chiffré";
+  if (m.sharedRef) return prefix + "📄 " + (m.sharedRef.title || m.sharedRef.id);
   if (m.text) return prefix + m.text;
   if (m.attachment?.kind === "image") return prefix + "📷 Photo";
   if (m.attachment?.kind === "audio") return prefix + "🎤 Message vocal";
   return prefix + "📎 " + (m.attachment?.name || "Fichier");
 }
 function chatAttachmentHtml(m) {
-  if (!m.attachment) return "";
+  if (!m.attachment || m.deletedForAll) return "";
   const label = esc(m.attachment.name || "Pièce jointe");
+  if (m.attachment.encrypted)
+    return `<button type="button" class="chat-attachment-link encrypted-attachment" data-encrypted-attachment="${esc(m.id)}">🔐 ${label} · déchiffrement…</button>`;
   if (m.attachment.kind === "image")
     return `<button type="button" class="chat-media-button" data-action="chat-open-attachment" data-id="${esc(m.id)}"><img data-chat-media="${esc(m.id)}" alt="${label}" class="chat-image-preview"><span>📷 ${label}</span></button>`;
   if (m.attachment.kind === "audio")
@@ -843,6 +850,10 @@ function ensureCallOverlay() {
   overlay.innerHTML = `
     <div class="call-card">
       <div class="call-avatar" id="callAvatar">☎</div>
+      <div id="callVideoStage" class="call-video-stage hidden">
+        <video id="remoteCallVideo" autoplay playsinline muted></video>
+        <video id="localCallVideo" autoplay playsinline muted></video>
+      </div>
       <h3 id="callName">Appel</h3>
       <p id="callState">Connexion…</p>
       <div class="call-timer hidden" id="callTimer">00:00</div>
@@ -850,6 +861,7 @@ function ensureCallOverlay() {
         <button type="button" id="callReject" class="call-control danger hidden" data-action="call-reject" aria-label="Refuser l'appel">✕</button>
         <button type="button" id="callAccept" class="call-control accept hidden" data-action="call-accept" aria-label="Accepter l'appel">📞</button>
         <button type="button" id="callMute" class="call-control hidden" data-action="call-mute" aria-label="Couper le micro">🎙</button>
+        <button type="button" id="callCamera" class="call-control hidden" data-action="call-camera" aria-label="Couper la caméra">📹</button>
         <button type="button" id="callEnableAudio" class="call-control hidden" data-action="call-enable-audio" aria-label="Activer le son">🔊</button>
         <button type="button" id="callHangup" class="call-control danger hidden" data-action="call-hangup" aria-label="Raccrocher">☎</button>
       </div>
@@ -869,9 +881,14 @@ function setCallUi(name, status, mode = "active") {
   $("callOverlay").classList.remove("hidden");
   $("callAccept").classList.toggle("hidden", mode !== "incoming");
   $("callReject").classList.toggle("hidden", mode !== "incoming");
+  const call = activeCall || incomingCall,
+    isVideo = call?.callType === "video";
   $("callMute").classList.toggle("hidden", mode === "incoming" || mode === "ended");
+  $("callCamera").classList.toggle("hidden", !isVideo || mode === "incoming" || mode === "ended");
   $("callHangup").classList.toggle("hidden", mode === "incoming" || mode === "ended");
   $("callTimer").classList.toggle("hidden", mode !== "connected");
+  $("callVideoStage").classList.toggle("hidden", !isVideo);
+  $("callAvatar").classList.toggle("hidden", isVideo);
   $("callEnableAudio").classList.toggle("hidden", !callAudioBlocked || mode === "incoming" || mode === "ended");
 }
 function hideCallUi() {
@@ -880,6 +897,11 @@ function hideCallUi() {
     $("remoteCallAudio").pause?.();
     $("remoteCallAudio").srcObject = null;
   }
+  for (const id of ["remoteCallVideo", "localCallVideo"])
+    if ($(id)) {
+      $(id).pause?.();
+      $(id).srcObject = null;
+    }
   callAudioBlocked = false;
 }
 function friendlyMediaError(error, purpose = "micro") {
@@ -987,9 +1009,9 @@ async function loadIceServers() {
   }
   return rtcIceServers;
 }
-async function makePeer() {
+async function makePeer(callType = "audio") {
   if (!navigator.mediaDevices?.getUserMedia || !window.RTCPeerConnection)
-    throw new Error("Les appels audio ne sont pas disponibles sur cet appareil.");
+    throw new Error("Les appels ne sont pas disponibles sur cet appareil.");
   let stream;
   try {
     stream = await navigator.mediaDevices.getUserMedia({
@@ -998,8 +1020,20 @@ async function makePeer() {
         noiseSuppression: true,
         autoGainControl: true,
       },
-      video: false,
+      video:
+        callType === "video"
+          ? {
+              facingMode: "user",
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+            }
+          : false,
     });
+    if (callType === "video") {
+      ensureCallOverlay();
+      $("localCallVideo").srcObject = stream;
+      $("localCallVideo").play().catch(() => {});
+    }
     const peer = new RTCPeerConnection({
       iceServers: await loadIceServers(),
       iceCandidatePoolSize: 2,
@@ -1010,8 +1044,13 @@ async function makePeer() {
     };
     peer.ontrack = (e) => {
       ensureCallOverlay();
-      const audio = $("remoteCallAudio");
-      audio.srcObject = e.streams[0] || new MediaStream([e.track]);
+      const remoteStream = e.streams[0] || new MediaStream([e.track]),
+        audio = $("remoteCallAudio");
+      audio.srcObject = remoteStream;
+      if (callType === "video") {
+        $("remoteCallVideo").srcObject = remoteStream;
+        $("remoteCallVideo").play().catch(() => {});
+      }
       playRemoteAudio();
     };
     peer.onconnectionstatechange = () => {
@@ -1100,7 +1139,7 @@ async function endCurrentCall(send = true) {
     await api("state/calls/" + encodeURIComponent(id) + "/end", {}).catch(() => {});
   finishCallLocal();
 }
-async function startAudioCall(contactId) {
+async function startDirectCall(contactId, callType = "audio") {
   if (chatRecorder?.state === "recording") cancelChatRecording();
   if (activeCall || incomingCall)
     throw new Error("Un appel est déjà en cours.");
@@ -1109,9 +1148,10 @@ async function startAudioCall(contactId) {
   clearTimeout(callEndUiTimer);
   setCallUi(contact.name, "Préparation de l’appel…", "active");
   try {
-    const { peer, stream } = await makePeer();
+    const { peer, stream } = await makePeer(callType);
     activeCall = {
       id: "",
+      callType,
       callerId: profile.id,
       calleeId: contact.id,
       callerName: profile.name,
@@ -1120,10 +1160,14 @@ async function startAudioCall(contactId) {
       stream,
       answerApplied: false,
     };
-    const offer = await peer.createOffer({ offerToReceiveAudio: true });
+    const offer = await peer.createOffer({
+      offerToReceiveAudio: true,
+      offerToReceiveVideo: callType === "video",
+    });
     await peer.setLocalDescription(offer);
     const out = await api("state/calls/start", {
       recipientId: contact.id,
+      callType,
       offer: peer.localDescription,
     });
     activeCall.id = out.id;
@@ -1140,6 +1184,12 @@ async function startAudioCall(contactId) {
     throw e;
   }
 }
+async function startAudioCall(contactId) {
+  return startDirectCall(contactId, "audio");
+}
+async function startVideoCall(contactId) {
+  return startDirectCall(contactId, "video");
+}
 async function acceptIncomingCall() {
   if (!incomingCall) return;
   const call = incomingCall;
@@ -1147,8 +1197,8 @@ async function acceptIncomingCall() {
   clearTimeout(callEndUiTimer);
   setCallUi(call.callerName, "Connexion…", "active");
   try {
-    const { peer, stream } = await makePeer();
-    activeCall = { ...call, peer, stream, answerApplied: true };
+    const { peer, stream } = await makePeer(call.callType || "audio");
+    activeCall = { ...call, callType: call.callType || "audio", peer, stream, answerApplied: true };
     incomingCall = null;
     callCandidateCursor = 0;
     remoteIceQueue = [];
@@ -1231,7 +1281,11 @@ async function pollCallState() {
       same(call.calleeId, profile.id)
     ) {
       incomingCall = call;
-      setCallUi(call.callerName, "Appel audio entrant", "incoming");
+      setCallUi(
+        call.callerName,
+        call.callType === "video" ? "Appel vidéo entrant" : "Appel audio entrant",
+        "incoming",
+      );
       beepRingtone();
     }
   } catch {}
@@ -1320,12 +1374,12 @@ function messagesView() {
             : "";
         return (
           separator +
-          `<div class="message ${mine ? "mine" : "theirs"}" id="msg-${esc(m.id)}">
-            ${active.kind === "thread" && !mine ? `<b class="message-sender">${esc(m.sender || "Participant")}</b>` : ""}
-            ${chatReplyHtml(m, list)}
-            ${chatAttachmentHtml(m)}
-            ${m.text ? `<p class="prewrap">${esc(m.text)}</p>` : ""}
-            <div class="message-meta"><time datetime="${esc(m.createdAt)}">${esc(chatTime(m.createdAt))}</time>${check}</div>
+          `<div class="message ${mine ? "mine" : "theirs"} ${m.system ? "system-message" : ""} ${m.encryption ? "encrypted-message" : ""} ${m.deletedForAll ? "deleted-message" : ""}" id="msg-${esc(m.id)}" data-message-id="${esc(m.id)}">
+            ${m.forwardedFromId ? '<span class="message-forwarded">↪ Transféré</span>' : ""}
+            ${m.system ? '<span class="message-system-label">⚙ Sousa Group One</span>' : ""}
+            ${active.kind === "thread" && !mine && !m.system ? `<b class="message-sender">${esc(m.sender || "Participant")}</b>` : ""}
+            ${m.deletedForAll ? '<p class="message-deleted-text">🚫 Ce message a été supprimé pour tout le monde.</p>' : `${chatReplyHtml(m, list)}${chatAttachmentHtml(m)}${m.encryption ? `<p class="prewrap encrypted-text" data-encrypted-text="${esc(m.id)}">🔐 Déchiffrement…</p>` : m.text ? `<p class="prewrap">${esc(m.text)}</p>` : ""}${m.sharedRef ? `<div class="shared-ref-placeholder" data-shared-ref="${esc(m.id)}"></div>` : ""}`}
+            <div class="message-meta"><time datetime="${esc(m.createdAt)}">${esc(chatTime(m.createdAt))}</time>${m.editedAt ? '<span class="message-edited">modifié</span>' : ""}${check}</div>
             <div class="message-actions">
               <button type="button" data-action="chat-reply" data-id="${esc(m.id)}">↩ Répondre</button>
               ${deleteRecordButton("messages", m)}
@@ -1359,7 +1413,7 @@ function messagesView() {
       <header class="chat-header">
         <button type="button" class="chat-back" data-action="chat-back" aria-label="Retour aux discussions">←</button>
         ${active.kind === "direct" ? chatAvatar(active.contact) : `<span class="chat-avatar chat-avatar-initial chat-group-avatar">${active.thread.type === "project" ? "🏗" : "👥"}</span>`}
-        <div class="chat-header-person"><strong>${esc(active.title)}</strong><span>${esc(active.subtitle)}</span></div>${active.kind === "direct" ? `<button type="button" class="chat-call-button" data-action="call-start" data-id="${esc(active.contact.id)}" aria-label="Appeler ${esc(active.title)}" title="Appel audio">📞</button>` : ""}
+        <div class="chat-header-person"><strong>${esc(active.title)}</strong><span>${esc(active.subtitle)}</span></div>${active.kind === "direct" ? `<div class="chat-call-actions"><button type="button" class="chat-call-button" data-action="call-start" data-id="${esc(active.contact.id)}" aria-label="Appeler ${esc(active.title)}" title="Appel audio">📞</button><button type="button" class="chat-call-button" data-action="call-video" data-id="${esc(active.contact.id)}" aria-label="Appel vidéo ${esc(active.title)}" title="Appel vidéo">📹</button></div>` : ""}
       </header>
       <div id="messageThread" class="messages chat-thread" role="log" aria-live="polite" aria-label="Messages avec ${esc(active.title)}">${bubbles}</div>
       <div id="chatReplyBar" class="chat-reply-bar ${chatReplyToId ? "" : "hidden"}">
@@ -2609,11 +2663,20 @@ document.addEventListener("click", async (e) => {
       mobileChatOpen = false;
       render();
     } else if (a === "call-start") await startAudioCall(id);
+    else if (a === "call-video") await startVideoCall(id);
     else if (a === "call-accept") await acceptIncomingCall();
     else if (a === "call-reject") await rejectIncomingCall();
     else if (a === "call-hangup") await endCurrentCall(true);
     else if (a === "call-enable-audio") await playRemoteAudio();
-    else if (a === "call-mute") {
+    else if (a === "call-camera") {
+      if (!activeCall?.stream) return;
+      const tracks = activeCall.stream.getVideoTracks(),
+        disabled = tracks.length && tracks.every((track) => !track.enabled);
+      tracks.forEach((track) => (track.enabled = disabled));
+      b.classList.toggle("muted", !disabled);
+      b.textContent = disabled ? "📹" : "🚫";
+      b.title = disabled ? "Couper la caméra" : "Réactiver la caméra";
+    } else if (a === "call-mute") {
       if (!activeCall?.stream) return;
       const tracks = activeCall.stream.getAudioTracks(),
         muted = tracks.every((track) => !track.enabled);
@@ -3138,13 +3201,15 @@ document.addEventListener("submit", async (e) => {
   const k = f.dataset.kind;
   try {
     if (formId === "messageForm") {
-      const payload = {
+      let payload = {
         text: p.text || "",
         recipientId: selectedThreadId ? null : selectedRecipient,
         threadId: selectedThreadId || "",
         replyToId: chatReplyToId || "",
         attachment: chatAttachmentDraft,
       };
+      if (window.SGOMessagingSuite?.prepareOutgoingMessage)
+        payload = await window.SGOMessagingSuite.prepareOutgoingMessage(payload);
       const result = await mutate(
         "message",
         payload,
@@ -3366,6 +3431,101 @@ document.addEventListener("keydown", (e) => {
 document.addEventListener("pointerdown", unlockRingtoneAudio, {
   passive: true,
 });
+window.SGOChatCore = {
+  api,
+  mutate,
+  refresh,
+  render,
+  modal,
+  closeModal,
+  toast,
+  notice,
+  esc,
+  same,
+  loadIceServers,
+  startDirectCall,
+  hasDirectCall: () => !!(activeCall || incomingCall),
+  documentModal,
+  authFetch: (path, options = {}) =>
+    fetch(path, {
+      ...options,
+      headers: {
+        ...(options.headers || {}),
+        ...(token ? { Authorization: "Bearer " + token } : {}),
+      },
+    }),
+  getState: () => state,
+  getProfile: () => profile,
+  getContacts: () => contacts,
+  getPage: () => page,
+  getRevision: () => revision,
+  getConversation: () => {
+    if (!profile) return null;
+    if (selectedThreadId) {
+      const thread = state?.messageThreads?.find((t) =>
+        same(t.id, selectedThreadId),
+      );
+      return thread
+        ? {
+            key: "thread:" + thread.id,
+            type: "thread",
+            id: String(thread.id),
+            thread,
+            participantIds: (thread.participants || []).map(Number),
+          }
+        : null;
+    }
+    if (selectedRecipient) {
+      const contact = contacts.find((c) => same(c.id, selectedRecipient));
+      return contact
+        ? {
+            key: "direct:" + contact.id,
+            type: "direct",
+            id: String(contact.id),
+            contact,
+            participantIds: [Number(profile.id), Number(contact.id)],
+          }
+        : null;
+    }
+    return null;
+  },
+  selectConversation: (key) => {
+    if (String(key).startsWith("thread:")) {
+      selectedThreadId = String(key).slice(7);
+      selectedRecipient = "";
+    } else if (String(key).startsWith("direct:")) {
+      selectedRecipient = String(key).slice(7);
+      selectedThreadId = "";
+    } else return;
+    page = "messages";
+    mobileChatOpen = true;
+    render();
+  },
+  goToMessages: () => {
+    page = "messages";
+    render();
+  },
+  setAttachmentDraft: (value) => {
+    chatAttachmentDraft = value;
+    render();
+  },
+  getAttachmentDraft: () => chatAttachmentDraft,
+  clearReply: () => {
+    chatReplyToId = "";
+  },
+  sendMessage: async (payload) => {
+    const result = await mutate(
+      "message",
+      payload,
+      null,
+      "state/messages",
+      null,
+    );
+    if (result) render();
+    return result;
+  },
+};
+
 document.body.classList.toggle(
   "light",
   localStorage.getItem("sgo_theme") === "light",
@@ -3398,12 +3558,7 @@ setInterval(() => {
   )
     refresh().catch((e) => notice(e.message));
 }, 30000);
-// Remove legacy offline caches. Sensitive application data is never cached by this version.
-if ("serviceWorker" in navigator)
-  navigator.serviceWorker
-    .getRegistrations()
-    .then((rs) => Promise.all(rs.map((r) => r.unregister())))
-    .catch(() => {});
+// Sensitive application data is never cached. The service worker is retained for push notifications.
 if ("caches" in window)
   caches
     .keys()
