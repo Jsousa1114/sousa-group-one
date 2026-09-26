@@ -2669,3 +2669,486 @@ td {
     padding-top: max(16px, env(safe-area-inset-top));
   }
 }
+
+
+/* Complete messaging suite */
+.suite-chat-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+.suite-chat-toolbar button,
+.suite-header-tools button,
+.suite-share-bar button,
+.suite-reactions button,
+.suite-reaction-picker button,
+.suite-option-list button,
+.suite-conversation-picker button,
+.suite-share-picker button,
+.suite-search-results button,
+.suite-history-row button,
+.group-call-controls button,
+.group-call-invite button {
+  border: 0;
+  font: inherit;
+  cursor: pointer;
+}
+.suite-chat-toolbar button,
+.suite-header-tools button {
+  min-width: 32px;
+  min-height: 32px;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--muted);
+}
+.suite-chat-toolbar button:hover,
+.suite-header-tools button:hover {
+  background: var(--panel2);
+  color: var(--text);
+}
+.suite-header-tools {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+.chat-header .suite-header-tools + .chat-call-actions {
+  margin-left: 2px;
+}
+.suite-e2ee {
+  width: auto !important;
+  padding: 0 8px;
+  font-size: .54rem !important;
+  white-space: nowrap;
+}
+.suite-e2ee.on {
+  color: var(--green) !important;
+}
+.suite-e2ee.waiting {
+  color: var(--yellow) !important;
+}
+.suite-e2ee.off {
+  opacity: .65;
+}
+.suite-conversation-flags {
+  margin-left: 5px;
+  font-size: .55rem;
+}
+.chat-contact.suite-pinned {
+  background: color-mix(in srgb, var(--green) 4%, transparent);
+}
+.chat-contact.suite-muted .chat-preview {
+  opacity: .62;
+}
+.chat-contact.suite-online .chat-avatar {
+  outline: 2px solid var(--green);
+  outline-offset: 1px;
+}
+.suite-share-bar {
+  min-height: 42px;
+  padding: 7px 11px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-top: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--muted);
+  font-size: .62rem;
+}
+.suite-share-bar button {
+  background: transparent;
+  color: var(--muted);
+  font-size: 1rem;
+}
+.suite-chat-tool {
+  color: var(--green);
+}
+.message-forwarded,
+.message-system-label {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: .5rem;
+  font-style: italic;
+}
+.message-system-label {
+  color: var(--green);
+  font-style: normal;
+  font-weight: 800;
+}
+.message.system-message {
+  align-self: center;
+  max-width: min(82%, 520px);
+  background: color-mix(in srgb, var(--panel2) 80%, transparent);
+  border: 1px solid var(--border);
+  text-align: center;
+}
+.message.deleted-message {
+  opacity: .72;
+}
+.message-deleted-text {
+  margin: 0;
+  color: var(--muted);
+  font-style: italic;
+}
+.message-edited {
+  margin-left: 4px;
+  color: var(--muted);
+  font-size: .46rem;
+}
+.encrypted-text.decrypt-error {
+  color: var(--yellow);
+}
+.encrypted-attachment {
+  opacity: .9;
+}
+.suite-shared-card {
+  min-width: min(280px, 70vw);
+  margin: 4px 0 7px;
+  padding: 10px;
+  display: grid;
+  grid-template-columns: 34px minmax(0,1fr) auto;
+  gap: 9px;
+  align-items: center;
+  border: 1px solid color-mix(in srgb, var(--green) 32%, var(--border));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--panel2) 78%, transparent);
+}
+.suite-shared-icon {
+  font-size: 1.25rem;
+}
+.suite-shared-card b,
+.suite-shared-card small {
+  display: block;
+}
+.suite-shared-card small {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: .55rem;
+  overflow-wrap: anywhere;
+}
+.suite-shared-card button {
+  border: 0;
+  border-radius: 8px;
+  padding: 6px 8px;
+  background: var(--green);
+  color: white;
+  font-size: .55rem;
+  cursor: pointer;
+}
+.suite-reactions {
+  min-height: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-top: 4px;
+}
+.suite-reactions:empty {
+  display: none;
+}
+.suite-reactions button {
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel2);
+  color: var(--text);
+  font-size: .52rem;
+}
+.suite-reactions button.mine {
+  border-color: var(--green);
+}
+.message.suite-favorite {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--yellow) 60%, transparent);
+}
+.danger-text {
+  color: var(--red) !important;
+}
+.suite-reaction-picker {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 8px;
+}
+.suite-reaction-picker button {
+  min-height: 48px;
+  border-radius: 12px;
+  background: var(--panel2);
+  font-size: 1.45rem;
+}
+.suite-option-list,
+.suite-conversation-picker,
+.suite-share-picker,
+.suite-search-results,
+.suite-history {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.suite-option-list button,
+.suite-conversation-picker button,
+.suite-share-picker button,
+.suite-search-results button {
+  padding: 10px 11px;
+  border-radius: 10px;
+  background: var(--panel2);
+  color: var(--text);
+  text-align: left;
+}
+.suite-conversation-picker button b,
+.suite-conversation-picker button small,
+.suite-share-picker button b,
+.suite-share-picker button small,
+.suite-search-results button b,
+.suite-search-results button span,
+.suite-search-results button small {
+  display: block;
+}
+.suite-conversation-picker small,
+.suite-share-picker small,
+.suite-search-results small {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: .56rem;
+}
+.suite-search-results {
+  margin-top: 12px;
+  max-height: 55vh;
+  overflow: auto;
+}
+.suite-search-results button span {
+  margin-top: 4px;
+  font-size: .66rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.suite-history-row {
+  padding: 9px 10px;
+  display: grid;
+  grid-template-columns: 28px minmax(0,1fr) auto;
+  gap: 8px;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.suite-history-row b,
+.suite-history-row small {
+  display: block;
+}
+.suite-history-row small {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: .54rem;
+}
+.suite-history-row button {
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: var(--panel2);
+  color: var(--text);
+  font-size: .56rem;
+}
+.suite-messaging-settings label {
+  display: block;
+  margin-top: 12px;
+}
+.suite-messaging-settings select,
+.suite-messaging-settings input {
+  width: 100%;
+  margin-top: 5px;
+}
+.group-call-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 4200;
+  padding: max(12px, env(safe-area-inset-top)) 12px max(12px, env(safe-area-inset-bottom));
+  display: grid;
+  place-items: center;
+  background: rgba(2,6,5,.92);
+  backdrop-filter: blur(12px);
+}
+.group-call-overlay.hidden {
+  display: none;
+}
+.group-call-card {
+  width: min(1000px, 96vw);
+  max-height: 94dvh;
+  display: grid;
+  grid-template-rows: auto minmax(0,1fr) auto;
+  gap: 12px;
+}
+.group-call-card header {
+  text-align: center;
+}
+.group-call-card h3 {
+  margin: 0;
+}
+.group-call-card p {
+  margin: 5px 0 0;
+  color: var(--muted);
+}
+.group-call-grid {
+  min-height: 260px;
+  max-height: 72dvh;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 8px;
+  overflow: auto;
+}
+.group-call-tile {
+  min-height: 180px;
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--panel);
+}
+.group-call-tile video {
+  width: 100%;
+  height: 100%;
+  min-height: 180px;
+  object-fit: cover;
+  background: #07110d;
+}
+.group-call-tile video.audio-only {
+  opacity: 0;
+}
+.group-call-tile:has(video.audio-only):before {
+  content: "👤";
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 3rem;
+}
+.group-call-name {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  padding: 4px 7px;
+  border-radius: 7px;
+  background: rgba(0,0,0,.58);
+  color: white;
+  font-size: .58rem;
+}
+.group-call-tile.disconnected {
+  opacity: .55;
+}
+.group-call-controls {
+  display: flex;
+  justify-content: center;
+  gap: 14px;
+}
+.group-call-controls button {
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  background: var(--panel2);
+  color: var(--text);
+  font-size: 1.1rem;
+}
+.group-call-controls button.danger,
+.group-call-controls button.muted {
+  background: var(--red);
+  color: white;
+}
+.group-call-invite {
+  position: fixed;
+  z-index: 4300;
+  top: max(14px, env(safe-area-inset-top));
+  left: 50%;
+  width: min(520px, calc(100vw - 24px));
+  transform: translateX(-50%);
+  padding: 12px;
+  display: grid;
+  grid-template-columns: minmax(0,1fr) auto auto;
+  gap: 9px;
+  align-items: center;
+  border: 1px solid color-mix(in srgb, var(--green) 45%, var(--border));
+  border-radius: 14px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+.group-call-invite b,
+.group-call-invite span {
+  display: block;
+}
+.group-call-invite span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: .58rem;
+}
+.group-call-invite button {
+  padding: 8px 10px;
+  border-radius: 9px;
+  background: var(--green);
+  color: white;
+}
+.group-call-invite button:last-child {
+  background: var(--red);
+}
+@media (max-width: 700px) {
+  .suite-e2ee {
+    max-width: 78px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .suite-header-tools {
+    gap: 0;
+  }
+  .suite-header-tools button {
+    min-width: 30px;
+    min-height: 30px;
+    padding: 0 4px;
+  }
+  .suite-reaction-picker {
+    grid-template-columns: repeat(4, 1fr);
+  }
+  .group-call-overlay {
+    padding-left: 0;
+    padding-right: 0;
+  }
+  .group-call-card {
+    width: 100%;
+    height: 100dvh;
+    max-height: 100dvh;
+    padding: max(10px, env(safe-area-inset-top)) 8px max(10px, env(safe-area-inset-bottom));
+  }
+  .group-call-grid {
+    grid-template-columns: repeat(2, minmax(0,1fr));
+    align-content: center;
+  }
+  .group-call-tile,
+  .group-call-tile video {
+    min-height: 145px;
+  }
+  .group-call-invite {
+    grid-template-columns: 1fr auto auto;
+  }
+}
+@media (max-width: 380px) {
+  .suite-chat-toolbar {
+    width: 100%;
+    margin-left: 0;
+    justify-content: flex-end;
+  }
+  .suite-header-tools .suite-e2ee {
+    display: none;
+  }
+  .suite-shared-card {
+    min-width: 0;
+    width: 100%;
+    grid-template-columns: 30px minmax(0,1fr);
+  }
+  .suite-shared-card button {
+    grid-column: 1 / -1;
+  }
+  .group-call-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+  .group-call-invite {
+    grid-template-columns: 1fr 1fr;
+  }
+  .group-call-invite > div {
+    grid-column: 1 / -1;
+  }
+}
