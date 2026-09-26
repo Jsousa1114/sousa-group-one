@@ -55,6 +55,7 @@ let token = sessionStorage.getItem("sgo_session"),
   callEndUiTimer = null,
   rtcIceServers = null,
   ringtoneTimer = null,
+  ringAudioContext = null,
   mobileChatOpen = false,
   userAccounts = [],
   pending = false,
@@ -895,15 +896,27 @@ async function playRemoteAudio() {
       $("callState").textContent = "En appel · touchez 🔊 pour entendre";
   }
 }
+function unlockRingtoneAudio() {
+  if (!window.AudioContext) return;
+  try {
+    ringAudioContext ||= new AudioContext();
+    if (ringAudioContext.state === "suspended")
+      ringAudioContext.resume().catch(() => {});
+  } catch {}
+}
 function stopRingtone() {
   clearInterval(ringtoneTimer);
   ringtoneTimer = null;
+  navigator.vibrate?.(0);
 }
 function beepRingtone() {
   if (ringtoneTimer || !window.AudioContext) return;
   const beep = () => {
     try {
-      const ctx = new AudioContext(),
+      ringAudioContext ||= new AudioContext();
+      if (ringAudioContext.state === "suspended")
+        ringAudioContext.resume().catch(() => {});
+      const ctx = ringAudioContext,
         osc = ctx.createOscillator(),
         gain = ctx.createGain();
       osc.frequency.value = 640;
@@ -913,10 +926,10 @@ function beepRingtone() {
       osc.connect(gain).connect(ctx.destination);
       osc.start();
       osc.stop(ctx.currentTime + 0.36);
-      osc.onended = () => ctx.close().catch(() => {});
     } catch {}
   };
   beep();
+  navigator.vibrate?.([500, 300, 500, 300, 500]);
   ringtoneTimer = setInterval(beep, 2200);
 }
 function formatCallTime(seconds) {
@@ -3328,6 +3341,9 @@ document.addEventListener("keydown", (e) => {
       first.focus();
     }
   }
+});
+document.addEventListener("pointerdown", unlockRingtoneAudio, {
+  passive: true,
 });
 document.body.classList.toggle(
   "light",
