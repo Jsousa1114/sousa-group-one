@@ -485,6 +485,144 @@ function routes(db) {
       );
     }),
   );
+  r.get(
+    "/messages/:id/attachment",
+    wrap(async (req, res) => {
+      const row = (
+        await db.query("SELECT data FROM app_state WHERE id=1")
+      ).rows[0];
+      const visible = D.viewState(row.data, req.user),
+        msg = visible.messages.find((m) => D.same(m.id, req.params.id));
+      if (!msg?.attachment?.fileId) D.fail("Pièce jointe introuvable.", 404);
+      const file = (
+        await db.query("SELECT content FROM file_contents WHERE id=$1", [
+          msg.attachment.fileId,
+        ])
+      ).rows[0];
+      if (!file) D.fail("Pièce jointe introuvable.", 404);
+      res
+        .set({
+          "Content-Type": msg.attachment.mime || "application/octet-stream",
+          "Content-Disposition": `inline; filename="${encodeURIComponent(
+            msg.attachment.name || "fichier",
+          )}"`,
+          "Cache-Control": "private, no-store",
+        })
+        .send(Buffer.from(file.content));
+    }),
+  );
+  r.post(
+    "/message-threads",
+    wrap(async (req, res) =>
+      res.json(
+        await mutate(
+          db,
+          req.user,
+          { ...req.body, action: "Conversation créée" },
+          async (c, d) => {
+            const p = req.body.payload || {},
+              type = p.type === "project" ? "project" : "group",
+              participants = [
+                ...new Set(
+                  [req.user.id, ...(Array.isArray(p.participants) ? p.participants : [])].map(
+                    String,
+                  ),
+                ),
+              ];
+            if (participants.length < 2)
+              D.fail("Ajoutez au moins un participant.");
+            if (participants.length > 50)
+              D.fail("50 participants maximum.");
+            const rows = (
+              await c.query(
+                "SELECT * FROM users WHERE id = ANY($1::int[]) AND deleted_at IS NULL AND disabled=false",
+                [participants.map(Number)],
+              )
+            ).rows;
+            if (rows.length !== participants.length)
+              D.fail("Un participant est introuvable ou désactivé.");
+            for (const user of rows) {
+              if (D.same(user.id, req.user.id)) continue;
+              if (!D.canContact(req.user, user, d))
+                D.fail("Participant non autorisé : " + user.name, 403);
+            }
+            let projectId = "";
+            if (type === "project") {
+              const project = D.ref(d, "projects", p.projectId);
+              if (!D.canProject(d, req.user, project))
+                D.fail("Accès chantier refusé.", 403);
+              projectId = String(project.id);
+            }
+            const thread = {
+              id: randomUUID(),
+              type,
+              name: D.text(
+                p.name ||
+                  (type === "project"
+                    ? D.ref(d, "projects", projectId).title
+                    : "Nouveau groupe"),
+                "Nom de la conversation",
+                120,
+              ),
+              participants,
+              projectId,
+              createdBy: req.user.id,
+              createdAt: new Date().toISOString(),
+            };
+            d.messageThreads.push(thread);
+            return { id: thread.id };
+          },
+        ),
+      ),
+    ),
+  );
+  r.post(
+    "/messages/read",
+    wrap(async (req, res) =>
+      res.json(
+        await mutate(
+          db,
+          req.user,
+          { ...req.body, action: "Messages lus" },
+          async (c, d) => {
+            const p = req.body.payload || {},
+              now = new Date().toISOString();
+            let changed = 0;
+            for (const msg of d.messages) {
+              const direct =
+                  p.recipientId &&
+                  !msg.threadId &&
+                  D.same(msg.senderId, p.recipientId) &&
+                  D.same(msg.recipientId, req.user.id),
+                threaded =
+                  p.threadId &&
+                  D.same(msg.threadId, p.threadId) &&
+                  !D.same(msg.senderId, req.user.id);
+              if (!direct && !threaded) continue;
+              if (threaded) {
+                const thread = d.messageThreads.find((t) =>
+                  D.same(t.id, msg.threadId),
+                );
+                if (
+                  !thread ||
+                  !(thread.participants || []).some((id) =>
+                    D.same(id, req.user.id),
+                  )
+                )
+                  continue;
+              }
+              msg.readBy = [
+                ...new Set([...(msg.readBy || []).map(String), String(req.user.id)]),
+              ];
+              if (direct) msg.readAt = now;
+              changed++;
+            }
+            return { changed };
+          },
+        ),
+      ),
+    ),
+  );
   r.post(
     "/messages",
     wrap(async (req, res) =>
@@ -495,19 +633,86 @@ function routes(db) {
           { ...req.body, action: "Message envoyé" },
           async (c, d) => {
             const p = req.body.payload || {},
+              text = D.text(p.text, "Message", 5000, true);
+            let recipient = null,
+              thread = null;
+            if (p.threadId) {
+              thread = d.messageThreads.find((t) => D.same(t.id, p.threadId));
+              if (
+                !thread ||
+                !(thread.participants || []).some((id) =>
+                  D.same(id, req.user.id),
+                )
+              )
+                D.fail("Conversation non autorisée.", 403);
+            } else {
               recipient = (
-                await c.query("SELECT * FROM users WHERE id=$1", [
-                  p.recipientId,
-                ])
+                await c.query(
+                  "SELECT * FROM users WHERE id=$1 AND deleted_at IS NULL AND disabled=false",
+                  [p.recipientId],
+                )
               ).rows[0];
-            if (!recipient || !D.canContact(req.user, recipient, d))
-              D.fail("Destinataire non autorisé.", 403);
+              if (!recipient || !D.canContact(req.user, recipient, d))
+                D.fail("Destinataire non autorisé.", 403);
+            }
+            let replyToId = "";
+            if (p.replyToId) {
+              const replied = d.messages.find((m) => D.same(m.id, p.replyToId));
+              if (!replied) D.fail("Message cité introuvable.");
+              const visibleReply = D.viewState(d, req.user).messages.some((m) =>
+                D.same(m.id, replied.id),
+              );
+              if (!visibleReply) D.fail("Message cité non autorisé.", 403);
+              replyToId = replied.id;
+            }
+            let attachment = null;
+            if (p.attachment) {
+              const raw = p.attachment,
+                name = D.text(raw.name, "Nom du fichier", 200),
+                mime = D.text(raw.mime, "Type de fichier", 120),
+                allowed =
+                  /^image\/(jpeg|png|webp|gif)$/.test(mime) ||
+                  /^audio\/(webm|ogg|mpeg|mp4|wav|x-m4a)$/.test(mime) ||
+                  mime === "application/pdf" ||
+                  mime === "text/plain";
+              if (!allowed) D.fail("Type de pièce jointe non autorisé.");
+              if (
+                typeof raw.content !== "string" ||
+                !/^[A-Za-z0-9+/]+={0,2}$/.test(raw.content)
+              )
+                D.fail("Pièce jointe invalide.");
+              const content = Buffer.from(raw.content, "base64");
+              if (!content.length || content.length > 5 * 1024 * 1024)
+                D.fail("Pièce jointe de 5 Mo maximum.");
+              const fileId = randomUUID();
+              await c.query(
+                "INSERT INTO file_contents(id,content) VALUES($1,$2)",
+                [fileId, content],
+              );
+              attachment = {
+                fileId,
+                name,
+                mime,
+                size: content.length,
+                kind: mime.startsWith("image/")
+                  ? "image"
+                  : mime.startsWith("audio/")
+                    ? "audio"
+                    : "file",
+              };
+            }
+            if (!text && !attachment)
+              D.fail("Écrivez un message ou ajoutez une pièce jointe.");
             const msg = {
               id: randomUUID(),
               senderId: req.user.id,
-              recipientId: recipient.id,
+              recipientId: recipient?.id || null,
+              threadId: thread?.id || "",
               sender: req.user.name,
-              text: D.text(p.text, "Message", 5000),
+              text,
+              replyToId,
+              attachment,
+              readBy: [String(req.user.id)],
               createdAt: new Date().toISOString(),
             };
             d.messages.push(msg);

@@ -1077,6 +1077,8 @@ test("WhatsApp-style messaging renders conversations, bubbles and search", async
     search.value = "contact";
     search.dispatchEvent(new h.w.Event("input", { bubbles: true }));
     assert.equal(d.querySelector(".chat-contact").hidden, false);
+    await flush();
+    await flush();
   } finally {
     h.close();
   }

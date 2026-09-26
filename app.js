@@ -40,6 +40,10 @@ let token = sessionStorage.getItem("sgo_session"),
   page = "dashboard",
   company = "",
   selectedRecipient = "",
+  selectedThreadId = "",
+  chatReplyToId = "",
+  chatAttachmentDraft = null,
+  chatRecorder = null,
   mobileChatOpen = false,
   userAccounts = [],
   pending = false,
@@ -178,6 +182,10 @@ function clearSession() {
   contacts = [];
   userAccounts = [];
   selectedRecipient = "";
+  selectedThreadId = "";
+  chatReplyToId = "";
+  chatAttachmentDraft = null;
+  chatRecorder = null;
   mobileChatOpen = false;
   company = "";
   page = "dashboard";
@@ -289,10 +297,15 @@ function render() {
   $("userName").textContent = profile.name + " · " + roles[profile.role];
   $("nav").innerHTML = Object.entries(menus)
     .filter(([k, [, rs]]) => rs.includes(profile.role) && k !== "users")
-    .map(
-      ([k, [label]]) =>
-        `<button class="nav-item ${page === k ? "active" : ""}" data-page="${k}">${esc(label)}</button>`,
-    )
+    .map(([k, [label]]) => {
+      const unread =
+        k === "messages"
+          ? state.messages.filter(
+              (m) => !same(m.senderId, profile.id) && !chatRead(m),
+            ).length
+          : 0;
+      return `<button class="nav-item ${page === k ? "active" : ""}" data-page="${k}">${esc(label)}${unread ? ` <span class="nav-unread">${unread > 99 ? "99+" : unread}</span>` : ""}</button>`;
+    })
     .join("");
   $("companyFilter").innerHTML =
     '<option value="">Toutes mes données</option>' +
@@ -312,8 +325,11 @@ function render() {
   )
     loadUsers();
   if (page === "audit") loadAudit();
-  if (page === "messages" && $("messageThread"))
+  if (page === "messages" && $("messageThread")) {
     $("messageThread").scrollTop = $("messageThread").scrollHeight;
+    hydrateChatAttachments();
+    queueMicrotask(() => markChatRead());
+  }
 }
 function projectRows(list) {
   return table(
@@ -696,85 +712,239 @@ function chatDate(value) {
     year: "numeric",
   });
 }
+function chatRead(m) {
+  return (m.readBy || []).some((id) => same(id, profile.id));
+}
+function chatMessagePreview(m) {
+  if (!m) return "Commencer une conversation";
+  const prefix = same(m.senderId, profile.id) ? "Vous : " : "";
+  if (m.text) return prefix + m.text;
+  if (m.attachment?.kind === "image") return prefix + "📷 Photo";
+  if (m.attachment?.kind === "audio") return prefix + "🎤 Message vocal";
+  return prefix + "📎 " + (m.attachment?.name || "Fichier");
+}
+function chatAttachmentHtml(m) {
+  if (!m.attachment) return "";
+  const label = esc(m.attachment.name || "Pièce jointe");
+  if (m.attachment.kind === "image")
+    return `<button type="button" class="chat-media-button" data-action="chat-open-attachment" data-id="${esc(m.id)}"><img data-chat-media="${esc(m.id)}" alt="${label}" class="chat-image-preview"><span>📷 ${label}</span></button>`;
+  if (m.attachment.kind === "audio")
+    return `<div class="chat-audio-wrap"><audio controls preload="none" data-chat-media="${esc(m.id)}"></audio><button type="button" class="chat-attachment-link" data-action="chat-open-attachment" data-id="${esc(m.id)}">🎤 ${label}</button></div>`;
+  return `<button type="button" class="chat-attachment-link" data-action="chat-open-attachment" data-id="${esc(m.id)}">📎 ${label} · ${Math.ceil((m.attachment.size || 0) / 1024)} Ko</button>`;
+}
+function chatReplyHtml(m, messages) {
+  if (!m.replyToId) return "";
+  const quoted = messages.find((x) => same(x.id, m.replyToId));
+  if (!quoted) return "";
+  return `<button type="button" class="chat-quote" data-action="chat-jump" data-id="${esc(quoted.id)}"><b>${esc(quoted.sender || "Message")}</b><span>${esc((quoted.text || chatMessagePreview(quoted)).slice(0, 120))}</span></button>`;
+}
+async function hydrateChatAttachments() {
+  if (!token) return;
+  for (const node of document.querySelectorAll("[data-chat-media]")) {
+    const id = node.dataset.chatMedia;
+    if (node.dataset.loaded) continue;
+    node.dataset.loaded = "1";
+    try {
+      const r = await fetch("/api/state/messages/" + encodeURIComponent(id) + "/attachment", {
+        headers: { Authorization: "Bearer " + token },
+      });
+      if (!r.ok) throw new Error("Pièce jointe inaccessible.");
+      const blob = await r.blob(),
+        objectUrl = URL.createObjectURL(blob);
+      node.src = objectUrl;
+      node.addEventListener("load", () => {
+        if (node.tagName === "IMG") node.classList.add("loaded");
+      }, { once: true });
+    } catch {
+      node.replaceWith(document.createTextNode("Pièce jointe indisponible"));
+    }
+  }
+}
+async function markChatRead() {
+  if (!token || pending || page !== "messages") return;
+  const payload = selectedThreadId
+    ? { threadId: selectedThreadId }
+    : { recipientId: selectedRecipient };
+  if (!payload.threadId && !payload.recipientId) return;
+  const unread = state.messages.some(
+    (m) =>
+      !same(m.senderId, profile.id) &&
+      !chatRead(m) &&
+      (payload.threadId
+        ? same(m.threadId, payload.threadId)
+        : !m.threadId && same(m.senderId, payload.recipientId)),
+  );
+  if (!unread) return;
+  try {
+    const out = await api("state/messages/read", {
+      action: "message.read",
+      payload,
+      revision,
+      requestId: crypto.randomUUID(),
+    });
+    if (Number.isSafeInteger(out.revision)) revision = out.revision;
+    for (const m of state.messages) {
+      const belongs = payload.threadId
+        ? same(m.threadId, payload.threadId)
+        : !m.threadId && same(m.senderId, payload.recipientId);
+      if (belongs && !same(m.senderId, profile.id))
+        m.readBy = [...new Set([...(m.readBy || []).map(String), String(profile.id)])];
+    }
+    render();
+  } catch (e) {
+    if (e.status !== 409) notice(e.message);
+  }
+}
+function threadForm(type = "group", projectId = "") {
+  const projects = visible("projects");
+  modal(
+    type === "project" ? "Discussion de chantier" : "Nouveau groupe",
+    `<form id="entityForm" data-kind="message.thread">
+      <label>Nom<input name="name" maxlength="120" required placeholder="${type === "project" ? "Discussion chantier" : "Nom du groupe"}"></label>
+      <label>Type<select name="type"><option value="group" ${type === "group" ? "selected" : ""}>Groupe</option><option value="project" ${type === "project" ? "selected" : ""}>Chantier</option></select></label>
+      <label>Chantier<select name="projectId"><option value="">Aucun</option>${projects.map((p) => `<option value="${esc(p.id)}" ${same(p.id, projectId) ? "selected" : ""}>${esc(p.title)}</option>`).join("")}</select></label>
+      <fieldset class="chat-participants"><legend>Participants</legend>${contacts.map((c) => `<label><input type="checkbox" name="participants" value="${esc(c.id)}"> ${esc(c.name)} · ${esc(roles[c.role] || c.role)}</label>`).join("")}</fieldset>
+      <p id="formError" class="error" role="alert"></p>
+      <div class="form-actions">${btn("Annuler", "close-modal")}<button type="submit" class="btn primary">Créer</button></div>
+    </form>`,
+  );
+}
 function messagesView() {
-  if (!contacts.length)
-    return '<article class="card empty">Aucun destinataire disponible. Un administrateur doit créer et activer les comptes des interlocuteurs.</article>';
-  if (!contacts.some((c) => same(c.id, selectedRecipient)))
-    selectedRecipient = String(contacts[0].id);
-  const conversations = contacts
-      .map((contact) => {
-        const messages = state.messages
-          .filter(
-            (m) =>
-              (same(m.senderId, profile.id) &&
-                same(m.recipientId, contact.id)) ||
-              (same(m.senderId, contact.id) &&
-                same(m.recipientId, profile.id)),
-          )
-          .sort(
-            (a, b) => new Date(a.createdAt) - new Date(b.createdAt),
-          );
-        return { contact, messages, last: messages.at(-1) };
-      })
-      .sort(
-        (a, b) =>
-          (b.last ? new Date(b.last.createdAt).getTime() : 0) -
-            (a.last ? new Date(a.last.createdAt).getTime() : 0) ||
-          a.contact.name.localeCompare(b.contact.name, "fr"),
-      ),
-    active =
-      conversations.find((c) => same(c.contact.id, selectedRecipient)) ||
-      conversations[0],
-    list = active.messages;
+  const threads = state.messageThreads || [];
+  if (!contacts.length && !threads.length)
+    return '<article class="card empty">Aucune discussion disponible. Créez un groupe ou vérifiez les comptes autorisés.</article>';
+  if (!selectedThreadId && !contacts.some((c) => same(c.id, selectedRecipient)))
+    selectedRecipient = contacts[0] ? String(contacts[0].id) : "";
+  if (selectedThreadId && !threads.some((t) => same(t.id, selectedThreadId)))
+    selectedThreadId = "";
+
+  const directConversations = contacts.map((contact) => {
+      const messages = state.messages
+        .filter(
+          (m) =>
+            !m.threadId &&
+            ((same(m.senderId, profile.id) && same(m.recipientId, contact.id)) ||
+              (same(m.senderId, contact.id) && same(m.recipientId, profile.id))),
+        )
+        .sort((x, y) => new Date(x.createdAt) - new Date(y.createdAt));
+      return {
+        key: "direct:" + contact.id,
+        kind: "direct",
+        contact,
+        title: contact.name,
+        subtitle: roles[contact.role] || contact.role,
+        messages,
+        last: messages.at(-1),
+        unread: messages.filter((m) => !same(m.senderId, profile.id) && !chatRead(m)).length,
+      };
+    }),
+    threadConversations = threads.map((thread) => {
+      const messages = state.messages
+        .filter((m) => same(m.threadId, thread.id))
+        .sort((x, y) => new Date(x.createdAt) - new Date(y.createdAt));
+      return {
+        key: "thread:" + thread.id,
+        kind: "thread",
+        thread,
+        title: thread.name,
+        subtitle: thread.type === "project"
+          ? "Chantier · " + (find("projects", thread.projectId)?.title || thread.projectId)
+          : "Groupe · " + (thread.participants || []).length + " participants",
+        messages,
+        last: messages.at(-1),
+        unread: messages.filter((m) => !same(m.senderId, profile.id) && !chatRead(m)).length,
+      };
+    }),
+    conversations = [...directConversations, ...threadConversations].sort(
+      (x, y) =>
+        (y.last ? new Date(y.last.createdAt).getTime() : 0) -
+          (x.last ? new Date(x.last.createdAt).getTime() : 0) ||
+        x.title.localeCompare(y.title, "fr"),
+    );
+  let active = selectedThreadId
+    ? conversations.find((c) => c.kind === "thread" && same(c.thread?.id, selectedThreadId))
+    : conversations.find((c) => c.kind === "direct" && same(c.contact?.id, selectedRecipient));
+  active ||= conversations[0];
+  if (!active) return '<article class="card empty">Aucune discussion disponible.</article>';
+  if (active.kind === "thread") {
+    selectedThreadId = String(active.thread.id);
+    selectedRecipient = "";
+  } else {
+    selectedRecipient = String(active.contact.id);
+    selectedThreadId = "";
+  }
+  const list = active.messages;
   let day = "";
   const bubbles =
     list
       .map((m) => {
         const currentDay = chatDate(m.createdAt),
-          separator =
-            currentDay !== day
-              ? `<div class="chat-day"><span>${esc(currentDay)}</span></div>`
-              : "";
+          separator = currentDay !== day
+            ? `<div class="chat-day"><span>${esc(currentDay)}</span></div>`
+            : "";
         day = currentDay;
-        const mine = same(m.senderId, profile.id);
+        const mine = same(m.senderId, profile.id),
+          readCount = (m.readBy || []).filter((id) => !same(id, m.senderId)).length,
+          check = mine
+            ? `<span class="message-check ${readCount ? "read" : ""}" title="${readCount ? "Lu" : "Envoyé"}">${readCount ? "✓✓" : "✓"}</span>`
+            : "";
         return (
           separator +
-          `<div class="message ${mine ? "mine" : "theirs"}"><p class="prewrap">${esc(m.text)}</p><div class="message-meta"><time datetime="${esc(m.createdAt)}">${esc(chatTime(m.createdAt))}</time>${mine ? '<span class="message-check" title="Envoyé">✓</span>' : ""}</div><div class="message-delete">${deleteRecordButton("messages", m)}</div></div>`
+          `<div class="message ${mine ? "mine" : "theirs"}" id="msg-${esc(m.id)}">
+            ${active.kind === "thread" && !mine ? `<b class="message-sender">${esc(m.sender || "Participant")}</b>` : ""}
+            ${chatReplyHtml(m, list)}
+            ${chatAttachmentHtml(m)}
+            ${m.text ? `<p class="prewrap">${esc(m.text)}</p>` : ""}
+            <div class="message-meta"><time datetime="${esc(m.createdAt)}">${esc(chatTime(m.createdAt))}</time>${check}</div>
+            <div class="message-actions">
+              <button type="button" data-action="chat-reply" data-id="${esc(m.id)}">↩ Répondre</button>
+              ${deleteRecordButton("messages", m)}
+            </div>
+          </div>`
         );
       })
       .join("") ||
     '<div class="chat-empty"><span>💬</span><p>Aucun message dans cette conversation.</p><small>Envoyez le premier message ci-dessous.</small></div>';
+
   return `<section class="whatsapp-chat ${mobileChatOpen ? "mobile-chat-open" : ""}">
     <aside class="chat-sidebar">
-      <div class="chat-sidebar-head"><div><h3>Discussions</h3><span>${contacts.length} contact${contacts.length > 1 ? "s" : ""}</span></div></div>
+      <div class="chat-sidebar-head"><div><h3>Discussions</h3><span>${conversations.length} conversation${conversations.length > 1 ? "s" : ""}</span></div><div class="chat-new-actions"><button type="button" data-action="chat-new-group" title="Nouveau groupe">＋ Groupe</button><button type="button" data-action="chat-new-project" title="Discussion chantier">＋ Chantier</button></div></div>
       <label class="chat-search" for="conversationSearch"><span aria-hidden="true">⌕</span><input id="conversationSearch" type="search" autocomplete="off" placeholder="Rechercher une discussion" aria-label="Rechercher une discussion"></label>
       <div id="conversationList" class="chat-conversations">
-        ${conversations
-          .map(({ contact, last }) => {
-            const preview = last
-                ? `${same(last.senderId, profile.id) ? "Vous : " : ""}${last.text}`
-                : "Commencer une conversation",
-              search = `${contact.name} ${roles[contact.role] || contact.role} ${preview}`.toLowerCase();
-            return `<button type="button" class="chat-contact ${same(contact.id, selectedRecipient) ? "active" : ""}" data-action="chat-select" data-id="${esc(contact.id)}" data-search="${esc(search)}">
-              ${chatAvatar(contact)}
-              <span class="chat-contact-body">
-                <span class="chat-contact-top"><b>${esc(contact.name)}</b><time>${last ? esc(chatTime(last.createdAt)) : ""}</time></span>
-                <span class="chat-contact-bottom"><span class="chat-preview">${esc(preview.slice(0, 82))}</span><small>${esc(roles[contact.role] || contact.role)}</small></span>
-              </span>
-            </button>`;
-          })
-          .join("")}
+        ${conversations.map((c) => {
+          const preview = chatMessagePreview(c.last),
+            search = `${c.title} ${c.subtitle} ${preview}`.toLowerCase(),
+            isActive = c.key === active.key;
+          return `<button type="button" class="chat-contact ${isActive ? "active" : ""}" data-action="chat-select" data-id="${esc(c.key)}" data-search="${esc(search)}">
+            ${c.kind === "direct" ? chatAvatar(c.contact) : `<span class="chat-avatar chat-avatar-initial chat-group-avatar">${c.thread.type === "project" ? "🏗" : "👥"}</span>`}
+            <span class="chat-contact-body">
+              <span class="chat-contact-top"><b>${esc(c.title)}</b><time>${c.last ? esc(chatTime(c.last.createdAt)) : ""}</time></span>
+              <span class="chat-contact-bottom"><span class="chat-preview">${esc(preview.slice(0, 82))}</span>${c.unread ? `<strong class="chat-unread">${c.unread > 99 ? "99+" : c.unread}</strong>` : `<small>${esc(c.subtitle)}</small>`}</span>
+            </span>
+          </button>`;
+        }).join("")}
       </div>
     </aside>
     <section class="chat-main-panel">
       <header class="chat-header">
         <button type="button" class="chat-back" data-action="chat-back" aria-label="Retour aux discussions">←</button>
-        ${chatAvatar(active.contact)}
-        <div class="chat-header-person"><strong>${esc(active.contact.name)}</strong><span>${esc(roles[active.contact.role] || active.contact.role)}</span></div>
+        ${active.kind === "direct" ? chatAvatar(active.contact) : `<span class="chat-avatar chat-avatar-initial chat-group-avatar">${active.thread.type === "project" ? "🏗" : "👥"}</span>`}
+        <div class="chat-header-person"><strong>${esc(active.title)}</strong><span>${esc(active.subtitle)}</span></div>
       </header>
-      <div id="messageThread" class="messages chat-thread" role="log" aria-live="polite" aria-label="Messages avec ${esc(active.contact.name)}">${bubbles}</div>
+      <div id="messageThread" class="messages chat-thread" role="log" aria-live="polite" aria-label="Messages avec ${esc(active.title)}">${bubbles}</div>
+      <div id="chatReplyBar" class="chat-reply-bar ${chatReplyToId ? "" : "hidden"}">
+        <div><b>Réponse</b><span>${chatReplyToId ? esc((list.find((m) => same(m.id, chatReplyToId))?.text || "Message").slice(0, 100)) : ""}</span></div>
+        <button type="button" data-action="chat-cancel-reply" aria-label="Annuler la réponse">✕</button>
+      </div>
+      <div id="chatAttachmentBar" class="chat-attachment-bar ${chatAttachmentDraft ? "" : "hidden"}">
+        <span>${chatAttachmentDraft ? esc((chatAttachmentDraft.kind === "audio" ? "🎤 " : "📎 ") + chatAttachmentDraft.name) : ""}</span>
+        <button type="button" data-action="chat-cancel-attachment" aria-label="Retirer la pièce jointe">✕</button>
+      </div>
       <form id="messageForm" class="chat-composer">
-        <div class="chat-compose-field"><textarea id="messageText" name="text" rows="1" maxlength="5000" required placeholder="Écrire un message" aria-label="Écrire un message"></textarea><p id="formError" class="error" role="alert"></p></div>
+        <input id="chatFile" type="file" hidden accept="image/jpeg,image/png,image/webp,image/gif,application/pdf,text/plain,audio/*">
+        <button type="button" class="chat-tool" data-action="chat-file" aria-label="Ajouter une photo ou un fichier" title="Pièce jointe">📎</button>
+        <button type="button" class="chat-tool" data-action="chat-voice" aria-label="Enregistrer un message vocal" title="Message vocal">🎤</button>
+        <div class="chat-compose-field"><textarea id="messageText" name="text" rows="1" maxlength="5000" placeholder="Écrire un message" aria-label="Écrire un message"></textarea><p id="formError" class="error" role="alert"></p></div>
         <button type="submit" class="chat-send" aria-label="Envoyer le message" title="Envoyer">➤</button>
       </form>
     </section>
@@ -1415,7 +1585,7 @@ function projectModal(id) {
         .filter((i) => find("invoices", i))
         .map((i) => btn("Ouvrir la facture " + i, "invoice", i))
         .join(" ") +
-      `<p>${esc(p.description)}</p><p>${esc(p.address)}</p><p>${date(p.start)} – ${date(p.end)} · ${esc(p.progress)} %</p><p>Équipe : ${(p.team || []).map((id) => esc(name("employees", id))).join(", ") || "Non affectée"}</p>${p.budget !== undefined ? `<p>Budget ${money(p.budget)} · Coûts ${money(p.cost)}</p>` : ""}${can(ops) ? btn("Modifier le suivi", "project-edit", id) + " " + btn("Supprimer le chantier", "project-delete", id, "danger") : ""}<h4 class="spaced">Documents et photos</h4>${table(
+      `<p>${esc(p.description)}</p><p>${esc(p.address)}</p><p>${date(p.start)} – ${date(p.end)} · ${esc(p.progress)} %</p><p>Équipe : ${(p.team || []).map((id) => esc(name("employees", id))).join(", ") || "Non affectée"}</p>${p.budget !== undefined ? `<p>Budget ${money(p.budget)} · Coûts ${money(p.cost)}</p>` : ""}${can(ops) ? btn("Modifier le suivi", "project-edit", id) + " " + btn("Supprimer le chantier", "project-delete", id, "danger") : ""} ${(() => { const thread = (state.messageThreads || []).find((t) => same(t.projectId, id)); return thread ? btn("Ouvrir la discussion", "chat-open-project", thread.id, "primary") : can(ops) ? btn("Créer la discussion chantier", "chat-create-project", id) : ""; })()}<h4 class="spaced">Documents et photos</h4>${table(
         ["Fichier", ""],
         state.documents
           .filter((x) => same(x.project, id))
@@ -1992,12 +2162,97 @@ document.addEventListener("click", async (e) => {
     id = b.dataset.id;
   try {
     if (a === "chat-select") {
-      selectedRecipient = String(id);
+      if (String(id).startsWith("thread:")) {
+        selectedThreadId = String(id).slice(7);
+        selectedRecipient = "";
+      } else {
+        selectedRecipient = String(id).replace(/^direct:/, "");
+        selectedThreadId = "";
+      }
+      chatReplyToId = "";
+      chatAttachmentDraft = null;
       mobileChatOpen = true;
       render();
     } else if (a === "chat-back") {
       mobileChatOpen = false;
       render();
+    } else if (a === "chat-new-group") threadForm("group");
+    else if (a === "chat-new-project") threadForm("project");
+    else if (a === "chat-open-project") {
+      page = "messages";
+      selectedThreadId = String(id);
+      selectedRecipient = "";
+      mobileChatOpen = true;
+      closeModal();
+      render();
+    } else if (a === "chat-create-project") {
+      closeModal();
+      threadForm("project", String(id));
+    } else if (a === "chat-reply") {
+      chatReplyToId = String(id);
+      render();
+      $("messageText")?.focus();
+    } else if (a === "chat-cancel-reply") {
+      chatReplyToId = "";
+      render();
+      $("messageText")?.focus();
+    } else if (a === "chat-cancel-attachment") {
+      chatAttachmentDraft = null;
+      render();
+      $("messageText")?.focus();
+    } else if (a === "chat-jump") {
+      document.getElementById("msg-" + id)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    } else if (a === "chat-file") $("chatFile")?.click();
+    else if (a === "chat-open-attachment") {
+      const r = await fetch("/api/state/messages/" + encodeURIComponent(id) + "/attachment", {
+        headers: { Authorization: "Bearer " + token },
+      });
+      if (!r.ok) throw new Error("Pièce jointe inaccessible.");
+      const blob = await r.blob(),
+        url = URL.createObjectURL(blob);
+      window.open(url, "_blank", "noopener");
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } else if (a === "chat-voice") {
+      if (chatRecorder?.state === "recording") {
+        chatRecorder.stop();
+        b.textContent = "🎤";
+        b.classList.remove("recording");
+      } else {
+        if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder)
+          throw new Error("Enregistrement vocal non disponible sur cet appareil.");
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true }),
+          chunks = [],
+          recorder = new MediaRecorder(stream);
+        chatRecorder = recorder;
+        recorder.ondataavailable = (event) => {
+          if (event.data.size) chunks.push(event.data);
+        };
+        recorder.onstop = async () => {
+          stream.getTracks().forEach((track) => track.stop());
+          const blob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
+          if (blob.size > 5 * 1024 * 1024) {
+            notice("Message vocal trop volumineux (5 Mo maximum).");
+            return;
+          }
+          const content = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(String(reader.result).split(",")[1]);
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+          });
+          chatAttachmentDraft = {
+            name: "message-vocal-" + Date.now() + ".webm",
+            mime: (blob.type || "audio/webm").split(";")[0],
+            content,
+            kind: "audio",
+          };
+          chatRecorder = null;
+          render();
+        };
+        recorder.start();
+        b.textContent = "■";
+        b.classList.add("recording");
+      }
     } else if (a === "close-modal") closeModal();
     else if (a === "open-side") {
       $("sidebar").classList.add("open");
@@ -2387,14 +2642,46 @@ document.addEventListener("submit", async (e) => {
     p = Object.fromEntries(data);
   const k = f.dataset.kind;
   try {
-    if (formId === "messageForm")
-      return await mutate(
+    if (formId === "messageForm") {
+      const payload = {
+        text: p.text || "",
+        recipientId: selectedThreadId ? null : selectedRecipient,
+        threadId: selectedThreadId || "",
+        replyToId: chatReplyToId || "",
+        attachment: chatAttachmentDraft,
+      };
+      const result = await mutate(
         "message",
-        { text: p.text, recipientId: selectedRecipient },
+        payload,
         null,
         "state/messages",
         f,
       );
+      if (result) {
+        chatReplyToId = "";
+        chatAttachmentDraft = null;
+        render();
+      }
+      return result;
+    }
+    if (k === "message.thread") {
+      p.participants = data.getAll("participants");
+      if (p.type !== "project") p.projectId = "";
+      const result = await mutate(
+        "message.thread",
+        p,
+        null,
+        "state/message-threads",
+        f,
+      );
+      if (result?.id) {
+        selectedThreadId = String(result.id);
+        selectedRecipient = "";
+        mobileChatOpen = true;
+        render();
+      }
+      return result;
+    }
     if (k === "employee.update") {
       const photo = await employeePhoto(data.get("photoFile"));
       delete p.photoFile;
@@ -2522,7 +2809,30 @@ document.addEventListener("input", (e) => {
     });
   }
 });
-document.addEventListener("change", (e) => {
+document.addEventListener("change", async (e) => {
+  if (e.target.id === "chatFile") {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+      notice("Pièce jointe de 5 Mo maximum.");
+      e.target.value = "";
+      return;
+    }
+    const content = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result).split(",")[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+    chatAttachmentDraft = {
+      name: file.name,
+      mime: file.type || "application/octet-stream",
+      content,
+      kind: file.type.startsWith("image/") ? "image" : file.type.startsWith("audio/") ? "audio" : "file",
+    };
+    render();
+    return;
+  }
   if (["f_company", "f_clientId"].includes(e.target.id)) filterFinanceClient();
   if (
     e.target.id === "f_company" &&
