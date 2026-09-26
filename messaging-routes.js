@@ -238,6 +238,11 @@ function routes(db) {
       const text = D.text(req.body?.text, "Message", 5000, true),
         encryption = req.body?.encryption || null;
       if (encryption) {
+        if (message.attachment?.encrypted)
+          D.fail(
+            "Un message chiffré contenant une pièce jointe ne peut pas être modifié sans renvoyer le fichier.",
+            409,
+          );
         if (
           encryption.algorithm !== "SGO-E2EE-P256-AESGCM-v1" ||
           typeof encryption.iv !== "string" ||
@@ -246,6 +251,7 @@ function routes(db) {
           typeof encryption.envelopes !== "object"
         )
           D.fail("Édition chiffrée invalide.");
+        encryption.senderId = String(req.user.id);
       }
       if (!text && !encryption && !message.attachment && !message.sharedRef)
         D.fail("Le message ne peut pas être vide.");
