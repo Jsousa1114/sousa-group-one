@@ -1037,3 +1037,47 @@ test("client edit is prefilled and saves contact changes from the list", async (
     h.close();
   }
 });
+
+
+test("WhatsApp-style messaging renders conversations, bubbles and search", async () => {
+  const h = await setup("admin", false, false, (d) => {
+    d.messages = [
+      {
+        id: "m-in",
+        senderId: 2,
+        recipientId: 1,
+        sender: "Contact",
+        text: "Bonjour depuis le chantier",
+        createdAt: "2026-09-26T18:00:00.000Z",
+      },
+      {
+        id: "m-out",
+        senderId: 1,
+        recipientId: 2,
+        sender: "Test User",
+        text: "Bien reçu",
+        createdAt: "2026-09-26T18:01:00.000Z",
+      },
+    ];
+  });
+  try {
+    click(h, '[data-page="messages"]');
+    const d = h.w.document;
+    assert.ok(d.querySelector(".whatsapp-chat"));
+    assert.equal(d.querySelectorAll(".chat-contact").length, 1);
+    assert.equal(d.querySelector(".chat-header-person strong").textContent, "Contact");
+    assert.equal(d.querySelectorAll(".chat-thread .message").length, 2);
+    assert.equal(d.querySelectorAll(".chat-thread .message.mine").length, 1);
+    assert.equal(d.querySelectorAll(".chat-thread .message.theirs").length, 1);
+    assert.match(d.querySelector(".chat-preview").textContent, /Vous : Bien reçu/);
+    const search = d.getElementById("conversationSearch");
+    search.value = "zzz";
+    search.dispatchEvent(new h.w.Event("input", { bubbles: true }));
+    assert.equal(d.querySelector(".chat-contact").hidden, true);
+    search.value = "contact";
+    search.dispatchEvent(new h.w.Event("input", { bubbles: true }));
+    assert.equal(d.querySelector(".chat-contact").hidden, false);
+  } finally {
+    h.close();
+  }
+});
