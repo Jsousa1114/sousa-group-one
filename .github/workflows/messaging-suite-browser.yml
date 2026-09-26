@@ -1,0 +1,38 @@
+name: Test suite messagerie complète
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - app.js
+      - messaging-suite.js
+      - messaging-crypto.js
+      - messaging-routes.js
+      - state-routes.js
+      - db.js
+      - styles.css
+      - index.html
+      - server.js
+      - service-worker.js
+      - test/messaging-suite-browser.cjs
+      - .github/workflows/messaging-suite-browser.yml
+
+permissions:
+  contents: read
+
+jobs:
+  messaging-suite-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install application and Chromium
+        run: |
+          npm ci
+          npm install --no-save playwright
+          npx playwright install --with-deps chromium
+      - name: Test E2EE, video, group calls, mobile and search
+        run: node test/messaging-suite-browser.cjs
