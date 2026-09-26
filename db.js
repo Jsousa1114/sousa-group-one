@@ -131,6 +131,15 @@ async function migrate(db = pool) {
     )`,
   );
   await db.query(
+    `CREATE TABLE IF NOT EXISTS message_overrides(
+      message_id TEXT PRIMARY KEY,
+      edited_text TEXT,
+      edited_at TIMESTAMPTZ,
+      deleted_for_all BOOLEAN NOT NULL DEFAULT false,
+      deleted_at TIMESTAMPTZ
+    )`,
+  );
+  await db.query(
     `CREATE TABLE IF NOT EXISTS user_crypto_keys(
       user_id INTEGER PRIMARY KEY,
       public_jwk JSONB NOT NULL,
