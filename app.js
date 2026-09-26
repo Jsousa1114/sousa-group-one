@@ -907,6 +907,8 @@ function genericPage(k) {
               (profile.role === "admin"
                 ? btn("Créer un compte", "linked-user", k + ":" + r.id) + " "
                 : "") +
+                btn("Modifier", "client-edit", r.id) +
+                " " +
                 btn("Supprimer le client", "client-delete", r.id, "danger"),
             ]
           : []),
@@ -1286,6 +1288,19 @@ function newForm(k) {
     menus[k][0],
   );
   if (company && $("f_company")) $("f_company").value = company;
+}
+function clientEdit(id) {
+  const client = find("clients", id);
+  if (!client) return;
+  const fields = schemas.clients.filter(([key]) => key !== "company");
+  formShell(
+    fields,
+    "client.update",
+    `<input type="hidden" name="id" value="${esc(id)}"><p>L’e-mail de contact ne modifie pas l’identifiant du compte de connexion. Les documents déjà émis conservent leurs coordonnées d’origine.</p>`,
+    "Modifier le client",
+  );
+  for (const [key] of fields)
+    $("f_" + key).value = client[key] ?? (key === "country" ? "CH" : "");
 }
 function projectModal(id) {
   const p = find("projects", id);
@@ -1965,6 +1980,8 @@ document.addEventListener("click", async (e) => {
               : "Élément supprimé.",
           );
       }
+    } else if (a === "client-edit") {
+      clientEdit(id);
     } else if (a === "client-delete") {
       const client = find("clients", id);
       if (
