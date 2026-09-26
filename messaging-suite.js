@@ -815,6 +815,17 @@
     );
   }
 
+  function callDuration(start, end) {
+    if (!start || !end) return "";
+    const seconds = Math.max(
+      0,
+      Math.round((new Date(end).getTime() - new Date(start).getTime()) / 1000),
+    );
+    if (seconds < 60) return seconds + " s";
+    const minutes = Math.floor(seconds / 60),
+      rest = seconds % 60;
+    return minutes + " min" + (rest ? " " + rest + " s" : "");
+  }
   async function openCallHistory() {
     const out = await core().api("messaging/calls/history"),
       me = profile(),
@@ -824,11 +835,11 @@
             otherId = incoming ? c.callerId : c.calleeId,
             otherName = incoming ? c.callerName : c.calleeName,
             icon = c.callType === "video" ? "📹" : "📞";
-          return `<div class="suite-history-row"><span>${icon}</span><span><b>${esc(otherName)}</b><small>${incoming ? "Entrant" : "Sortant"} · ${esc(c.status)} · ${new Date(c.createdAt).toLocaleString("fr-CH")}</small></span><button type="button" data-suite-action="history-call" data-suite-id="${esc(otherId)}" data-suite-type="${esc(c.callType || "audio")}">Rappeler</button></div>`;
+          return `<div class="suite-history-row"><span>${icon}</span><span><b>${esc(otherName)}</b><small>${incoming ? "Entrant" : "Sortant"} · ${esc(c.status)}${c.endedAt ? " · " + esc(callDuration(c.createdAt, c.endedAt)) : ""} · ${new Date(c.createdAt).toLocaleString("fr-CH")}</small></span><button type="button" data-suite-action="history-call" data-suite-id="${esc(otherId)}" data-suite-type="${esc(c.callType || "audio")}">Rappeler</button></div>`;
         }),
         ...(out.groups || []).map((c) => {
           const thread = state()?.messageThreads?.find((t) => String(t.id) === String(c.threadId));
-          return `<div class="suite-history-row"><span>${c.callType === "video" ? "👥📹" : "👥📞"}</span><span><b>${esc(thread?.name || "Appel de groupe")}</b><small>${esc(c.status)} · ${new Date(c.createdAt).toLocaleString("fr-CH")}</small></span></div>`;
+          return `<div class="suite-history-row"><span>${c.callType === "video" ? "👥📹" : "👥📞"}</span><span><b>${esc(thread?.name || "Appel de groupe")}</b><small>${esc(c.status)}${c.endedAt ? " · " + esc(callDuration(c.createdAt, c.endedAt)) : ""} · ${new Date(c.createdAt).toLocaleString("fr-CH")}</small></span></div>`;
         }),
       ];
     core().modal(
@@ -1009,6 +1020,7 @@
         <p class="muted">La clé privée reste dans ce navigateur. Le serveur ne reçoit que la clé publique et les ciphertexts.</p>
         <button type="button" class="btn primary" data-suite-action="push">Activer les notifications push</button>
         <p id="suitePushStatus" class="muted"></p>
+        <p id="suiteTurnStatus" class="muted">Relais TURN : vérification…</p>
         ${me.role === "admin" ? '<div id="suiteRetentionSettings" class="spaced"><h4>Conservation des communications</h4><p class="muted">Chargement…</p></div>' : ""}
       `;
       content.appendChild(card);
@@ -1019,6 +1031,15 @@
       pushStatus.textContent =
         "Notifications navigateur : " +
         (window.Notification ? Notification.permission : "non disponible");
+    const turnStatus = $("suiteTurnStatus");
+    if (turnStatus) {
+      const callConfig = await core().api("state/calls/config").catch(() => null);
+      turnStatus.textContent =
+        "Relais TURN : " +
+        (callConfig?.turnAvailable
+          ? "configuré — appels renforcés sur les réseaux restrictifs"
+          : "non configuré — STUN uniquement");
+    }
     if (me.role === "admin") await renderRetention();
   }
   async function renderRetention() {
