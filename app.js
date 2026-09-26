@@ -744,14 +744,20 @@ function chatRead(m) {
 function chatMessagePreview(m) {
   if (!m) return "Commencer une conversation";
   const prefix = same(m.senderId, profile.id) ? "Vous : " : "";
+  if (m.deletedForAll) return prefix + "🚫 Message supprimé";
+  if (m.system) return "⚙ " + (m.text || "Activité du chantier");
+  if (m.encryption) return prefix + "🔐 Message chiffré";
+  if (m.sharedRef) return prefix + "📄 " + (m.sharedRef.title || m.sharedRef.id);
   if (m.text) return prefix + m.text;
   if (m.attachment?.kind === "image") return prefix + "📷 Photo";
   if (m.attachment?.kind === "audio") return prefix + "🎤 Message vocal";
   return prefix + "📎 " + (m.attachment?.name || "Fichier");
 }
 function chatAttachmentHtml(m) {
-  if (!m.attachment) return "";
+  if (!m.attachment || m.deletedForAll) return "";
   const label = esc(m.attachment.name || "Pièce jointe");
+  if (m.attachment.encrypted)
+    return `<button type="button" class="chat-attachment-link encrypted-attachment" data-encrypted-attachment="${esc(m.id)}">🔐 ${label} · déchiffrement…</button>`;
   if (m.attachment.kind === "image")
     return `<button type="button" class="chat-media-button" data-action="chat-open-attachment" data-id="${esc(m.id)}"><img data-chat-media="${esc(m.id)}" alt="${label}" class="chat-image-preview"><span>📷 ${label}</span></button>`;
   if (m.attachment.kind === "audio")
@@ -1368,12 +1374,12 @@ function messagesView() {
             : "";
         return (
           separator +
-          `<div class="message ${mine ? "mine" : "theirs"}" id="msg-${esc(m.id)}">
-            ${active.kind === "thread" && !mine ? `<b class="message-sender">${esc(m.sender || "Participant")}</b>` : ""}
-            ${chatReplyHtml(m, list)}
-            ${chatAttachmentHtml(m)}
-            ${m.text ? `<p class="prewrap">${esc(m.text)}</p>` : ""}
-            <div class="message-meta"><time datetime="${esc(m.createdAt)}">${esc(chatTime(m.createdAt))}</time>${check}</div>
+          `<div class="message ${mine ? "mine" : "theirs"} ${m.system ? "system-message" : ""} ${m.encryption ? "encrypted-message" : ""} ${m.deletedForAll ? "deleted-message" : ""}" id="msg-${esc(m.id)}" data-message-id="${esc(m.id)}">
+            ${m.forwardedFromId ? '<span class="message-forwarded">↪ Transféré</span>' : ""}
+            ${m.system ? '<span class="message-system-label">⚙ Sousa Group One</span>' : ""}
+            ${active.kind === "thread" && !mine && !m.system ? `<b class="message-sender">${esc(m.sender || "Participant")}</b>` : ""}
+            ${m.deletedForAll ? '<p class="message-deleted-text">🚫 Ce message a été supprimé pour tout le monde.</p>' : `${chatReplyHtml(m, list)}${chatAttachmentHtml(m)}${m.encryption ? `<p class="prewrap encrypted-text" data-encrypted-text="${esc(m.id)}">🔐 Déchiffrement…</p>` : m.text ? `<p class="prewrap">${esc(m.text)}</p>` : ""}${m.sharedRef ? `<div class="shared-ref-placeholder" data-shared-ref="${esc(m.id)}"></div>` : ""}`}
+            <div class="message-meta"><time datetime="${esc(m.createdAt)}">${esc(chatTime(m.createdAt))}</time>${m.editedAt ? '<span class="message-edited">modifié</span>' : ""}${check}</div>
             <div class="message-actions">
               <button type="button" data-action="chat-reply" data-id="${esc(m.id)}">↩ Répondre</button>
               ${deleteRecordButton("messages", m)}
@@ -3438,6 +3444,15 @@ window.SGOChatCore = {
   same,
   loadIceServers,
   startDirectCall,
+  documentModal,
+  authFetch: (path, options = {}) =>
+    fetch(path, {
+      ...options,
+      headers: {
+        ...(options.headers || {}),
+        ...(token ? { Authorization: "Bearer " + token } : {}),
+      },
+    }),
   getState: () => state,
   getProfile: () => profile,
   getContacts: () => contacts,
