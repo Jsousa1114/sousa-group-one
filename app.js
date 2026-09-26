@@ -1001,7 +1001,7 @@ function closeModal(force = false) {
 function formShell(fields, kind, extra = "", title = "Ajouter") {
   modal(
     title,
-    `<form id="entityForm" data-kind="${esc(kind)}">${fields.map(field).join("")}${extra}<p id="formError" role="alert" class="error"></p><div class="form-actions">${btn("Annuler", "close-modal")}<button type="submit" class="btn primary">Enregistrer</button></div></form>`,
+    `<form id="entityForm" method="post" data-kind="${esc(kind)}">${fields.map(field).join("")}${extra}<p id="formError" role="alert" class="error"></p><div class="form-actions">${btn("Annuler", "close-modal")}<button type="submit" class="btn primary">Enregistrer</button></div></form>`,
   );
 }
 function lineRow(l = {}) {
@@ -1921,14 +1921,16 @@ document.addEventListener("click", async (e) => {
 });
 document.addEventListener("submit", async (e) => {
   const f = e.target;
-  if (!["entityForm", "messageForm"].includes(f.id)) return;
+  // Named form controls (e.g. name="id") shadow HTMLFormElement properties in browsers.
+  const formId = f.getAttribute("id");
+  if (!["entityForm", "messageForm"].includes(formId)) return;
   e.preventDefault();
   if (pending) return;
   const data = new FormData(f),
     p = Object.fromEntries(data);
   const k = f.dataset.kind;
   try {
-    if (f.id === "messageForm")
+    if (formId === "messageForm")
       return await mutate(
         "message",
         { text: p.text, recipientId: selectedRecipient },
