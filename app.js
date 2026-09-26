@@ -791,6 +791,10 @@ const columns = {
     ["amount", "Valeur annuelle"],
   ],
 };
+function personListName(person, photo = "") {
+  const label = person.name || "—";
+  return `<span class="person-list-name">${photo ? `<img class="person-list-photo" src="${esc(photo)}" alt="" width="40" height="40" loading="lazy">` : `<span class="person-list-photo person-list-initial" aria-hidden="true">${esc(label.slice(0, 1).toUpperCase())}</span>`}<span>${esc(label)}</span></span>`;
+}
 function genericPage(k) {
   const cols = columns[k] || [];
   return (
@@ -824,7 +828,9 @@ function genericPage(k) {
                       : esc(name("companies", r[f]))
                     : k === "companies" && f === "name"
                       ? `<span class="company-identity"><img class="company-row-logo" src="${companyLogoPath(r.id)}" alt="" />${esc(r[f])}</span>`
-                      : esc(r[f] ?? "—"),
+                      : k === "employees" && f === "name"
+                        ? personListName(r, r.photo)
+                        : esc(r[f] ?? "—"),
         ),
         ...(k === "employees"
           ? [
@@ -1341,7 +1347,10 @@ async function loadUsers() {
         )
         .filter((u) => !company || u.company === company)
         .map((u) => [
-          esc(u.name),
+          personListName(
+            u,
+            state.employees.find((e) => same(e.id, u.employee_id))?.photo,
+          ),
           esc(u.email),
           esc(roles[u.role]),
           u.employee_id ? esc(name("employees", u.employee_id)) : "Non",
