@@ -650,3 +650,28 @@ test("linked staff roles use employee companies without gaining new role permiss
     /désactivé/,
   );
 });
+
+test("employee salary period defaults to monthly and validates hourly amounts", () => {
+  const p = {
+    name: "Salary test",
+    job: "Technicien",
+    company: "home",
+    email: "salary@test.invalid",
+    phone: "",
+    salary: "35.50",
+    activity: 100,
+    vacation: 20,
+    entry: "2026-09-26",
+  };
+  const create = (extra = {}) =>
+    command(fixture(), admin, "create", { ...p, ...extra }, "employees");
+  assert.equal(create().result.salaryPeriod, "monthly");
+  assert.equal(
+    create({ salaryPeriod: "hourly" }).result.salaryPeriod,
+    "hourly",
+  );
+  assert.equal(create({ salaryPeriod: "hourly" }).result.salary, 35.5);
+  assert.throws(() => create({ salaryPeriod: "weekly" }), /Type de salaire/);
+  assert.throws(() => create({ salary: "" }), /Renseignez le salaire/);
+  assert.throws(() => create({ salary: -1 }), /./);
+});

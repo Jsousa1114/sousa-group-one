@@ -632,7 +632,8 @@ test("account and new employee are created atomically with retry and rollback pr
     newEmployee: {
       job: "Technicien",
       phone: "",
-      salary: 5000,
+      salary: 35.5,
+      salaryPeriod: "hourly",
       activity: 80,
       vacation: 20,
       entry: "2026-09-24",
@@ -650,6 +651,11 @@ test("account and new employee are created atomically with retry and rollback pr
   const state = (await call("state", admin)).data.data;
   assert.equal(state.employees.filter((e) => e.id === eid).length, 1);
   assert.equal(state.employees.find((e) => e.id === eid).activity, 80);
+  assert.equal(
+    state.employees.find((e) => e.id === eid).salaryPeriod,
+    "hourly",
+  );
+  assert.equal(state.employees.find((e) => e.id === eid).salary, 35.5);
   const login = await call("auth/login", null, {
     email: body.email,
     password: body.password,

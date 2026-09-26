@@ -730,14 +730,23 @@ test("employee dossier combines personal details and account without a separate 
     click(h, '#modalBody [data-action="edit-user"]');
     assert.equal(h.w.document.getElementById("f_password").required, false);
     assert.equal(h.w.document.getElementById("f_password").value, "");
-    h.w.document.querySelector('[name="employeeCompanies"][value="tech"]').checked = true;
-    assert.equal(h.w.document.getElementById("entityForm").checkValidity(), true);
+    h.w.document.querySelector(
+      '[name="employeeCompanies"][value="tech"]',
+    ).checked = true;
+    assert.equal(
+      h.w.document.getElementById("entityForm").checkValidity(),
+      true,
+    );
     submit(h);
     await flush();
-    const update = h.requests.findLast((r) => r.url.endsWith("/users") && r.opts.method === "POST");
-    assert.deepEqual(JSON.parse(update.opts.body).payload.employeeCompanies, ["home", "tech"]);
+    const update = h.requests.findLast(
+      (r) => r.url.endsWith("/users") && r.opts.method === "POST",
+    );
+    assert.deepEqual(JSON.parse(update.opts.body).payload.employeeCompanies, [
+      "home",
+      "tech",
+    ]);
     assert.equal(JSON.parse(update.opts.body).payload.password, "");
-
   } finally {
     h.close();
   }
@@ -773,7 +782,15 @@ test("new employee details submit together with the account and existing links h
       new h.w.Event("change", { bubbles: true }),
     );
     fill(h, "employeeJob", "Technicien");
-    fill(h, "employeeSalary", "5000");
+    fill(h, "employeeSalaryPeriod", "hourly");
+    d.getElementById("f_employeeSalaryPeriod").dispatchEvent(
+      new h.w.Event("change", { bubbles: true }),
+    );
+    assert.match(
+      d.getElementById("f_employeeSalary").labels[0].textContent,
+      /CHF\/heure/,
+    );
+    fill(h, "employeeSalary", "35.50");
     d.querySelector('[name="employeeCompanies"][value="tech"]').checked = true;
     fill(h, "employeeActivity", "80");
     fill(h, "employeeVacation", "20");
@@ -787,7 +804,8 @@ test("new employee details submit together with the account and existing links h
     assert.ok(req);
     const p = JSON.parse(req.opts.body).payload;
     assert.equal(p.newEmployee.job, "Technicien");
-    assert.equal(p.newEmployee.salary, "5000");
+    assert.equal(p.newEmployee.salary, "35.50");
+    assert.equal(p.newEmployee.salaryPeriod, "hourly");
     assert.ok(p.employeeCompanies.includes("tech"));
     assert.ok(p.employeeCompanies.includes("home"));
     assert.equal(p.role, "employee");
@@ -855,15 +873,71 @@ test("named id input cannot bypass submit interception in a real browser", async
     form.querySelector('[name="companies"][value="tech"]').checked = true;
     const event = new h.w.Event("submit", { bubbles: true, cancelable: true });
     form.dispatchEvent(event);
-    assert.equal(event.defaultPrevented, true, "must not navigate with form values in URL");
+    assert.equal(
+      event.defaultPrevented,
+      true,
+      "must not navigate with form values in URL",
+    );
     assert.equal(form.getAttribute("method"), "post");
     await flush();
     await flush();
-    const request = h.requests.findLast(r => r.url.endsWith("/command") && r.opts.method === "POST");
+    const request = h.requests.findLast(
+      (r) => r.url.endsWith("/command") && r.opts.method === "POST",
+    );
     assert.equal(JSON.parse(request.opts.body).action, "employee.companies");
-    assert.deepEqual(JSON.parse(request.opts.body).payload.companies, ["home", "tech"]);
-    assert.match(h.w.document.getElementById("toast").textContent, /enregistrée/);
+    assert.deepEqual(JSON.parse(request.opts.body).payload.companies, [
+      "home",
+      "tech",
+    ]);
+    assert.match(
+      h.w.document.getElementById("toast").textContent,
+      /enregistrée/,
+    );
     click(h, '[data-action="employee-companies"]');
-    assert.equal(h.w.document.querySelector('[name="companies"][value="tech"]').checked, true);
-  } finally { h.close(); }
+    assert.equal(
+      h.w.document.querySelector('[name="companies"][value="tech"]').checked,
+      true,
+    );
+  } finally {
+    h.close();
+  }
+});
+
+test("standalone employee creation supports hourly salary and shows its unit", async () => {
+  const h = await setup();
+  try {
+    click(h, '[data-page="employees"]');
+    click(h, '[data-action="new"]');
+    const d = h.w.document;
+    assert.equal(d.getElementById("f_salaryPeriod").value, "monthly");
+    fill(h, "salaryPeriod", "hourly");
+    d.getElementById("f_salaryPeriod").dispatchEvent(
+      new h.w.Event("change", { bubbles: true }),
+    );
+    assert.match(
+      d.getElementById("f_salary").labels[0].textContent,
+      /CHF\/heure/,
+    );
+    assert.equal(d.getElementById("f_salary").required, true);
+    for (const [k, v] of Object.entries({
+      name: "Hourly employee",
+      job: "Technicien",
+      company: "home",
+      email: "hourly@test.invalid",
+      salary: "35.50",
+      entry: "2026-09-26",
+    }))
+      fill(h, k, v);
+    submit(h);
+    await flush();
+    await flush();
+    await flush();
+    assert.match(d.getElementById("modalBody").textContent, /Salaire horaire/);
+    assert.match(
+      d.getElementById("modalBody").textContent,
+      /35\.50\sCHF \/ heure/,
+    );
+  } finally {
+    h.close();
+  }
 });
