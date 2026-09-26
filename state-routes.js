@@ -1254,6 +1254,7 @@ function routes(db) {
               callerName: active.caller_name,
               calleeName: active.callee_name,
               status: active.status,
+              callType: active.call_type || "audio",
               offer: active.offer,
               answer: active.answer,
               createdAt: active.created_at,
@@ -1268,6 +1269,7 @@ function routes(db) {
     wrap(async (req, res) => {
       await expireCalls(db);
       const p = req.body || {},
+        callType = p.callType === "video" ? "video" : "audio",
         recipient = (
           await db.query(
             "SELECT * FROM users WHERE id=$1 AND deleted_at IS NULL AND disabled=false",
@@ -1297,10 +1299,20 @@ function routes(db) {
       if (busy) D.fail("Un des correspondants est déjà en appel.", 409);
       const id = randomUUID();
       await db.query(
-        "INSERT INTO rtc_calls(id,caller_id,callee_id,caller_name,callee_name,status,offer) VALUES($1,$2,$3,$4,$5,'ringing',$6)",
-        [id, req.user.id, recipient.id, req.user.name, recipient.name, p.offer],
+        "INSERT INTO rtc_calls(id,caller_id,callee_id,caller_name,callee_name,status,offer,call_type) VALUES($1,$2,$3,$4,$5,'ringing',$6,$7)",
+        [id, req.user.id, recipient.id, req.user.name, recipient.name, p.offer, callType],
       );
-      res.json({ id, status: "ringing" });
+      await notifyUsers(db, [Number(recipient.id)], {
+        title: callType === "video" ? "Appel vidéo entrant" : "Appel audio entrant",
+        body: req.user.name + " vous appelle",
+        url:
+          "/?open=messages&conversation=" +
+          encodeURIComponent("direct:" + req.user.id),
+        tag: "call-" + id,
+        conversationKey: "direct:" + req.user.id,
+        directCallId: id,
+      }).catch(() => {});
+      res.json({ id, status: "ringing", callType });
     }),
   );
   r.get(
@@ -1316,6 +1328,7 @@ function routes(db) {
           callerName: call.caller_name,
           calleeName: call.callee_name,
           status: call.status,
+          callType: call.call_type || "audio",
           offer: call.offer,
           answer: call.answer,
           createdAt: call.created_at,
