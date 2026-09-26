@@ -1427,6 +1427,35 @@ test("complete messaging suite secures presence, preferences, reactions, E2EE tr
   assert.equal(suiteLogin.status, 200);
   const suiteClient = suiteLogin.data.token;
 
+  // Push subscription storage works even when VAPID sending is disabled in tests.
+  const pushKey = await call("messaging/push/key", suiteClient);
+  assert.equal(pushKey.status, 200);
+  assert.equal(
+    (
+      await call("messaging/push/subscription", suiteClient, {
+        subscription: {
+          endpoint: "https://push.test.invalid/" + stamp,
+          keys: {
+            p256dh: "test-p256dh-key",
+            auth: "test-auth-key",
+          },
+        },
+      })
+    ).status,
+    200,
+  );
+  assert.equal(
+    Number(
+      (
+        await db.query(
+          "SELECT COUNT(*)::int n FROM push_subscriptions WHERE user_id=$1",
+          [suiteUserId],
+        )
+      ).rows[0].n,
+    ),
+    1,
+  );
+
   // Presence / typing.
   assert.equal(
     (await call("messaging/presence", suiteClient, { typingKey: null })).status,
