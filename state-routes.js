@@ -947,13 +947,6 @@ function routes(db) {
         )
       ).rows[0];
       if (busy) D.fail("Un des correspondants est déjà en appel.", 409);
-      const recent = (
-        await db.query(
-          "SELECT id FROM rtc_calls WHERE caller_id=$1 AND callee_id=$2 AND created_at > NOW() - INTERVAL '3 seconds' LIMIT 1",
-          [req.user.id, recipient.id],
-        )
-      ).rows[0];
-      if (recent) D.fail("Patientez quelques secondes avant de rappeler.", 429);
       const id = randomUUID();
       await db.query(
         "INSERT INTO rtc_calls(id,caller_id,callee_id,caller_name,callee_name,status,offer) VALUES($1,$2,$3,$4,$5,'ringing',$6)",
