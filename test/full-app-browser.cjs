@@ -103,7 +103,7 @@ async function visitAll(page, expectedPages, mobile=false){
 
     await admin.page.locator('[data-page="pilotage"]').click();
     await admin.page.locator(".ops-center").waitFor({timeout:10000});
-    for(const tab of ["overview","tasks","crm","stock","workorders","analytics","automations","integrations","notifications"]){
+    for(const tab of ["overview","p1","tasks","crm","stock","workorders","analytics","automations","integrations","notifications"]){
       await admin.page.locator('[data-ops-tab="'+tab+'"]').click();
       await admin.page.waitForTimeout(120);
       await noOverflow(admin.page,"pilotage "+tab);
@@ -119,6 +119,9 @@ async function visitAll(page, expectedPages, mobile=false){
     await employee.page.locator(".ops-center").waitFor({timeout:10000});
     assert.equal(await employee.page.locator('[data-ops-tab="crm"]').count(),0);
     assert.equal(await employee.page.locator('[data-ops-tab="analytics"]').count(),0);
+    await employee.page.locator('[data-ops-tab="p1"]').click();
+    await employee.page.waitForTimeout(200);
+    await noOverflow(employee.page,"mobile pilotage p1");
     await employee.page.locator('[data-ops-tab="tasks"]').click();
     await noOverflow(employee.page,"mobile pilotage tasks");
     assert.equal(await employee.page.locator('[data-page="clients"]').count(),0);
