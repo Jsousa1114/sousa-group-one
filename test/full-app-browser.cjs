@@ -25,8 +25,8 @@ async function seed(){
       [email,hash,role,name,"",company,employeeId,clientId]);
   const d=emptyState();
   d.employees=[{id:"e1",name:"Audit Employee",job:"Technicien",email:"audit-employee@test.invalid",phone:"+41 76 111 22 33",company:"home",companies:["home"],vacation:20,activity:100,status:"Actif"}];
-  d.clients=[{id:"c1",name:"Audit Client",email:"audit-client@test.invalid",phone:"+41 79 111 22 33",city:"Lausanne",company:"home"}];
-  d.projects=[{id:"P-2026-001",title:"Chantier audit",clientId:"c1",company:"home",team:["e1"],status:"En cours",progress:35,budget:12000,cost:3500}];
+  d.clients=[{id:"c1",name:"Audit Client",email:"audit-client@test.invalid",phone:"+41 79 111 22 33",city:"Lausanne",company:"home"},{id:"c2",name:"Client supprimable",email:"delete-client@test.invalid",phone:"+41 79 222 33 44",city:"Nyon",company:"home"}];
+  d.projects=[{id:"P-2026-001",title:"Chantier audit",clientId:"c1",company:"home",team:["e1"],status:"En cours",progress:35,budget:12000,cost:3500},{id:"P-DELETE",title:"Chantier supprimable",clientId:"c1",company:"home",team:[],status:"Planifié",progress:0,budget:0,cost:0}];
   d.time=[{id:"t1",employeeId:"e1",project:"P-2026-001",date:"2026-09-26",start:"08:00",end:"16:00",hours:8,status:"Validée"}];
   d.planning=[{id:"pl1",employeeId:"e1",project:"P-2026-001",date:"2026-09-28",start:"08:00",end:"17:00",location:"Lausanne",company:"home"}];
   d.absences=[{id:"a1",employeeId:"e1",type:"Vacances",from:"2026-10-05",to:"2026-10-06",days:2,status:"En attente"}];
@@ -100,6 +100,33 @@ async function visitAll(page, expectedPages, mobile=false){
     await admin.page.locator("#modalWrap:not(.hidden)").waitFor();
     assert.match(await admin.page.locator("#modalWrap").innerText(),/Chantier audit/);
     await admin.page.locator('[data-action="close-modal"]').click();
+
+    // Regression: client edit must persist through the real browser form.
+    await admin.page.locator('[data-page="clients"]').click();
+    const clientRow=admin.page.locator("tr").filter({hasText:"Audit Client"});
+    await clientRow.locator('[data-action="client-edit"]').click();
+    await admin.page.locator("#modalWrap:not(.hidden)").waitFor();
+    await admin.page.locator("#f_city").fill("Genève");
+    await admin.page.locator('#entityForm button[type="submit"]').click();
+    await admin.page.locator("#modalWrap.hidden").waitFor();
+    await admin.page.getByText("Genève",{exact:true}).waitFor({timeout:5000});
+
+    // Regression: unlinked client deletion must work end-to-end.
+    const deletableClient=admin.page.locator("tr").filter({hasText:"Client supprimable"});
+    admin.page.once("dialog",dialog=>dialog.accept());
+    await deletableClient.locator('[data-action="client-delete"]').click();
+    await admin.page.waitForTimeout(120);
+    assert.equal(await admin.page.getByText("Client supprimable",{exact:true}).count(),0);
+
+    // Regression: unlinked project deletion must work end-to-end.
+    await admin.page.locator('[data-page="projects"]').click();
+    const deletableProject=admin.page.locator("tr").filter({hasText:"Chantier supprimable"});
+    await deletableProject.locator('[data-action="project"]').click();
+    await admin.page.locator("#modalWrap:not(.hidden)").waitFor();
+    admin.page.once("dialog",dialog=>dialog.accept());
+    await admin.page.locator('[data-action="project-delete"]').click();
+    await admin.page.waitForTimeout(120);
+    assert.equal(await admin.page.getByText("Chantier supprimable",{exact:true}).count(),0);
 
     await admin.page.locator('[data-page="pilotage"]').click();
     await admin.page.locator(".ops-center").waitFor({timeout:10000});
