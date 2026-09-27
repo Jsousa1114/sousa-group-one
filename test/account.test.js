@@ -118,6 +118,11 @@ test("login issues an HttpOnly SameSite cookie that authenticates protected rout
     headers: { Cookie: cookie },
   });
   assert.equal(response.status, 200);
+  const logout = await fetch(url + "/api/auth/logout", {
+    method: "POST",
+    headers: { Cookie: cookie },
+  });
+  assert.equal(logout.status, 200);
 });
 
 test("TOTP secrets can be encrypted and decrypted with AES-GCM", () => {
