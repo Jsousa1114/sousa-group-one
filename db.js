@@ -67,6 +67,19 @@ async function migrate(db = pool) {
   ])
     await db.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS " + column);
   await db.query(
+    `CREATE TABLE IF NOT EXISTS user_recovery_codes(
+      user_id INTEGER NOT NULL,
+      code_hash TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      used_at TIMESTAMPTZ,
+      PRIMARY KEY(user_id,code_hash)
+    )`,
+  );
+  await db.query(
+    `CREATE INDEX IF NOT EXISTS user_recovery_codes_unused_idx
+     ON user_recovery_codes(user_id,used_at)`,
+  );
+  await db.query(
     `CREATE TABLE IF NOT EXISTS user_sessions(
       id TEXT PRIMARY KEY,
       user_id INTEGER NOT NULL,
