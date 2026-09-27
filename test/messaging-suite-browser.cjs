@@ -5,7 +5,7 @@ const assert = require("node:assert/strict");
 const bcrypt = require("bcryptjs");
 const { chromium } = require("playwright");
 const { database } = require("./database");
-const { migrate } = require("../db");
+const { migrate, replaceStateSnapshot } = require("../db");
 const { createApp } = require("../server");
 const { emptyState } = require("../domain");
 
@@ -58,7 +58,7 @@ async function seed() {
       createdAt: new Date().toISOString(),
     },
   ];
-  await db.query("UPDATE app_state SET data=$1 WHERE id=1", [JSON.stringify(state)]);
+  await replaceStateSnapshot(db, state, "test-messaging-suite-fixture");
   server = createApp(db).listen(0, "127.0.0.1");
   await new Promise((resolve) => server.once("listening", resolve));
   base = "http://127.0.0.1:" + server.address().port;
