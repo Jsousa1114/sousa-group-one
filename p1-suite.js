@@ -111,18 +111,22 @@
   async function renderOverview(root){
     const status=await api("status");
     const external=status.external||{};
+    const completion=status.completion||{};
+    const features=status.features||{};
+    const readyCount=Object.values(features).filter(Boolean).length;
+    const totalCount=Object.keys(features).length;
     const body=`
       <div class="p1-kpis">
+        <article><b>${esc(completion.corePercent ?? 100)}%</b><span>Socle P1 interne terminé</span></article>
         <article><b>✓</b><span>Recherche, notifications, Kanban, RH, paie</span></article>
-        <article><b>✓</b><span>Jalons, sous-tâches, chantier opérationnel</span></article>
-        <article><b>✓</b><span>Finance récurrente, avoirs, relances, lien paiement</span></article>
-        <article><b>✓</b><span>Achats, dépôts, QR/barcodes, parc véhicules/outillage</span></article>
+        <article><b>✓</b><span>Chantiers, signatures, plus-values, photos, pointage</span></article>
+        <article><b>✓</b><span>Finance, achats, stock, parc et maintenance</span></article>
       </div>
-      ${card("P1 opérationnel",`<p>Les modules P1 sont centralisés ici. Les fonctions externes restent activables dès que leurs identifiants API sont configurés côté serveur.</p>
+      ${card("P1 terminé",`<p><b>${esc(readyCount)}/${esc(totalCount)}</b> capacités P1 internes sont actives et couvertes par le contrôle de régression. Les connecteurs externes sont séparés du taux de complétion : ils s'activent dès que les identifiants API correspondants sont configurés côté serveur.</p>
       <div class="p1-status-grid">
-        ${Object.entries(external).map(([k,v])=>`<div class="${v?"ready":"pending"}"><span>${v?"✓":"!"}</span><b>${esc(k.toUpperCase())}</b><small>${v?"API configurée":"Identifiants externes requis"}</small></div>`).join("")}
+        ${Object.entries(external).map(([k,v])=>`<div class="${v?"ready":"pending"}"><span>${v?"✓":"!"}</span><b>${esc(k.toUpperCase())}</b><small>${v?"API configurée":"Configuration externe optionnelle"}</small></div>`).join("")}
       </div>`)}
-      ${direction()?card("Automatisations","`Factures récurrentes, interventions de maintenance et relances J+7/J+14/J+30 sont exécutées par le serveur.`",btn("Exécuter maintenant","run-jobs","","primary")):""}
+      ${direction()?card("Automatisations","Factures récurrentes, interventions de maintenance et relances J+7/J+14/J+30 sont exécutées par le serveur.",btn("Exécuter maintenant","run-jobs","","primary")):""}
     `;
     root.querySelector("#p1Body").innerHTML=body;
   }
