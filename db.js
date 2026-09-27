@@ -88,7 +88,9 @@ async function loadState(db, { forUpdate = false } = {}) {
     )
   ).rows[0];
   return {
-    data: await hydrateEntityMirror(db, row?.data || {}),
+    data: canonicalEntityStateEnabled()
+      ? await hydrateEntityMirror(db, row?.data || {})
+      : normalize(row?.data || {}),
     revision: Number(row?.revision || 0),
   };
 }
@@ -726,15 +728,25 @@ async function migrate(db = pool) {
         Array.isArray(mirrorState?.[collection]) &&
         mirrorState[collection].length > 0,
     );
-  // Never overwrite an existing canonical mirror from a compact app_state during rollback.
-  // Bootstrap/sync only when the mirror is empty or app_state still contains real legacy data.
-  if (entityCount === 0 || rawHasMirroredData)
-    await syncEntityMirror(db, normalize(mirrorState));
   if (canonicalEntityStateEnabled()) {
+    // First activation: seed the canonical tables from the complete legacy state.
+    if (entityCount === 0 || rawHasMirroredData)
+      await syncEntityMirror(db, normalize(mirrorState));
     const hydrated = await hydrateEntityMirror(db, mirrorState);
     await db.query(
       "UPDATE app_state SET data=$1,updated_at=NOW(),updated_by='entity-canonical-migration' WHERE id=1",
       [JSON.stringify(persistedState(hydrated))],
+    );
+  } else if (rawHasMirroredData) {
+    // Legacy/default mode stays fully backward-compatible: app_state is authoritative.
+    await syncEntityMirror(db, normalize(mirrorState));
+  } else if (entityCount > 0) {
+    // Safe rollback from canonical mode: rebuild the full legacy snapshot before
+    // returning app_state to authoritative mode.
+    const restored = await hydrateEntityMirror(db, mirrorState);
+    await db.query(
+      "UPDATE app_state SET data=$1,updated_at=NOW(),updated_by='entity-canonical-rollback' WHERE id=1",
+      [JSON.stringify(restored)],
     );
   }
   await db.query(
