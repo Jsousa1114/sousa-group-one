@@ -4,6 +4,7 @@ const bcrypt = require("bcryptjs");
 const { auth } = require("./auth-middleware");
 const { wrap } = require("./auth-routes");
 const D = require("./domain");
+const { transaction } = require("./db");
 const {
   generateTotpSecret,
   verifyTotp,
@@ -297,10 +298,9 @@ function routes(db) {
     "/profile",
     wrap(async (req, res) => {
       const p = req.body || {};
-      await db.query("BEGIN");
-      try {
+      const result = await transaction(db, async (c) => {
         const row = (
-            await db.query("SELECT data,revision FROM app_state WHERE id=1 FOR UPDATE")
+            await c.query("SELECT data,revision FROM app_state WHERE id=1 FOR UPDATE")
           ).rows[0],
           data = D.normalize(row.data);
         if (req.user.employee_id) {
@@ -331,25 +331,21 @@ function routes(db) {
         } else {
           D.fail("Ce compte n’a pas de fiche personnelle modifiable.", 403);
         }
-        await db.query(
+        await c.query(
           `UPDATE app_state
            SET data=$1,revision=revision+1,updated_at=NOW(),updated_by=$2
            WHERE id=1`,
           [JSON.stringify(data), req.user.email],
         );
-        await db.query(
+        await c.query(
           "INSERT INTO audit_logs(user_email,action,metadata) VALUES($1,$2,$3)",
           [req.user.email, "Profil personnel modifié", "{}"],
         );
-        await db.query("COMMIT");
-        res.json({ ok: true, revision: row.revision + 1 });
-      } catch (e) {
-        await db.query("ROLLBACK");
-        throw e;
-      }
+        return { revision: row.revision + 1 };
+      });
+      res.json({ ok: true, revision: result.revision });
     }),
   );
-
   r.post(
     "/2fa/setup",
     wrap(async (req, res) => {
