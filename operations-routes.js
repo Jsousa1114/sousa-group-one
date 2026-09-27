@@ -482,7 +482,7 @@ function routes(db) {
       if (cursor) {
         params.push(cursor.createdAt, cursor.id);
         where.push(
-          `(created_at,id) < (${params.length - 1}::timestamptz,${params.length}::text)`,
+          `(created_at,id) < ($${params.length - 1}::timestamptz,$${params.length}::text)`,
         );
       }
       params.push(limit + 1);
@@ -492,7 +492,7 @@ function routes(db) {
              FROM user_notifications
              WHERE ${where.join(" AND ")}
              ORDER BY created_at DESC,id DESC
-             LIMIT ${params.length}`,
+             LIMIT $${params.length}`,
             params,
           )
         ).rows,
@@ -966,12 +966,12 @@ function routes(db) {
         where = ["inventory_id=ANY($1::text[])"];
       if (req.query.inventoryId) {
         params.push(String(req.query.inventoryId));
-        where.push(`inventory_id=${params.length}`);
+        where.push(`inventory_id=$${params.length}`);
       }
       if (cursor) {
         params.push(cursor.createdAt, cursor.id);
         where.push(
-          `(created_at,id) < (${params.length - 1}::timestamptz,${params.length}::text)`,
+          `(created_at,id) < ($${params.length - 1}::timestamptz,$${params.length}::text)`,
         );
       }
       params.push(limit + 1);
@@ -980,7 +980,7 @@ function routes(db) {
             `SELECT * FROM inventory_movements
              WHERE ${where.join(" AND ")}
              ORDER BY created_at DESC,id DESC
-             LIMIT ${params.length}`,
+             LIMIT $${params.length}`,
             params,
           )
         ).rows,
