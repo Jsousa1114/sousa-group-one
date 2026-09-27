@@ -3,6 +3,7 @@ const path = require("node:path"),
   { randomUUID } = require("node:crypto"),
   express = require("express");
 const { pool, migrate } = require("./db");
+const { readiness } = require("./production-readiness");
 function createApp(db = pool) {
   const app = express();
   app.disable("x-powered-by");
@@ -59,6 +60,10 @@ function createApp(db = pool) {
     } catch {
       res.status(503).json({ ok: false });
     }
+  });
+  app.get("/readyz", async (req, res) => {
+    const report = await readiness(db);
+    res.set("Cache-Control", "no-store").status(report.ok ? 200 : 503).json(report);
   });
   app.use("/api/auth", require("./auth-routes").routes(db));
   app.use("/api/account", require("./account-routes").routes(db));
