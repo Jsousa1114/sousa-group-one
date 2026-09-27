@@ -355,6 +355,7 @@ function render() {
     ? [oldComposer.selectionStart, oldComposer.selectionEnd]
     : null;
   const oldThread = $("messageThread");
+  const threadFocused = document.activeElement === oldThread;
   const scrollTop = oldThread?.scrollTop || 0;
   const atBottom =
     !oldThread ||
@@ -410,6 +411,7 @@ function render() {
       sameConversation && !atBottom
         ? scrollTop
         : $("messageThread").scrollHeight;
+    if (sameConversation && threadFocused) $("messageThread").focus({ preventScroll: true });
     const search = $("conversationSearch");
     search.value = searchValue;
     filterChatConversations(searchValue);
@@ -417,6 +419,7 @@ function render() {
       search.focus();
       search.setSelectionRange(...searchSelection);
     }
+    updateChatScrollButton();
     hydrateChatAttachments();
     queueMicrotask(() => markChatRead());
   }
@@ -1492,7 +1495,10 @@ function messagesView() {
         ${active.kind === "direct" ? chatAvatar(active.contact) : `<span class="chat-avatar chat-avatar-initial chat-group-avatar">${active.thread.type === "project" ? "🏗" : "👥"}</span>`}
         <div class="chat-header-person"><strong>${esc(active.title)}</strong><span>${esc(active.subtitle)}</span></div>${active.kind === "direct" ? `<div class="chat-call-actions"><button type="button" class="chat-call-button" data-action="call-start" data-id="${esc(active.contact.id)}" aria-label="Appeler ${esc(active.title)}" title="Appel audio">📞</button><button type="button" class="chat-call-button" data-action="call-video" data-id="${esc(active.contact.id)}" aria-label="Appel vidéo ${esc(active.title)}" title="Appel vidéo">📹</button></div>` : ""}
       </header>
-      <div id="messageThread" class="messages chat-thread" role="log" aria-live="polite" aria-label="Messages avec ${esc(active.title)}">${bubbles}</div>
+      <div class="chat-history">
+        <div id="messageThread" class="messages chat-thread" role="log" tabindex="0" aria-live="polite" aria-label="Messages avec ${esc(active.title)}">${bubbles}</div>
+        <button type="button" id="chatLatest" class="chat-latest hidden" data-action="chat-latest" aria-controls="messageThread">↓ Derniers messages</button>
+      </div>
       <div id="chatReplyBar" class="chat-reply-bar ${chatReplyToId ? "" : "hidden"}">
         <div><b>Réponse</b><span>${chatReplyToId ? esc((list.find((m) => same(m.id, chatReplyToId))?.text || "Message").slice(0, 100)) : ""}</span></div>
         <button type="button" data-action="chat-cancel-reply" aria-label="Annuler la réponse">✕</button>
@@ -2739,6 +2745,13 @@ document.addEventListener("click", async (e) => {
       selectChat(String(id));
       mobileChatOpen = true;
       render();
+    } else if (a === "chat-latest") {
+      const thread = $("messageThread");
+      if (thread) {
+        thread.scrollTop = thread.scrollHeight;
+        thread.focus({ preventScroll: true });
+      }
+      updateChatScrollButton();
     } else if (a === "chat-back") {
       mobileChatOpen = false;
       render();
@@ -3477,6 +3490,13 @@ document.addEventListener("submit", async (e) => {
     else notice(err.message);
   }
 });
+function updateChatScrollButton() {
+  const thread = $("messageThread"), button = $("chatLatest");
+  if (thread && button) button.classList.toggle("hidden", thread.scrollHeight - thread.scrollTop - thread.clientHeight <= 60);
+}
+document.addEventListener("scroll", (event) => {
+  if (event.target.id === "messageThread") updateChatScrollButton();
+}, true);
 function filterChatConversations(value) {
   const q = value.trim().toLowerCase();
   document.querySelectorAll(".chat-contact").forEach((row) => {
