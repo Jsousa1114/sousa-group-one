@@ -162,19 +162,39 @@ function routes(db) {
                 [ids],
               )
             ).rows
-          : [];
+          : [],
+        prefRows = ids.length
+          ? (
+              await db.query(
+                "SELECT user_id,data FROM account_preferences WHERE user_id=ANY($1::int[])",
+                [ids],
+              )
+            ).rows
+          : [],
+        prefs = new Map(prefRows.map((x) => [String(x.user_id), x.data || {}]));
       res.json({
-        presence: rows.map((x) => ({
-          userId: x.user_id,
-          lastSeen: x.last_seen,
-          typingKey:
-            x.typing_until && new Date(x.typing_until) > new Date()
-              ? x.typing_key
-              : null,
-          online:
-            x.last_seen &&
-            Date.now() - new Date(x.last_seen).getTime() < 45000,
-        })),
+        presence: rows.map((x) => {
+          const privacy = prefs.get(String(x.user_id))?.privacy || {},
+            own = D.same(x.user_id, req.user.id),
+            showLast = own || privacy.lastSeen !== false,
+            showOnline = own || privacy.online !== false;
+          return {
+            userId: x.user_id,
+            lastSeen: showLast ? x.last_seen : null,
+            typingKey:
+              showOnline &&
+              x.typing_until &&
+              new Date(x.typing_until) > new Date()
+                ? x.typing_key
+                : null,
+            online:
+              !!(
+                showOnline &&
+                x.last_seen &&
+                Date.now() - new Date(x.last_seen).getTime() < 45000
+              ),
+          };
+        }),
       });
     }),
   );
@@ -761,6 +781,21 @@ async function notifyUsers(db, userIds, payload) {
     allowedUserIds = allowedUserIds.filter((id) => !mutedSet.has(id));
   }
   if (!allowedUserIds.length) return { sent: 0 };
+  const category =
+      payload?.category ||
+      (/call/i.test(String(payload?.tag || "")) ? "calls" : payload?.conversationKey?.startsWith("thread:") ? "groups" : "messages"),
+    prefRows = (
+      await db.query(
+        "SELECT user_id,data FROM account_preferences WHERE user_id=ANY($1::int[])",
+        [allowedUserIds],
+      )
+    ).rows,
+    prefMap = new Map(prefRows.map((x) => [Number(x.user_id), x.data || {}]));
+  allowedUserIds = allowedUserIds.filter((id) => {
+    const n = prefMap.get(Number(id))?.notifications || {};
+    return n.push !== false && n[category] !== false;
+  });
+  if (!allowedUserIds.length) return { sent: 0 };
   const rows = (
     await db.query(
       "SELECT id,user_id,endpoint,p256dh,auth FROM push_subscriptions WHERE user_id=ANY($1::int[])",
@@ -770,12 +805,18 @@ async function notifyUsers(db, userIds, payload) {
   let sent = 0;
   for (const row of rows) {
     try {
+      const n = prefMap.get(Number(row.user_id))?.notifications || {},
+        notificationPayload = {
+          ...payload,
+          silent: n.sound === false,
+          vibrate: n.vibration === false ? [] : [180, 90, 180],
+        };
       await webPush.sendNotification(
         {
           endpoint: row.endpoint,
           keys: { p256dh: row.p256dh, auth: row.auth },
         },
-        JSON.stringify(payload),
+        JSON.stringify(notificationPayload),
         { TTL: 90 },
       );
       sent++;
