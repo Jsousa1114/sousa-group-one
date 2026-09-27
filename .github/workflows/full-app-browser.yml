@@ -8,6 +8,8 @@ on:
       - styles.css
       - account-center.js
       - account-routes.js
+      - operations-center.js
+      - operations-routes.js
       - messaging-suite.js
       - messaging-routes.js
       - state-routes.js

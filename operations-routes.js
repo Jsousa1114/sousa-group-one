@@ -30,6 +30,38 @@ const isoDate = (value, optional = true) => {
 };
 const companyAllowed = (user, company) =>
   !!company && company !== "group" && D.inCompany(user, company);
+const pageLimit = (value, fallback = 50, max = 200) => {
+  const n = Number.parseInt(String(value || ""), 10);
+  return Number.isInteger(n) && n > 0 ? Math.min(n, max) : fallback;
+};
+const encodeCursor = (row) => {
+  const createdAt = new Date(row.created_at);
+  if (!Number.isFinite(createdAt.getTime())) D.fail("Date de pagination invalide.");
+  return Buffer.from(
+    createdAt.toISOString() + "|" + String(row.id),
+    "utf8",
+  ).toString("base64url");
+};
+const decodeCursor = (value) => {
+  if (!value) return null;
+  try {
+    const raw = Buffer.from(String(value), "base64url").toString("utf8"),
+      split = raw.lastIndexOf("|"),
+      createdAt = raw.slice(0, split),
+      id = raw.slice(split + 1);
+    if (
+      split < 1 ||
+      !id ||
+      !Number.isFinite(Date.parse(createdAt))
+    )
+      D.fail("Curseur de pagination invalide.");
+    return { createdAt, id };
+  } catch (error) {
+    if (error?.status) throw error;
+    D.fail("Curseur de pagination invalide.");
+  }
+};
+
 
 async function stateContext(db, user) {
   const row = (await db.query("SELECT data,revision FROM app_state WHERE id=1"))
@@ -447,15 +479,33 @@ function routes(db) {
   r.get(
     "/notifications",
     wrap(async (req, res) => {
+      const limit = pageLimit(req.query.limit, 50, 100),
+        cursor = decodeCursor(req.query.cursor),
+        params = [req.user.id],
+        where = ["user_id=$1"];
+      if (cursor) {
+        params.push(cursor.createdAt, cursor.id);
+        where.push(
+          `(created_at,id) < ($${params.length - 1}::timestamptz,$${params.length}::text)`,
+        );
+      }
+      params.push(limit + 1);
       const rows = (
-        await db.query(
-          `SELECT id,category,title,body,url,entity_type,entity_id,read_at,created_at
-           FROM user_notifications WHERE user_id=$1
-           ORDER BY created_at DESC LIMIT 200`,
-          [req.user.id],
-        )
-      ).rows;
-      res.json({ notifications: rows });
+          await db.query(
+            `SELECT id,category,title,body,url,entity_type,entity_id,read_at,created_at
+             FROM user_notifications
+             WHERE ${where.join(" AND ")}
+             ORDER BY created_at DESC,id DESC
+             LIMIT $${params.length}`,
+            params,
+          )
+        ).rows,
+        hasMore = rows.length > limit,
+        page = rows.slice(0, limit);
+      res.json({
+        notifications: page,
+        nextCursor: hasMore && page.length ? encodeCursor(page[page.length - 1]) : null,
+      });
     }),
   );
   r.post(
@@ -905,16 +955,45 @@ function routes(db) {
   r.get(
     "/inventory/movements",
     wrap(async (req, res) => {
-      const ctx = await stateContext(db, req.user);
-      const visibleIds = new Set(ctx.view.inventory.map((x) => String(x.id)));
-      let rows = (
-        await db.query(
-          "SELECT * FROM inventory_movements ORDER BY created_at DESC LIMIT 1000",
-        )
-      ).rows.filter((x) => visibleIds.has(String(x.inventory_id)));
-      if (req.query.inventoryId)
-        rows = rows.filter((x) => D.same(x.inventory_id, req.query.inventoryId));
-      res.json({ movements: rows });
+      const ctx = await stateContext(db, req.user),
+        visibleIds = ctx.view.inventory.map((x) => String(x.id)),
+        limit = pageLimit(req.query.limit, 100, 200),
+        cursor = decodeCursor(req.query.cursor);
+      if (!visibleIds.length)
+        return res.json({ movements: [], nextCursor: null });
+      if (
+        req.query.inventoryId &&
+        !visibleIds.some((id) => D.same(id, req.query.inventoryId))
+      )
+        D.fail("Article inaccessible.", 403);
+      const params = [visibleIds],
+        where = ["inventory_id=ANY($1::text[])"];
+      if (req.query.inventoryId) {
+        params.push(String(req.query.inventoryId));
+        where.push(`inventory_id=$${params.length}`);
+      }
+      if (cursor) {
+        params.push(cursor.createdAt, cursor.id);
+        where.push(
+          `(created_at,id) < ($${params.length - 1}::timestamptz,$${params.length}::text)`,
+        );
+      }
+      params.push(limit + 1);
+      const rows = (
+          await db.query(
+            `SELECT * FROM inventory_movements
+             WHERE ${where.join(" AND ")}
+             ORDER BY created_at DESC,id DESC
+             LIMIT $${params.length}`,
+            params,
+          )
+        ).rows,
+        hasMore = rows.length > limit,
+        page = rows.slice(0, limit);
+      res.json({
+        movements: page,
+        nextCursor: hasMore && page.length ? encodeCursor(page[page.length - 1]) : null,
+      });
     }),
   );
   r.post(

@@ -1929,6 +1929,35 @@ test("operations platform covers tasks CRM stock work orders analytics insights 
     admin,
   );
   assert.ok(movements.data.movements.some((x) => x.id === movement.data.id));
+  const secondMovement = await call("operations/inventory/movement", admin, {
+    inventoryId,
+    movementType: "in",
+    quantity: 1,
+    projectId: "p1",
+    employeeId: "e1",
+    note: "Retour pagination",
+  });
+  assert.equal(secondMovement.status, 200, JSON.stringify(secondMovement.data));
+  const movementPage1 = await call(
+    "operations/inventory/movements?inventoryId=" +
+      encodeURIComponent(inventoryId) +
+      "&limit=1",
+    admin,
+  );
+  assert.equal(movementPage1.data.movements.length, 1);
+  assert.ok(movementPage1.data.nextCursor);
+  const movementPage2 = await call(
+    "operations/inventory/movements?inventoryId=" +
+      encodeURIComponent(inventoryId) +
+      "&limit=1&cursor=" +
+      encodeURIComponent(movementPage1.data.nextCursor),
+    admin,
+  );
+  assert.equal(movementPage2.data.movements.length, 1);
+  assert.notEqual(
+    movementPage1.data.movements[0].id,
+    movementPage2.data.movements[0].id,
+  );
 
   const work = await call("operations/work-orders", admin, {
     company: "home",
@@ -2003,6 +2032,41 @@ test("operations platform covers tasks CRM stock work orders analytics insights 
       )
     ).status,
     403,
+  );
+
+  const adminUserId = (
+    await db.query("SELECT id FROM users WHERE email='a@test.invalid'")
+  ).rows[0].id;
+  for (const [id, minutes] of [
+    ["pagination-notification-1", 1],
+    ["pagination-notification-2", 2],
+    ["pagination-notification-3", 3],
+  ])
+    await db.query(
+      `INSERT INTO user_notifications
+       (id,user_id,category,title,body,created_at)
+       VALUES($1,$2,'test',$3,'pagination',NOW()-($4::int * INTERVAL '1 minute'))
+       ON CONFLICT (id) DO NOTHING`,
+      [id, adminUserId, id, minutes],
+    );
+  const notificationPage1 = await call(
+    "operations/notifications?limit=2",
+    admin,
+  );
+  assert.equal(notificationPage1.status, 200);
+  assert.equal(notificationPage1.data.notifications.length, 2);
+  assert.ok(notificationPage1.data.nextCursor);
+  const notificationPage2 = await call(
+    "operations/notifications?limit=2&cursor=" +
+      encodeURIComponent(notificationPage1.data.nextCursor),
+    admin,
+  );
+  assert.equal(notificationPage2.status, 200);
+  const firstPageIds = new Set(
+    notificationPage1.data.notifications.map((x) => x.id),
+  );
+  assert.ok(
+    notificationPage2.data.notifications.every((x) => !firstPageIds.has(x.id)),
   );
 
   const integrations = await call("operations/integrations", admin);
