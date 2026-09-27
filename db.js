@@ -767,6 +767,21 @@ async function loadState(db = pool, { forUpdate = false } = {}) {
       data[record.collection].push(record.data);
   return { data, revision: row.revision };
 }
+async function replaceStateSnapshot(db, value, updatedBy = "migration") {
+  const data = normalize(value);
+  return transaction(db, async (c) => {
+    const row = (
+      await c.query("SELECT revision FROM app_state WHERE id=1 FOR UPDATE")
+    ).rows[0];
+    if (!row) throw new AppError("État applicatif introuvable.", 500);
+    await c.query(
+      "UPDATE app_state SET data=$1,revision=revision+1,updated_at=NOW(),updated_by=$2 WHERE id=1",
+      [JSON.stringify(data), String(updatedBy).slice(0, 255)],
+    );
+    await syncEntityMirror(c, data);
+    return { revision: row.revision + 1 };
+  });
+}
 async function transaction(db, fn) {
   const c = await db.connect();
   try {
@@ -865,5 +880,6 @@ module.exports = {
   mutate,
   syncEntityMirror,
   loadState,
+  replaceStateSnapshot,
   MIRRORED_COLLECTIONS,
 };
