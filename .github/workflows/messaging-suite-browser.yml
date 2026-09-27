@@ -20,6 +20,9 @@ on:
       - auth-routes.js
       - auth-middleware.js
       - test/messaging-suite-browser.cjs
+      - migration-runner.js
+      - migrations/**
+      - file-storage.js
       - .github/workflows/messaging-suite-browser.yml
 
 permissions:
