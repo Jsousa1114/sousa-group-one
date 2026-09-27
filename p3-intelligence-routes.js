@@ -140,7 +140,11 @@ function buildWorkload(ctx, user, weeks = 4, startDate = todayIso()) {
 }
 
 function aiConfigured() {
-  return !!(process.env.AI_API_URL && process.env.AI_API_KEY);
+  return !!(
+    process.env.AI_API_URL &&
+    process.env.AI_API_KEY &&
+    process.env.AI_MODEL
+  );
 }
 
 function transcriptionConfigured() {
@@ -177,7 +181,7 @@ function parseJsonText(value) {
 }
 
 async function callAi({ system, user, imageDataUrl = "", json = false }) {
-  if (!aiConfigured()) D.fail("Le fournisseur IA n'est pas configuré.", 503);
+  if (!aiConfigured()) D.fail("Le fournisseur IA n'est pas configuré (AI_API_URL, AI_API_KEY et AI_MODEL).", 424);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 30000);
   try {
@@ -188,7 +192,7 @@ async function callAi({ system, user, imageDataUrl = "", json = false }) {
         ]
       : user;
     const body = {
-      model: process.env.AI_MODEL || "default",
+      model: process.env.AI_MODEL,
       temperature: 0.2,
       messages: [
         { role: "system", content: system },
@@ -598,7 +602,7 @@ function routes(db) {
     wrap(async (req, res) => {
       if (req.user.role === "client") D.fail("Accès non autorisé.", 403);
       if (!transcriptionConfigured())
-        D.fail("La transcription serveur n'est pas configurée. Utilisez la dictée du navigateur ou configurez AI_TRANSCRIBE_API_URL.", 503);
+        D.fail("La transcription serveur n'est pas configurée. Utilisez la dictée du navigateur ou configurez AI_TRANSCRIBE_API_URL.", 424);
       const dataUrl = validAudioDataUrl(req.body?.audioDataUrl);
       const match = dataUrl.match(/^data:(audio\/[A-Za-z0-9.+-]+);base64,(.+)$/);
       const mime = match[1];
