@@ -21,24 +21,29 @@ const MIRRORED_COLLECTIONS = [
   "tools",
   "maintenance",
   "documents",
+  "messages",
   "messageThreads",
+  "clocks",
 ];
 async function syncEntityCollection(c, collection, rows) {
   const list = Array.isArray(rows) ? rows.filter((x) => x && x.id != null) : [];
   await c.query("DELETE FROM entity_records WHERE collection=$1", [collection]);
-  for (const row of list)
+  for (let position = 0; position < list.length; position++) {
+    const row = list[position];
     await c.query(
-      `INSERT INTO entity_records(collection,entity_id,company,data,updated_at)
-       VALUES($1,$2,$3,$4,NOW())
+      `INSERT INTO entity_records(collection,entity_id,company,data,position,updated_at)
+       VALUES($1,$2,$3,$4,$5,NOW())
        ON CONFLICT(collection,entity_id) DO UPDATE SET
-       company=EXCLUDED.company,data=EXCLUDED.data,updated_at=NOW()`,
+       company=EXCLUDED.company,data=EXCLUDED.data,position=EXCLUDED.position,updated_at=NOW()`,
       [
         collection,
         String(row.id),
         row.company ? String(row.company) : null,
         JSON.stringify(row),
+        position,
       ],
     );
+  }
 }
 async function syncEntityMirror(c, data, changedOnly = null) {
   const collections = changedOnly || MIRRORED_COLLECTIONS;
@@ -162,7 +167,13 @@ async function migrate(db = pool) {
     )`,
   );
   await db.query(
+    "ALTER TABLE entity_records ADD COLUMN IF NOT EXISTS position INTEGER NOT NULL DEFAULT 0",
+  );
+  await db.query(
     `CREATE INDEX IF NOT EXISTS entity_records_company_idx ON entity_records(collection,company)`,
+  );
+  await db.query(
+    `CREATE INDEX IF NOT EXISTS entity_records_order_idx ON entity_records(collection,position,entity_id)`,
   );
   await db.query(
     `CREATE TABLE IF NOT EXISTS application_errors(
@@ -654,6 +665,7 @@ async function migrate(db = pool) {
   await db.query(
     `INSERT INTO schema_migrations(version) VALUES
       ('2026-09-27-entity-records-mirror'),
+      ('2026-09-27-entity-records-canonical-v1'),
       ('2026-09-27-webauthn-passkeys')
       ON CONFLICT(version) DO NOTHING`,
   );
@@ -693,6 +705,36 @@ async function migrate(db = pool) {
       );
   }
 }
+async function loadState(db = pool, { forUpdate = false } = {}) {
+  const row = (
+    await db.query(
+      "SELECT data,revision FROM app_state WHERE id=1" +
+        (forUpdate ? " FOR UPDATE" : ""),
+    )
+  ).rows[0];
+  if (!row) throw new AppError("État applicatif introuvable.", 500);
+  const data = normalize(row.data);
+  const canonical = (
+    await db.query(
+      "SELECT 1 FROM schema_migrations WHERE version='2026-09-27-entity-records-canonical-v1'",
+    )
+  ).rows.length > 0;
+  if (!canonical) return { data, revision: row.revision };
+  for (const collection of MIRRORED_COLLECTIONS) data[collection] = [];
+  const records = (
+    await db.query(
+      `SELECT collection,data
+       FROM entity_records
+       WHERE collection=ANY($1::text[])
+       ORDER BY collection,position,entity_id`,
+      [MIRRORED_COLLECTIONS],
+    )
+  ).rows;
+  for (const record of records)
+    if (MIRRORED_COLLECTIONS.includes(record.collection))
+      data[record.collection].push(record.data);
+  return { data, revision: row.revision };
+}
 async function transaction(db, fn) {
   const c = await db.connect();
   try {
@@ -717,9 +759,7 @@ async function mutate(db, user, body, fn) {
   if (!Number.isSafeInteger(body.revision) || body.revision < 0)
     throw new AppError("Version de données requise.");
   return transaction(db, async (c) => {
-    const row = (
-      await c.query("SELECT data,revision FROM app_state WHERE id=1 FOR UPDATE")
-    ).rows[0];
+    const row = await loadState(c, { forUpdate: true });
     const previous = (
       await c.query(
         "SELECT result,request_hash FROM command_receipts WHERE user_id=$1 AND request_id=$2",
@@ -792,5 +832,6 @@ module.exports = {
   transaction,
   mutate,
   syncEntityMirror,
+  loadState,
   MIRRORED_COLLECTIONS,
 };
