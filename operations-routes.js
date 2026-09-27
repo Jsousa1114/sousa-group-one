@@ -1042,6 +1042,87 @@ function routes(db) {
   );
 
   r.get(
+    "/payroll-export",
+    wrap(async (req, res) => {
+      if (!D.privileged(req.user, D.HR)) D.fail("Accès RH requis.", 403);
+      const month = String(req.query.month || "").trim();
+      if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month))
+        D.fail("Mois invalide. Utilisez AAAA-MM.");
+      const ctx = await stateContext(db, req.user),
+        employees = new Map(ctx.view.employees.map((e) => [String(e.id), e])),
+        rows = new Map();
+      const ensure = (employee, company) => {
+        const key = String(employee.id) + "::" + String(company || employee.company || "");
+        if (!rows.has(key))
+          rows.set(key, {
+            employeeId: String(employee.id),
+            name: String(employee.name || employee.id),
+            company: String(company || employee.company || ""),
+            activity: Number(employee.activity) || 0,
+            total: 0,
+            validated: 0,
+            pending: 0,
+          });
+        return rows.get(key);
+      };
+      for (const employee of employees.values())
+        ensure(employee, employee.company);
+      for (const time of ctx.view.time) {
+        if (!String(time.date || "").startsWith(month + "-")) continue;
+        const employee = employees.get(String(time.employeeId));
+        if (!employee) continue;
+        const project = ctx.data.projects.find((p) => D.same(p.id, time.project)),
+          company = time.company || project?.company || employee.company,
+          row = ensure(employee, company),
+          hours = Number(time.hours) || 0;
+        row.total += hours;
+        if (time.status === "Validé") row.validated += hours;
+        else row.pending += hours;
+      }
+      const cell = (value) => {
+        const s = String(value ?? "");
+        return /[;"\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+      };
+      const lines = [
+        [
+          "Mois",
+          "ID salarié",
+          "Salarié",
+          "Entreprise",
+          "Taux activité %",
+          "Heures totales",
+          "Heures validées",
+          "Heures à valider",
+        ].join(";"),
+        ...[...rows.values()]
+          .sort((a, b) => a.name.localeCompare(b.name) || a.company.localeCompare(b.company))
+          .map((row) =>
+            [
+              month,
+              row.employeeId,
+              row.name,
+              row.company,
+              row.activity,
+              row.total.toFixed(2),
+              row.validated.toFixed(2),
+              row.pending.toFixed(2),
+            ]
+              .map(cell)
+              .join(";"),
+          ),
+      ];
+      res
+        .status(200)
+        .type("text/csv; charset=utf-8")
+        .set(
+          "Content-Disposition",
+          `attachment; filename="sousa-payroll-${month}.csv"`,
+        )
+        .send("\uFEFF" + lines.join("\n"));
+    }),
+  );
+
+  r.get(
     "/analytics",
     wrap(async (req, res) => {
       if (!D.privileged(req.user, [...D.STAFF, "hr", "accounting", "manager"]))
@@ -1206,6 +1287,71 @@ function routes(db) {
             entityId: item.id,
           });
       }
+      const daysUntil = (date) =>
+        Math.ceil(
+          (Date.parse(String(date) + "T12:00:00Z") -
+            Date.parse(today + "T12:00:00Z")) /
+            86400000,
+        );
+      const complianceInsight = ({
+        expiry,
+        type,
+        title,
+        body,
+        page,
+        entityId,
+      }) => {
+        if (!expiry) return;
+        const days = daysUntil(expiry);
+        if (!Number.isFinite(days) || days > 60) return;
+        insights.push({
+          severity: days < 0 ? "critical" : days <= 30 ? "high" : "medium",
+          type,
+          title: days < 0 ? title + " expiré" : title + " à renouveler",
+          body:
+            body +
+            " · " +
+            expiry +
+            (days < 0
+              ? " · expiré depuis " + Math.abs(days) + " j"
+              : " · dans " + days + " j"),
+          page,
+          entityId,
+        });
+      };
+      for (const employee of ctx.view.employees) {
+        if (!employee.residencePermitExpiry) continue;
+        complianceInsight({
+          expiry: employee.residencePermitExpiry,
+          type: "employee.residence_permit_expiry",
+          title: "Permis de séjour",
+          body: employee.name || employee.id,
+          page:
+            req.user.role === "employee" && D.same(employee.id, req.user.employee_id)
+              ? "settings"
+              : "employees",
+          entityId: employee.id,
+        });
+      }
+      for (const document of ctx.view.documents) {
+        if (document.category !== "identity" || !document.expiresAt) continue;
+        const employee = ctx.view.employees.find((e) =>
+          D.same(e.id, document.employeeId),
+        );
+        complianceInsight({
+          expiry: document.expiresAt,
+          type: "employee.document_expiry",
+          title: document.documentType || "Document salarié",
+          body: (employee?.name || document.employeeId || "Salarié") + " · " + document.name,
+          page:
+            req.user.role === "employee" &&
+            D.same(document.employeeId, req.user.employee_id)
+              ? "settings"
+              : "employees",
+          entityId: document.employeeId || document.id,
+        });
+      }
+
       const future = ctx.view.planning.filter(
         (x) => x.date && x.date >= today,
       );
