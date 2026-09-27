@@ -719,9 +719,16 @@ async function migrate(db = pool) {
     await db.query("SELECT data FROM app_state WHERE id=1")
   ).rows[0]?.data;
   const entityCount = Number(
-    (await db.query("SELECT COUNT(*)::int AS count FROM entity_records")).rows[0]?.count || 0,
-  );
-  if (!canonicalEntityStateEnabled() || entityCount === 0)
+      (await db.query("SELECT COUNT(*)::int AS count FROM entity_records")).rows[0]?.count || 0,
+    ),
+    rawHasMirroredData = MIRRORED_COLLECTIONS.some(
+      (collection) =>
+        Array.isArray(mirrorState?.[collection]) &&
+        mirrorState[collection].length > 0,
+    );
+  // Never overwrite an existing canonical mirror from a compact app_state during rollback.
+  // Bootstrap/sync only when the mirror is empty or app_state still contains real legacy data.
+  if (entityCount === 0 || rawHasMirroredData)
     await syncEntityMirror(db, normalize(mirrorState));
   if (canonicalEntityStateEnabled()) {
     const hydrated = await hydrateEntityMirror(db, mirrorState);
