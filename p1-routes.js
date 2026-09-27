@@ -489,9 +489,28 @@ function routes(db) {
     const todayDate = today();
     const myPlanning = req.user.employee_id ? ctx.view.planning.filter((x)=>D.same(x.employeeId,req.user.employee_id)&&x.date>=todayDate).sort((a,b)=>(a.date+a.start).localeCompare(b.date+b.start)).slice(0,5) : [];
     const unread = Number((await db.query("SELECT COUNT(*)::int n FROM user_notifications WHERE user_id=$1 AND read_at IS NULL",[req.user.id])).rows[0]?.n||0);
+    let clientActions = { changeOrders: [], workOrders: [] };
+    if (req.user.role === "client" && req.user.client_id) {
+      const projectIds = ctx.view.projects.map((x) => String(x.id));
+      if (projectIds.length) {
+        clientActions.changeOrders = (
+          await db.query(
+            "SELECT id,project_id,title,description,amount,status,created_at FROM project_change_orders WHERE project_id=ANY($1::text[]) AND status='sent' ORDER BY created_at DESC",
+            [projectIds],
+          )
+        ).rows;
+      }
+      clientActions.workOrders = (
+        await db.query(
+          "SELECT id,project_id,title,description,status,scheduled_at,customer_signature,signed_at FROM work_orders WHERE client_id=$1 AND status<>'cancelled' ORDER BY scheduled_at DESC NULLS LAST,created_at DESC LIMIT 100",
+          [String(req.user.client_id)],
+        )
+      ).rows;
+    }
     res.json({
       preferences: prefs,
       role: req.user.role,
+      clientActions,
       kpis: {
         projects: ctx.view.projects.filter((x)=>x.status!=="Terminé").length,
         hours: ctx.view.time.reduce((n,x)=>n+Number(x.hours||0),0),
@@ -518,6 +537,36 @@ function routes(db) {
       [req.user.id,JSON.stringify(safe)],
     );
     res.json({ok:true,preferences:safe});
+  }));
+
+  r.post("/client/work-order/:id/sign", wrap(async (req,res) => {
+    if (req.user.role !== "client" || !req.user.client_id)
+      D.fail("Compte client requis.",403);
+    const row = (
+      await db.query(
+        "SELECT * FROM work_orders WHERE id=$1 AND client_id=$2 AND status<>'cancelled'",
+        [String(req.params.id), String(req.user.client_id)],
+      )
+    ).rows[0];
+    if (!row) D.fail("Bon de travail inaccessible.",404);
+    if (row.customer_signature) D.fail("Ce bon de travail est déjà signé.");
+    const signature = clean(String(req.body?.signature || ""), 500);
+    await db.query(
+      "UPDATE work_orders SET customer_signature=$1,signed_at=NOW(),updated_at=NOW() WHERE id=$2",
+      [signature,row.id],
+    );
+    await notify(
+      db,
+      (await db.query(
+        "SELECT id FROM users WHERE disabled=false AND deleted_at IS NULL AND role=ANY($1::text[]) AND (company='group' OR company=$2)",
+        [["admin","direction","manager"], row.company],
+      )).rows.map((x)=>x.id),
+      "project",
+      "Bon de travail signé",
+      row.title + " · signature client reçue",
+      "?open=projects",
+    );
+    res.json({ok:true,id:row.id,signedAt:new Date().toISOString()});
   }));
 
   r.get("/project/:id/full", wrap(async (req,res) => {
