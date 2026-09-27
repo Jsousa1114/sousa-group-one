@@ -29,14 +29,17 @@
     v
       ? new Date(v).toLocaleString("fr-CH", { timeZone: "Europe/Zurich" })
       : "—";
-  const allowedStaff = () =>
-    ["admin", "direction", "hr", "manager", "accounting"].includes(profile()?.role);
-  const commercial = () =>
-    ["admin", "direction", "manager", "accounting"].includes(profile()?.role);
-  const operational = () =>
-    ["admin", "direction", "manager", "employee"].includes(profile()?.role);
-  const hrAllowed = () =>
-    ["admin", "direction", "hr"].includes(profile()?.role);
+  const roleAllowed = (roles) => {
+    const p = profile() || {}, base = roles.includes(p.role);
+    if (p.role === "admin") return base;
+    const denied = p.permission_denials || [];
+    if (base && denied.includes(p.role)) return false;
+    return base || (p.permission_grants || []).some((r) => roles.includes(r) && !denied.includes(r));
+  };
+  const allowedStaff = () => roleAllowed(["admin", "direction", "hr", "manager", "accounting"]);
+  const commercial = () => roleAllowed(["admin", "direction", "manager", "accounting"]);
+  const operational = () => roleAllowed(["admin", "direction", "manager", "employee"]);
+  const hrAllowed = () => roleAllowed(["admin", "direction", "hr"]);
 
   function root() {
     return document.getElementById("operationsCenter");
@@ -58,6 +61,7 @@
       ...(profile()?.role === "admin" || profile()?.role === "direction"
         ? [["automations", "Automatisations"], ["integrations", "Intégrations"]]
         : []),
+      ["p2", "P2 · Avancé"],
       ["p3", "P3 · Intelligence"],
       ["notifications", "Notifications"],
     ];
@@ -580,6 +584,10 @@
       else if (activeTab === "lifecycle") await renderLifecycle();
       else if (activeTab === "automations") await renderAutomations();
       else if (activeTab === "integrations") await renderIntegrations();
+      else if (activeTab === "p2") {
+        if (!window.SGOP2Center) throw new Error("Module P2 indisponible.");
+        await window.SGOP2Center.render(root().querySelector("#opsBody"));
+      }
       else if (activeTab === "p3") {
         if (!window.SGOP3Center) throw new Error("Module P3 indisponible.");
         await window.SGOP3Center.render(root().querySelector("#opsBody"));
