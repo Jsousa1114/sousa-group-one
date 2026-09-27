@@ -3,7 +3,7 @@ const express = require("express"),
   bcrypt = require("bcryptjs"),
   jwt = require("jsonwebtoken");
 const { randomUUID } = require("node:crypto");
-const { verifyTotp } = require("./account-security");
+const { verifyTotp, hashRecoveryCode } = require("./account-security");
 const { auth, profile } = require("./auth-middleware");
 const { AppError, text } = require("./domain");
 const wrap = (fn) => (req, res, next) =>
@@ -42,11 +42,26 @@ function routes(db) {
       if (u.totp_enabled) {
         if (!req.body?.totpCode)
           return res.status(401).json({
-            error: "Code de double authentification requis.",
+            error: "Code de double authentification ou code de secours requis.",
             code: "TOTP_REQUIRED",
           });
-        if (!verifyTotp(u.totp_secret, req.body.totpCode))
-          throw new AppError("Code de double authentification invalide.", 401);
+        const secondFactor = String(req.body.totpCode || "");
+        if (!verifyTotp(u.totp_secret, secondFactor)) {
+          const recoveryHash = hashRecoveryCode(secondFactor),
+            used = (
+              await db.query(
+                `UPDATE user_recovery_codes SET used_at=NOW()
+                 WHERE user_id=$1 AND code_hash=$2 AND used_at IS NULL
+                 RETURNING code_hash`,
+                [u.id, recoveryHash],
+              )
+            ).rows[0];
+          if (!used)
+            throw new AppError(
+              "Code de double authentification ou code de secours invalide.",
+              401,
+            );
+        }
       }
       attempts.delete(key);
       const sid = randomUUID(),
