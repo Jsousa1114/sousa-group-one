@@ -88,6 +88,7 @@ async function noOverflow(page,label){
     await admin.locator(".p2-chart").waitFor();
     assert.match(await admin.locator("#p2Body").innerText(),/Prévision de trésorerie/);
     await admin.locator('[data-p2-tab="approvals"]').click();
+    await admin.getByText("Workflow d’approbation",{exact:true}).waitFor({timeout:10000});
     assert.match(await admin.locator("#p2Body").innerText(),/Workflow d’approbation/);
     await noOverflow(admin,engine+" admin P2");
     await admin.screenshot({path:"p2-browser-results/"+engine+"-admin.png",fullPage:true});
@@ -105,7 +106,7 @@ async function noOverflow(page,label){
     await client.locator('#p2Form input[name="endsAt"]').fill("2026-10-02T11:00");
     await client.locator('#p2Form button[type="submit"]').click();
     await client.locator("#modalWrap").waitFor({state:"hidden"});
-    await client.waitForTimeout(150);
+    await client.getByText("Visite P2",{exact:true}).waitFor({timeout:10000});
     assert.match(await client.locator(".p2-center").innerText(),/Visite P2/);
     await noOverflow(client,engine+" client P2");
     await client.screenshot({path:"p2-browser-results/"+engine+"-client.png",fullPage:true});
