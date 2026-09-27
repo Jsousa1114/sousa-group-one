@@ -18,12 +18,13 @@ const money = (n) =>
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(Number(n) || 0);
-const date = (v) =>
-  v
-    ? new Date(v.length === 10 ? v + "T12:00:00" : v).toLocaleDateString(
-        "fr-CH",
-      )
-    : "—";
+const date = (v) => {
+  if (!v) return "—";
+  const value = new Date(v.length === 10 ? v + "T12:00:00" : v);
+  return window.SGOAccountPreferences?.dateFormat === "ISO"
+    ? value.toISOString().slice(0, 10)
+    : value.toLocaleDateString("fr-CH");
+};
 const today = () =>
   new Intl.DateTimeFormat("en-CA", {
     timeZone: "Europe/Zurich",
@@ -3620,6 +3621,20 @@ window.SGOChatCore = {
   getProfile: () => profile,
   getContacts: () => contacts,
   getPage: () => page,
+  setPage: (next) => {
+    if (menus[next]?.[1]?.includes(profile?.role)) {
+      page = next;
+      render();
+    }
+  },
+  setCompany: (next) => {
+    const value = String(next || "");
+    if (!value || state?.companies?.some((c) => c.id === value)) {
+      company = value;
+      render();
+    }
+  },
+  getCompany: () => company,
   getRevision: () => revision,
   canRefreshMessages: () =>
     !pending &&
