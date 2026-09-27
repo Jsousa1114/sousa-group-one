@@ -43,6 +43,9 @@
       ...(commercial() ? [["crm", "CRM"]] : []),
       ...(operational() ? [["stock", "Stock"], ["workorders", "Bons de travail"]] : []),
       ...(allowedStaff() ? [["analytics", "Analytics"]] : []),
+      ...(["admin","direction","hr","manager","accounting","employee"].includes(profile()?.role)
+        ? [["ai", "Assistant IA"]]
+        : []),
       ...(profile()?.role === "admin" || profile()?.role === "direction"
         ? [["automations", "Automatisations"], ["integrations", "Intégrations"]]
         : []),
@@ -142,6 +145,20 @@
   }
   async function post(path, body) {
     return core().api("operations/" + path, body);
+  }
+  async function aiGet(path) {
+    return core().api("ai/" + path);
+  }
+  async function aiPost(path, body) {
+    return core().api("ai/" + path, body);
+  }
+  function fileAsBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || "").split(",")[1] || "");
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
   }
   async function renderOverview() {
     const [overview, insights] = await Promise.all([get("overview"), get("insights")]);
@@ -336,6 +353,48 @@
         </article>
       </div>`;
   }
+  async function renderAi() {
+    const status = await aiGet("status");
+    root().querySelector("#opsBody").innerHTML = `
+      <div class="ops-ai-grid">
+        <article class="card">
+          <div class="ops-card-head">
+            <div><h3>Assistant IA Sousa Group One</h3><p>Analyse uniquement les données auxquelles votre compte a accès.</p></div>
+            <span class="status ${status.configured ? "ok" : "warning"}">${status.configured ? "Configuré" : "Non configuré"}</span>
+          </div>
+          <p class="muted">Fournisseur : ${esc(status.provider)} · modèle : ${esc(status.model)}</p>
+          ${status.configured ? "" : '<p class="ops-ai-warning">Ajoutez OPENAI_API_KEY côté serveur pour activer ces fonctions. Aucune donnée n’est envoyée tant que l’IA n’est pas configurée.</p>'}
+          <form id="opsAiForm" class="ops-ai-form">
+            <label>Fonction<select name="mode">
+              <option value="assistant">Assistant interne</option>
+              <option value="quote-draft">Brouillon de devis</option>
+              <option value="daily-summary">Résumé journalier</option>
+              <option value="planning-assist">Aide à la planification</option>
+              <option value="anomaly-review">Analyse des anomalies</option>
+            </select></label>
+            <label>Chantier (optionnel)<select name="projectId"><option value="">Aucun</option>${projectOptions("")}</select></label>
+            <label class="ops-ai-prompt">Question / consigne<textarea name="prompt" rows="6" maxlength="6000" placeholder="Ex. Prépare-moi les priorités de demain…"></textarea></label>
+            <div class="form-actions"><button type="submit" class="btn primary" ${status.configured ? "" : "disabled"}>Analyser</button></div>
+          </form>
+        </article>
+        <article class="card">
+          <h3>OCR chantier / facture / matériel</h3>
+          <label>Type d’analyse<select id="opsAiImageKind"><option value="invoice">Facture fournisseur</option><option value="material">Matériel / référence</option><option value="general">Photo de chantier</option></select></label>
+          <label>Image<input id="opsAiImage" type="file" accept="image/jpeg,image/png,image/webp"></label>
+          <div class="form-actions"><button type="button" class="btn" data-ops-action="ai-image" ${status.configured ? "" : "disabled"}>Analyser l’image</button></div>
+        </article>
+        <article class="card">
+          <h3>Compte rendu vocal → texte</h3>
+          <p class="muted">WebM, OGG, MP3, MP4/M4A ou WAV · 8 Mo maximum.</p>
+          <label>Audio<input id="opsAiAudio" type="file" accept="audio/*"></label>
+          <div class="form-actions"><button type="button" class="btn" data-ops-action="ai-audio" ${status.configured ? "" : "disabled"}>Transcrire</button></div>
+        </article>
+        <article class="card ops-ai-result-card">
+          <div class="ops-card-head"><div><h3>Résultat</h3><p>Proposition uniquement : rien n’est appliqué automatiquement.</p></div></div>
+          <pre id="opsAiResult" class="ops-ai-result">Aucun résultat pour le moment.</pre>
+        </article>
+      </div>`;
+  }
   async function renderIntegrations() {
     const [out, errorOut] = await Promise.all([
         get("integrations"),
@@ -401,6 +460,7 @@
       else if (activeTab === "stock") await renderStock();
       else if (activeTab === "workorders") await renderWorkOrders();
       else if (activeTab === "analytics") await renderAnalytics();
+      else if (activeTab === "ai") await renderAi();
       else if (activeTab === "automations") await renderAutomations();
       else if (activeTab === "integrations") await renderIntegrations();
       else if (activeTab === "notifications") await renderNotifications();
@@ -620,7 +680,27 @@
       else if (a === "new-stock") stockForm();
       else if (a === "new-workorder") await workOrderForm();
       else if (a === "edit-workorder") await workOrderForm(b.dataset.id);
-      else if (a === "new-automation") automationForm();
+      else if (a === "ai-image") {
+        const file = document.getElementById("opsAiImage")?.files?.[0];
+        if (!file) throw new Error("Choisissez une image.");
+        if (file.size > 5 * 1024 * 1024) throw new Error("Image de 5 Mo maximum.");
+        const content = await fileAsBase64(file);
+        const out = await aiPost("image", {
+          kind: document.getElementById("opsAiImageKind")?.value || "general",
+          mime: file.type,
+          content,
+        });
+        const result = document.getElementById("opsAiResult");
+        if (result) result.textContent = out.text || "Aucun résultat.";
+      } else if (a === "ai-audio") {
+        const file = document.getElementById("opsAiAudio")?.files?.[0];
+        if (!file) throw new Error("Choisissez un fichier audio.");
+        if (file.size > 8 * 1024 * 1024) throw new Error("Audio de 8 Mo maximum.");
+        const content = await fileAsBase64(file);
+        const out = await aiPost("transcribe", { mime: file.type, content });
+        const result = document.getElementById("opsAiResult");
+        if (result) result.textContent = out.text || "Aucune transcription.";
+      } else if (a === "new-automation") automationForm();
       else if (a === "new-webhook") webhookForm();
       else if (a === "test-webhook") {
         await post("webhooks/test", { id: b.dataset.id });
@@ -650,6 +730,28 @@
     searchTimer = setTimeout(() => search(event.target.value), 220);
   });
   document.addEventListener("submit", async (event) => {
+    if (event.target.id === "opsAiForm") {
+      event.preventDefault();
+      const data = new FormData(event.target),
+        mode = String(data.get("mode") || "assistant"),
+        prompt = String(data.get("prompt") || ""),
+        projectId = String(data.get("projectId") || ""),
+        result = document.getElementById("opsAiResult");
+      try {
+        if (result) result.textContent = "Analyse en cours…";
+        let out;
+        if (mode === "quote-draft") out = await aiPost("quote-draft", { description: prompt, projectId });
+        else if (mode === "daily-summary") out = await aiPost("daily-summary", { date: new Date().toISOString().slice(0,10) });
+        else if (mode === "planning-assist") out = await aiPost("planning-assist", { objective: prompt });
+        else if (mode === "anomaly-review") out = await aiPost("anomaly-review", {});
+        else out = await aiPost("assistant", { prompt });
+        if (result) result.textContent = out.text || "Aucun résultat.";
+      } catch (e) {
+        if (result) result.textContent = e.message;
+        core().notice(e.message);
+      }
+      return;
+    }
     if (event.target.id !== "opsEntityForm") return;
     event.preventDefault();
     await handleSubmit(event.target);
