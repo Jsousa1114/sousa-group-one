@@ -1838,6 +1838,19 @@ test("complete messaging suite secures presence, preferences, reactions, E2EE tr
 
 
 test("operations platform covers tasks CRM stock work orders analytics insights and permissions", async () => {
+  const viewerEmail = "ops-viewer-" + Date.now() + "@test.invalid",
+    viewerHash = await bcrypt.hash("Ops-Viewer-Password-2026", 4);
+  await db.query(
+    "INSERT INTO users(email,password_hash,role,name,avatar,company) VALUES($1,$2,'client','Ops Viewer','','home')",
+    [viewerEmail, viewerHash],
+  );
+  const viewerLogin = await call("auth/login", null, {
+      email: viewerEmail,
+      password: "Ops-Viewer-Password-2026",
+    }),
+    viewer = viewerLogin.data.token;
+  assert.equal(viewerLogin.status, 200);
+
   const overview = await call("operations/overview", admin);
   assert.equal(overview.status, 200, JSON.stringify(overview.data));
   assert.ok(overview.data.tasks);
@@ -1871,7 +1884,7 @@ test("operations platform covers tasks CRM stock work orders analytics insights 
   assert.equal(crm.status, 200, JSON.stringify(crm.data));
   const crmList = await call("operations/crm", admin);
   assert.ok(crmList.data.opportunities.some((x) => x.id === crm.data.id));
-  assert.equal((await call("operations/crm", employee)).status, 403);
+  assert.equal((await call("operations/crm", viewer)).status, 403);
 
   const inventory = await call(
     "state/command",
@@ -1928,7 +1941,7 @@ test("operations platform covers tasks CRM stock work orders analytics insights 
   assert.equal(analytics.status, 200, JSON.stringify(analytics.data));
   assert.ok(analytics.data.kpis);
   assert.ok(Array.isArray(analytics.data.byProject));
-  assert.equal((await call("operations/analytics", client)).status, 403);
+  assert.equal((await call("operations/analytics", viewer)).status, 403);
 
   const insights = await call("operations/insights", admin);
   assert.equal(insights.status, 200, JSON.stringify(insights.data));
@@ -1937,7 +1950,7 @@ test("operations platform covers tasks CRM stock work orders analytics insights 
   const integrations = await call("operations/integrations", admin);
   assert.equal(integrations.status, 200, JSON.stringify(integrations.data));
   assert.equal(typeof integrations.data.runtime.turnConfigured, "boolean");
-  assert.equal((await call("operations/integrations", client)).status, 403);
+  assert.equal((await call("operations/integrations", viewer)).status, 403);
 
   const search = await call("operations/search?q=Project", admin);
   assert.equal(search.status, 200);
