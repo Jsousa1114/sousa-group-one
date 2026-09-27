@@ -208,7 +208,10 @@
     root().querySelector("#opsBody").innerHTML = `
       <div class="ops-toolbar">
         <label>Chantier<select id="opsTaskProjectFilter"><option value="">Tous les chantiers</option>${projectOptions(projectFilter)}</select></label>
-        ${operational() ? button("Nouvelle tâche", "new-task", "", "primary") : ""}
+        <div class="form-actions">
+          ${projectFilter && (operational() || profile()?.role === "accounting") ? button("Résumé automatique", "project-summary") : ""}
+          ${operational() ? button("Nouvelle tâche", "new-task", "", "primary") : ""}
+        </div>
       </div>
       <div class="ops-kanban">
         ${columns
@@ -657,6 +660,22 @@
         activeTab = b.dataset.tab;
         root().innerHTML = shell();
         await renderTab();
+      } else if (a === "project-summary") {
+        if (!projectFilter) throw new Error("Choisissez un chantier.");
+        const out = await get(
+          "project/" + encodeURIComponent(projectFilter) + "/daily-summary",
+        );
+        modal(
+          "Résumé automatique · " + (out.project?.title || projectFilter),
+          `<div class="ops-summary">
+            <p class="muted">${esc(date(out.date))} · ${esc(out.totalHours || 0)} h enregistrées</p>
+            ${String(out.summary || "")
+              .split("\n")
+              .filter(Boolean)
+              .map((line) => `<p>${esc(line)}</p>`)
+              .join("")}
+          </div>`,
+        );
       } else if (a === "new-task") taskForm();
       else if (a === "task-status") {
         await post("tasks", {
