@@ -477,10 +477,27 @@ function routes(db) {
     if(!quote) D.fail("Devis inaccessible.",404);
     if(["Accepté","Refusé"].includes(quote.status)) D.fail("Ce devis est déjà clôturé.");
     const channel=["notification","email","sms"].includes(req.body?.channel)?req.body.channel:"notification";
-    const id=randomUUID();
-    await db.query("INSERT INTO p2_quote_reminders(id,quote_id,company,channel,status,note,created_by) VALUES($1,$2,$3,$4,'queued',$5,$6)",
-      [id,String(quote.id),String(quote.company||""),channel,clean(String(req.body?.note||""),1000,true)||null,req.user.id]);
-    res.json({ok:true,id,channel});
+    const id=randomUUID(), note=clean(String(req.body?.note||""),1000,true)||null;
+    let status="queued";
+    if(channel==="email"||channel==="sms"){
+      const client=clientVisible(ctx,req.user,String(quote.clientId||""));
+      const recipient=channel==="email"?client.email:client.phone;
+      if(!recipient) D.fail("Coordonnée client manquante.");
+      const url=channel==="email"?process.env.EMAIL_API_URL:process.env.SMS_API_URL;
+      const key=channel==="email"?process.env.EMAIL_API_KEY:process.env.SMS_API_KEY;
+      if(!url||!key) D.fail("Connecteur "+channel+" non configuré.",503);
+      const payload={
+        to:recipient,
+        subject:channel==="email"?"Relance devis "+quote.id:undefined,
+        text:note||("Bonjour, nous revenons vers vous concernant le devis "+quote.id+" de Sousa Group One."),
+        metadata:{quoteId:quote.id,clientId:client.id,company:quote.company||null}
+      };
+      await callConnector(url,key,payload);
+      status="sent";
+    }
+    await db.query("INSERT INTO p2_quote_reminders(id,quote_id,company,channel,status,note,created_by) VALUES($1,$2,$3,$4,$5,$6,$7)",
+      [id,String(quote.id),String(quote.company||""),channel,status,note,req.user.id]);
+    res.json({ok:true,id,channel,status});
   }));
 
   r.get("/calendar.ics", wrap(async (req,res) => {
@@ -497,6 +514,31 @@ function routes(db) {
     const body=["BEGIN:VCALENDAR","VERSION:2.0","PRODID:-//Sousa Group One//Planning//FR","CALSCALE:GREGORIAN",events,"END:VCALENDAR"].join("\r\n");
     res.set({"Content-Type":"text/calendar; charset=utf-8","Content-Disposition":"attachment; filename=\"sousa-group-planning.ics\""});
     res.send(body);
+  }));
+
+  r.post("/calendar/push", wrap(async (req,res) => {
+    const provider=String(req.body?.provider||"");
+    if(!["google","microsoft"].includes(provider)) D.fail("Calendrier invalide.");
+    const ctx=await stateContext(db,req.user);
+    const employeeId=req.user.employee_id || req.body?.employeeId;
+    if(req.body?.employeeId && !staff(req.user)) D.fail("Accès planning requis.",403);
+    const rows=ctx.view.planning.filter(x=>!employeeId||same(x.employeeId,employeeId));
+    const url=provider==="google"?process.env.GOOGLE_CALENDAR_API_URL:process.env.MICROSOFT_CALENDAR_API_URL;
+    const key=provider==="google"?process.env.GOOGLE_CALENDAR_API_KEY:process.env.MICROSOFT_CALENDAR_API_KEY;
+    if(!url||!key) D.fail("Connecteur calendrier "+provider+" non configuré.",503);
+    const events=rows.map(x=>{
+      const project=ctx.view.projects.find(p=>same(p.id,x.project));
+      return {
+        id:String(x.id),
+        title:project?.title||"Planning Sousa Group",
+        startsAt:dateAtLocal(x.date,x.start)?.toISOString(),
+        endsAt:dateAtLocal(x.date,x.end)?.toISOString(),
+        location:x.location||"",
+        projectId:x.project||null
+      };
+    }).filter(x=>x.startsAt&&x.endsAt);
+    const result=await callConnector(url,key,{events,source:"sousa-group-one"});
+    res.json({ok:true,provider,count:events.length,status:result.status});
   }));
 
   r.post("/communications/:provider", wrap(async (req,res) => {
