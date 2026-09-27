@@ -165,6 +165,56 @@ async function deleteFile(db, id) {
   return !!row;
 }
 
+async function migrateDatabaseFilesToObjectStorage(db, limit = 50) {
+  const cfg = objectConfig();
+  if (!cfg) return { migrated: 0, pending: 0, configured: false };
+  const cap = Math.max(1, Math.min(Number(limit) || 50, 200));
+  const rows = (
+    await db.query(
+      `SELECT id,content
+       FROM file_contents
+       WHERE content IS NOT NULL
+         AND COALESCE(storage_backend,'database')='database'
+       ORDER BY id
+       LIMIT $1`,
+      [cap],
+    )
+  ).rows;
+  let migrated = 0;
+  for (const row of rows) {
+    const buffer = Buffer.from(row.content);
+    const key = objectKey(row.id, cfg);
+    await objectRequest("PUT", key, buffer);
+    try {
+      const result = await db.query(
+        `UPDATE file_contents
+         SET content=NULL,
+             storage_backend='object',
+             storage_key=$2,
+             size=COALESCE(size,$3)
+         WHERE id=$1 AND content IS NOT NULL
+         RETURNING id`,
+        [String(row.id), key, buffer.length],
+      );
+      if (result.rows.length) migrated++;
+    } catch (error) {
+      await objectRequest("DELETE", key).catch(() => {});
+      throw error;
+    }
+  }
+  const pending = Number(
+    (
+      await db.query(
+        `SELECT COUNT(*)::int AS count
+         FROM file_contents
+         WHERE content IS NOT NULL
+           AND COALESCE(storage_backend,'database')='database'`,
+      )
+    ).rows[0]?.count || 0,
+  );
+  return { migrated, pending, configured: true };
+}
+
 async function cleanupObjectDeletions(db, limit = 50) {
   if (!storageAvailable()) return { deleted: 0, pending: 0 };
   const rows = (
@@ -195,4 +245,5 @@ module.exports = {
   getFile,
   deleteFile,
   cleanupObjectDeletions,
+  migrateDatabaseFilesToObjectStorage,
 };
