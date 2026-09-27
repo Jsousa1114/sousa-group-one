@@ -1597,31 +1597,6 @@ function messagesView() {
   </section>`;
 }
 
-function reportsView() {
-  const months = new Map();
-  for (const p of visible("payments")) {
-    const m = p.date.slice(0, 7);
-    months.set(m, (months.get(m) || 0) + p.amount);
-  }
-  return (
-    heading(
-      "Rapports sur les données visibles",
-      btn("Exporter CSV", "export", "projects"),
-    ) +
-    cards([
-      ["Heures enregistrées", sum("time", "hours").toFixed(2) + " h"],
-      ["Coûts chantiers", money(sum("projects", "cost"))],
-      [
-        "Budget moins coûts",
-        money(sum("projects", "budget") - sum("projects", "cost")),
-      ],
-    ]) +
-    table(
-      ["Mois", "Encaissements"],
-      [...months].sort().map(([m, n]) => [esc(m), money(n)]),
-    )
-  );
-}
 const views = {
   dashboard,
   time: timeView,
@@ -1636,7 +1611,17 @@ const views = {
   invoices: () => financeView("invoices"),
   documents: documentsView,
   messages: messagesView,
-  reports: reportsView,
+  reports: () =>
+    window.SGOCoreUI.reportsView({
+      visible,
+      sum,
+      heading,
+      btn,
+      cards,
+      money,
+      table,
+      esc,
+    }),
   pilotage: () =>
     heading("Pilotage") +
     '<div id="operationsCenter"><article class="card"><p>Chargement du pilotage…</p></article></div>',
@@ -1663,73 +1648,7 @@ const views = {
     heading("Mon compte") +
     '<div id="accountCenter" class="account-center-loading"><article class="card"><p>Chargement de votre compte…</p></article></div>',
 };
-const columns = {
-  companies: [
-    ["name", "Entreprise"],
-    ["type", "Secteur"],
-  ],
-  employees: [
-    ["name", "Nom"],
-    ["job", "Fonction"],
-    ["email", "E-mail"],
-    ["company", "Entreprise"],
-    ["vacation", "Vacances"],
-  ],
-  clients: [
-    ["name", "Nom"],
-    ["email", "E-mail"],
-    ["phone", "Téléphone"],
-    ["city", "Ville"],
-  ],
-  payments: [
-    ["invoice", "Facture"],
-    ["amount", "Montant"],
-    ["date", "Date"],
-    ["method", "Mode"],
-  ],
-  expenses: [
-    ["supplier", "Fournisseur"],
-    ["project", "Chantier"],
-    ["amount", "Montant"],
-    ["date", "Date"],
-  ],
-  inventory: [
-    ["sku", "Référence"],
-    ["name", "Article"],
-    ["stock", "Stock"],
-    ["min", "Minimum"],
-    ["unit", "Unité"],
-    ["buy", "Achat"],
-    ["sell", "Vente"],
-  ],
-  suppliers: [
-    ["name", "Nom"],
-    ["contact", "Contact"],
-    ["email", "E-mail"],
-    ["phone", "Téléphone"],
-  ],
-  vehicles: [
-    ["plate", "Plaque"],
-    ["employeeId", "Attribué à"],
-    ["brand", "Marque"],
-    ["model", "Modèle"],
-    ["km", "Kilométrage"],
-    ["service", "Entretien"],
-  ],
-  tools: [
-    ["name", "Nom"],
-    ["serial", "N° série"],
-    ["employeeId", "Attribué à"],
-    ["status", "État"],
-  ],
-  maintenance: [
-    ["title", "Contrat"],
-    ["clientId", "Client"],
-    ["frequency", "Fréquence"],
-    ["next", "Prochaine visite"],
-    ["amount", "Valeur annuelle"],
-  ],
-};
+const columns = window.SGOCoreUI.columns;
 const recordDeleteRoles = {
   companies: ["admin", "direction"],
   inventory: ops,
