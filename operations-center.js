@@ -337,9 +337,13 @@
       </div>`;
   }
   async function renderIntegrations() {
-    const out = await get("integrations"),
+    const [out, errorOut] = await Promise.all([
+        get("integrations"),
+        get("errors").catch(() => ({ errors: [] })),
+      ]),
       runtime = out.runtime || {},
-      integrations = out.integrations || [];
+      integrations = out.integrations || [],
+      recentErrors = errorOut.errors || [];
     const rows = [
       ["TURN appels", runtime.turnConfigured],
       ["IA / OCR", runtime.aiConfigured],
@@ -352,6 +356,12 @@
         <p class="muted">Le code de connexion est prêt. Les services payants ou tiers nécessitent leurs propres identifiants.</p>
         <div class="ops-integration-grid">
           ${rows.map(([name, ok]) => `<div class="${ok ? "connected" : "pending"}"><span>${ok ? "✓" : "!"}</span><b>${esc(name)}</b><small>${ok ? "Connecté" : "À configurer"}</small></div>`).join("")}
+        </div>
+      </article>
+      <article class="card">
+        <div class="ops-card-head"><div><h3>Erreurs récentes</h3><p>Journal interne des erreurs serveur 5xx.</p></div><span class="status ${recentErrors.length ? "warning" : "ok"}">${recentErrors.length ? recentErrors.length + " récente(s)" : "Aucune"}</span></div>
+        <div class="ops-simple-list">
+          ${recentErrors.slice(0, 12).map((x) => `<div><span><b>${esc(x.method + " " + x.path)}</b><small>${esc(dt(x.created_at))} · HTTP ${esc(x.status)} · ${esc(x.message || "")}</small></span></div>`).join("") || '<p class="muted">Aucune erreur enregistrée.</p>'}
         </div>
       </article>
       <article class="card">
