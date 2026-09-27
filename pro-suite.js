@@ -12,6 +12,7 @@
   }).format(new Date());
   let cache = {};
   let searchTimer = null;
+  let configLoadedAt = 0;
 
   const core = () => window.SGOChatCore;
   const state = () => core()?.getState?.() || {};
@@ -58,6 +59,59 @@
       ${tabsMarkup()}
       <div id="proBody"></div>
     </section>`;
+  }
+
+  const modulePageMap = {
+    dashboard: "dashboard",
+    employees: "employees",
+    time: "time",
+    planning: "planning",
+    absences: "absences",
+    projects: "projects",
+    clients: "crm",
+    quotes: "quotes",
+    invoices: "invoices",
+    payments: "payments",
+    expenses: "invoices",
+    inventory: "inventory",
+    suppliers: "inventory",
+    vehicles: "vehicles",
+    tools: "tools",
+    maintenance: "maintenance",
+    documents: "documents",
+    messages: "messaging",
+    reports: "reports",
+    pilotage: "crm",
+    advanced: "dashboard",
+    pro: "dashboard",
+  };
+  async function applyWorkspaceConfig(force = false) {
+    if (!profile()?.id) return;
+    if (!force && Date.now() - configLoadedAt < 60000 && cache.workspaceConfig) {
+      applyConfigToUi(cache.workspaceConfig);
+      return;
+    }
+    const cfg = await api("config");
+    cache.workspaceConfig = cfg;
+    configLoadedAt = Date.now();
+    applyConfigToUi(cfg);
+  }
+  function applyConfigToUi(cfg) {
+    if (!cfg) return;
+    document.title = cfg.companyName || "Sousa Group One";
+    if (cfg.accentColor) document.documentElement.style.setProperty("--accent", cfg.accentColor);
+    if (cfg.primaryColor) document.documentElement.style.setProperty("--brand-primary", cfg.primaryColor);
+    if (cfg.logoUrl) {
+      document.querySelectorAll(".brand-logo").forEach((img) => { img.src = cfg.logoUrl; });
+    }
+    document.querySelectorAll(".brand b").forEach((el) => {
+      if (cfg.companyName) el.textContent = String(cfg.companyName).replace(/\s+One$/i, "");
+    });
+    const modules = cfg.modules || {};
+    document.querySelectorAll("#nav [data-page]").forEach((button) => {
+      const moduleKey = modulePageMap[button.dataset.page];
+      button.hidden = !!moduleKey && modules[moduleKey] === false;
+    });
   }
 
   function actionKpi(label, value, action, kind = "") {
@@ -309,6 +363,7 @@
 
   async function afterRender() {
     ensureTopActions();
+    await applyWorkspaceConfig().catch(() => {});
     await dashboardEnhance();
   }
 
@@ -439,6 +494,7 @@
           whiteLabel: { customDomain: fd.get("customDomain"), supportEmail: fd.get("supportEmail"), vatMode: "configurable" },
         });
         core().toast("Configuration enregistrée.");
+        await applyWorkspaceConfig(true);
         await renderSettings();
       }
     } catch (error) {
@@ -455,4 +511,5 @@
   });
 
   window.SGOProSuite = { render, afterRender, openProject, showSearch };
+  setTimeout(() => afterRender().catch(() => {}), 0);
 })();
