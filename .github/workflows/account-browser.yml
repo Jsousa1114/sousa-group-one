@@ -18,6 +18,10 @@ on:
       - service-worker.js
       - test/account.test.js
       - test/account-browser.cjs
+      - db.js
+      - migration-runner.js
+      - migrations/**
+      - file-storage.js
       - .github/workflows/account-browser.yml
 
 permissions:
