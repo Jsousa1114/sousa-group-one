@@ -30,6 +30,32 @@ const isoDate = (value, optional = true) => {
 };
 const companyAllowed = (user, company) =>
   !!company && company !== "group" && D.inCompany(user, company);
+const LIFECYCLE_DEFAULTS = {
+  onboarding: [
+    "Contrat signé et date d’entrée confirmée",
+    "Compte de connexion créé et accès vérifié",
+    "Coordonnées personnelles et contact d’urgence vérifiés",
+    "Permis, autorisations et documents professionnels vérifiés",
+    "Documents RH nécessaires ajoutés au dossier",
+    "Matériel et outillage attribués",
+    "Véhicule, clés et accès physiques attribués si nécessaire",
+    "Planning initial communiqué",
+    "Accueil et consignes de sécurité effectués",
+  ],
+  offboarding: [
+    "Date de fin confirmée",
+    "Planning futur vérifié et retiré si nécessaire",
+    "Heures, absences et solde vacances vérifiés",
+    "Matériel et outillage restitués",
+    "Véhicule, clés et accès physiques restitués",
+    "Documents et dossiers nécessaires archivés",
+    "Accès applicatifs et compte de connexion clôturés",
+    "Dossiers en cours transférés au responsable",
+    "Sortie administrative confirmée",
+  ],
+};
+const lifecyclePhase = (value) =>
+  oneOf(String(value || ""), ["onboarding", "offboarding"], "Phase RH");
 const pageLimit = (value, fallback = 50, max = 200) => {
   const n = Number.parseInt(String(value || ""), 10);
   return Number.isInteger(n) && n > 0 ? Math.min(n, max) : fallback;
@@ -1281,6 +1307,180 @@ function routes(db) {
           ],
         );
       res.json({ ok: true, id });
+    }),
+  );
+
+  r.get(
+    "/hr/lifecycle",
+    wrap(async (req, res) => {
+      if (!D.privileged(req.user, D.HR)) D.fail("Accès RH requis.", 403);
+      const phase = lifecyclePhase(req.query.phase),
+        ctx = await stateContext(db, req.user),
+        employee = ctx.view.employees.find((e) =>
+          D.same(e.id, req.query.employeeId),
+        );
+      if (!employee) D.fail("Salarié inaccessible.", 403);
+      const rows = (
+        await db.query(
+          `SELECT * FROM employee_lifecycle_items
+           WHERE employee_id=$1 AND phase=$2
+           ORDER BY created_at,id`,
+          [String(employee.id), phase],
+        )
+      ).rows;
+      const completed = rows.filter((x) => x.completed).length,
+        required = rows.filter((x) => x.required).length,
+        requiredCompleted = rows.filter((x) => x.required && x.completed).length;
+      res.json({
+        employee: {
+          id: String(employee.id),
+          name: employee.name,
+          company: employee.company,
+          status: employee.status,
+        },
+        phase,
+        items: rows,
+        progress: {
+          total: rows.length,
+          completed,
+          required,
+          requiredCompleted,
+          percent: rows.length ? Math.round((completed / rows.length) * 100) : 0,
+          ready: required > 0 && requiredCompleted === required,
+        },
+      });
+    }),
+  );
+
+  r.post(
+    "/hr/lifecycle/init",
+    wrap(async (req, res) => {
+      if (!D.privileged(req.user, D.HR)) D.fail("Accès RH requis.", 403);
+      const phase = lifecyclePhase(req.body?.phase),
+        ctx = await stateContext(db, req.user),
+        employee = ctx.view.employees.find((e) =>
+          D.same(e.id, req.body?.employeeId),
+        );
+      if (!employee) D.fail("Salarié inaccessible.", 403);
+      const existing = Number(
+        (
+          await db.query(
+            "SELECT COUNT(*)::int AS n FROM employee_lifecycle_items WHERE employee_id=$1 AND phase=$2",
+            [String(employee.id), phase],
+          )
+        ).rows[0]?.n || 0,
+      );
+      if (!existing) {
+        for (const label of LIFECYCLE_DEFAULTS[phase])
+          await db.query(
+            `INSERT INTO employee_lifecycle_items
+             (id,employee_id,company,phase,label,required,created_by)
+             VALUES($1,$2,$3,$4,$5,true,$6)`,
+            [
+              randomUUID(),
+              String(employee.id),
+              employee.company,
+              phase,
+              label,
+              req.user.id,
+            ],
+          );
+      }
+      res.json({ ok: true, created: existing ? 0 : LIFECYCLE_DEFAULTS[phase].length });
+    }),
+  );
+
+  r.post(
+    "/hr/lifecycle/item",
+    wrap(async (req, res) => {
+      if (!D.privileged(req.user, D.HR)) D.fail("Accès RH requis.", 403);
+      const row = (
+        await db.query("SELECT * FROM employee_lifecycle_items WHERE id=$1", [
+          String(req.body?.id || ""),
+        ])
+      ).rows[0];
+      if (!row) D.fail("Étape RH introuvable.", 404);
+      const ctx = await stateContext(db, req.user),
+        employee = ctx.view.employees.find((e) =>
+          D.same(e.id, row.employee_id),
+        );
+      if (!employee) D.fail("Salarié inaccessible.", 403);
+      const completed =
+          typeof req.body?.completed === "boolean"
+            ? req.body.completed
+            : row.completed,
+        label =
+          req.body?.label === undefined
+            ? row.label
+            : clean(req.body.label, 300),
+        required =
+          typeof req.body?.required === "boolean"
+            ? req.body.required
+            : row.required,
+        dueDate =
+          req.body?.dueDate === undefined
+            ? row.due_date
+            : isoDate(req.body.dueDate, true);
+      await db.query(
+        `UPDATE employee_lifecycle_items
+         SET label=$1,required=$2,completed=$3,due_date=$4,
+             completed_by=CASE WHEN $3 THEN $5::int ELSE NULL END,
+             completed_at=CASE WHEN $3 THEN COALESCE(completed_at,NOW()) ELSE NULL END,
+             updated_at=NOW()
+         WHERE id=$6`,
+        [label, required, completed, dueDate, req.user.id, row.id],
+      );
+      res.json({ ok: true, id: row.id });
+    }),
+  );
+
+  r.post(
+    "/hr/lifecycle/add",
+    wrap(async (req, res) => {
+      if (!D.privileged(req.user, D.HR)) D.fail("Accès RH requis.", 403);
+      const phase = lifecyclePhase(req.body?.phase),
+        ctx = await stateContext(db, req.user),
+        employee = ctx.view.employees.find((e) =>
+          D.same(e.id, req.body?.employeeId),
+        );
+      if (!employee) D.fail("Salarié inaccessible.", 403);
+      const id = randomUUID();
+      await db.query(
+        `INSERT INTO employee_lifecycle_items
+         (id,employee_id,company,phase,label,required,due_date,created_by)
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,
+        [
+          id,
+          String(employee.id),
+          employee.company,
+          phase,
+          clean(req.body?.label, 300),
+          req.body?.required !== false,
+          isoDate(req.body?.dueDate, true),
+          req.user.id,
+        ],
+      );
+      res.json({ ok: true, id });
+    }),
+  );
+
+  r.post(
+    "/hr/lifecycle/delete",
+    wrap(async (req, res) => {
+      if (!D.privileged(req.user, D.HR)) D.fail("Accès RH requis.", 403);
+      const row = (
+        await db.query("SELECT * FROM employee_lifecycle_items WHERE id=$1", [
+          String(req.body?.id || ""),
+        ])
+      ).rows[0];
+      if (!row) D.fail("Étape RH introuvable.", 404);
+      const ctx = await stateContext(db, req.user),
+        employee = ctx.view.employees.find((e) =>
+          D.same(e.id, row.employee_id),
+        );
+      if (!employee) D.fail("Salarié inaccessible.", 403);
+      await db.query("DELETE FROM employee_lifecycle_items WHERE id=$1", [row.id]);
+      res.json({ ok: true });
     }),
   );
 

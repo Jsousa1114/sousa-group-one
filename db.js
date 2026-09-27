@@ -181,6 +181,28 @@ async function migrate(db = pool) {
     `CREATE INDEX IF NOT EXISTS user_notifications_user_idx ON user_notifications(user_id,read_at,created_at DESC)`,
   );
   await db.query(
+    `CREATE TABLE IF NOT EXISTS employee_lifecycle_items(
+      id TEXT PRIMARY KEY,
+      employee_id TEXT NOT NULL,
+      company TEXT NOT NULL,
+      phase TEXT NOT NULL CHECK(phase IN ('onboarding','offboarding')),
+      label TEXT NOT NULL,
+      required BOOLEAN NOT NULL DEFAULT true,
+      completed BOOLEAN NOT NULL DEFAULT false,
+      due_date DATE,
+      completed_by INTEGER,
+      completed_at TIMESTAMPTZ,
+      created_by INTEGER,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`,
+  );
+  await db.query(
+    `CREATE INDEX IF NOT EXISTS employee_lifecycle_employee_phase_idx
+     ON employee_lifecycle_items(employee_id,phase,created_at)`,
+  );
+
+  await db.query(
     `CREATE TABLE IF NOT EXISTS project_tasks(
       id TEXT PRIMARY KEY,
       project_id TEXT NOT NULL,
@@ -398,6 +420,11 @@ async function migrate(db = pool) {
   await db.query(
     `INSERT INTO schema_migrations(version) VALUES
       ('2026-09-27-platform-p0-p3-baseline')
+      ON CONFLICT(version) DO NOTHING`,
+  );
+  await db.query(
+    `INSERT INTO schema_migrations(version) VALUES
+      ('2026-09-27-employee-lifecycle')
       ON CONFLICT(version) DO NOTHING`,
   );
   await db.query(
