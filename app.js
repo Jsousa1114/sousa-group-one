@@ -102,6 +102,7 @@ const menus = {
   messages: ["Messages", Object.keys(roles)],
   reports: ["Rapports", [...core, "hr", "accounting", "manager"]],
   pilotage: ["Pilotage", [...core, "hr", "manager", "accounting", "employee"]],
+  pro: ["Centre de gestion", [...core, "hr", "manager", "accounting", "employee"]],
   advanced: ["P2 · Avancé", Object.keys(roles)],
   users: ["Comptes", ["admin"]],
   audit: ["Journal", hr],
@@ -134,7 +135,7 @@ const can = (rs) => {
 };
 const visible = (k) =>
   (state?.[k] || []).filter((x) => {
-    if (k === "employees" && x.deletedAt) return false;
+    if (x.deletedAt && k !== "messages") return false;
     if (!company) return true;
     const employee =
       k === "employees"
@@ -460,6 +461,8 @@ function render() {
   $("content").innerHTML = views[page] ? views[page]() : genericPage(page);
   if (page === "advanced" && window.SGOP2Center?.render)
     window.SGOP2Center.render($("p2Standalone")).catch((e) => notice(e.message));
+  if (page === "pro" && window.SGOProSuite?.render)
+    window.SGOProSuite.render($("proStandalone")).catch((e) => notice(e.message));
   if (
     (page === "users" || page === "employees") &&
     profile.role === "admin" &&
@@ -496,6 +499,7 @@ function render() {
     window.SGOAccountCenter?.afterRender?.();
     window.SGOOperationsCenter?.afterRender?.();
     window.SGOP1Suite?.afterRender?.();
+    window.SGOProSuite?.afterRender?.();
   });
 }
 function projectRows(list) {
@@ -1640,6 +1644,9 @@ const views = {
   pilotage: () =>
     heading("Pilotage") +
     '<div id="operationsCenter"><article class="card"><p>Chargement du pilotage…</p></article></div>',
+  pro: () =>
+    heading("Centre de gestion") +
+    '<div id="proStandalone"><article class="card"><p>Chargement du centre de gestion…</p></article></div>',
   advanced: () =>
     heading("P2 · Avancé") +
     '<div id="p2Standalone"><article class="card"><p>Chargement P2…</p></article></div>',
@@ -2231,6 +2238,7 @@ function projectModal(id) {
   if (!p) return;
   modal(
     p.title,
+    `<button type="button" class="btn primary" data-pro-action="project-central" data-id="${esc(id)}">Fiche chantier centrale</button> ` +
     (can([...ops, ...fin])
       ? btn("Chantier terminé → Facturation", "project-finish", id, "primary")
       : "") +
@@ -3086,18 +3094,27 @@ document.addEventListener("click", async (e) => {
         kind = id.slice(0, split),
         rid = id.slice(split + 1);
       const record = find(kind, rid);
+      const trashable = ["documents", "inventory", "suppliers", "vehicles", "tools", "maintenance"].includes(kind);
       const prompt =
         kind === "messages"
           ? "Masquer ce message pour vous ? Il restera visible pour votre interlocuteur."
-          : `Supprimer définitivement cet élément (${record?.name || record?.title || record?.id || rid}) ? Cette action est irréversible. Les totaux associés seront mis à jour. La suppression peut être bloquée si l’élément est lié à d’autres données.`;
+          : trashable
+            ? `Mettre cet élément (${record?.name || record?.title || record?.id || rid}) dans la corbeille pendant 30 jours ?`
+            : `Supprimer définitivement cet élément (${record?.name || record?.title || record?.id || rid}) ? Cette action est irréversible. Les totaux associés seront mis à jour. La suppression peut être bloquée si l’élément est lié à d’autres données.`;
       if (record && confirm(prompt)) {
-        const result = await mutate("record.delete", { kind, id: rid });
-        if (result)
-          toast(
-            kind === "messages"
-              ? "Message supprimé pour vous."
-              : "Élément supprimé.",
-          );
+        if (trashable) {
+          await api("pro/trash", { kind, id: rid });
+          await refresh();
+          toast("Élément déplacé dans la corbeille.");
+        } else {
+          const result = await mutate("record.delete", { kind, id: rid });
+          if (result)
+            toast(
+              kind === "messages"
+                ? "Message supprimé pour vous."
+                : "Élément supprimé.",
+            );
+        }
       }
     } else if (a === "client-edit") {
       clientEdit(id);
@@ -3106,22 +3123,26 @@ document.addEventListener("click", async (e) => {
       if (
         client &&
         confirm(
-          `Supprimer définitivement le client « ${client.name} » ? Cette action est irréversible. La suppression sera refusée si des données ou un compte de connexion sont liés.`,
+          `Mettre le client « ${client.name} » dans la corbeille pendant 30 jours ? Ses données liées sont conservées.`,
         )
       ) {
-        const result = await mutate("client.delete", { id });
-        if (result) toast("Client supprimé.");
+        await api("pro/trash", { kind: "clients", id });
+        await refresh();
+        closeModal(true);
+        toast("Client déplacé dans la corbeille.");
       }
     } else if (a === "project-delete") {
       const project = find("projects", id);
       if (
         project &&
         confirm(
-          `Supprimer définitivement le chantier « ${project.title} » ? Cette action est irréversible. La suppression sera refusée si des heures, documents ou autres données y sont liés.`,
+          `Mettre le chantier « ${project.title} » dans la corbeille pendant 30 jours ? Les heures, documents, devis et factures liés sont conservés.`,
         )
       ) {
-        const result = await mutate("project.delete", { id });
-        if (result) toast("Chantier supprimé.");
+        await api("pro/trash", { kind: "projects", id });
+        await refresh();
+        closeModal(true);
+        toast("Chantier déplacé dans la corbeille.");
       }
     } else if (a === "project-finish") {
       if (
