@@ -9,6 +9,9 @@ on:
       - state-routes.js
       - db.js
       - test/messaging-browser.cjs
+      - migration-runner.js
+      - migrations/**
+      - file-storage.js
       - .github/workflows/messaging-browser.yml
 
 permissions:
