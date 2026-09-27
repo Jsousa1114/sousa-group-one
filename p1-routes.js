@@ -480,21 +480,91 @@ function routes(db) {
 
   r.get("/status", wrap(async (req,res) => {
     const tables = [
-      "p1_project_milestones","p1_finance_templates","p1_price_catalog","p1_recurring_invoices",
-      "p1_purchase_orders","p1_tool_events","p1_vehicle_events","p1_maintenance_plans"
+      "p1_dashboard_preferences",
+      "p1_project_milestones",
+      "p1_project_photo_meta",
+      "p1_time_policies",
+      "p1_time_geolocation",
+      "p1_finance_templates",
+      "p1_price_catalog",
+      "p1_client_pricing",
+      "p1_recurring_invoices",
+      "p1_credit_notes",
+      "p1_invoice_reminders",
+      "p1_payment_links",
+      "p1_purchase_orders",
+      "p1_inventory_barcodes",
+      "p1_inventory_location_stock",
+      "p1_tool_events",
+      "p1_vehicle_events",
+      "p1_maintenance_plans",
+      "p1_integration_profiles"
     ];
     const counts = {};
     for (const table of tables) counts[table] = Number((await db.query("SELECT COUNT(*)::int n FROM "+table)).rows[0]?.n || 0);
+    const features = {
+      dashboard: true,
+      globalSearch: true,
+      notifications: true,
+      projectTasks: true,
+      kanban: true,
+      milestones: true,
+      checklists: true,
+      dailyReports: true,
+      punchList: true,
+      clientSignatures: true,
+      changeOrders: true,
+      photoAlbumsAnnotations: true,
+      projectQr: true,
+      simplifiedClocking: true,
+      optionalGeolocation: true,
+      automaticBreaks: true,
+      overtimeNightSunday: true,
+      timeApproval: true,
+      payrollExport: true,
+      onboardingOffboarding: true,
+      complianceAlerts: true,
+      employeeHistory: true,
+      workOrders: true,
+      recurringInvoices: true,
+      creditNotes: true,
+      invoiceReminders: true,
+      paymentLinks: true,
+      quoteTemplates: true,
+      priceCatalog: true,
+      clientPricing: true,
+      purchaseOrders: true,
+      stockMovements: true,
+      barcodeQr: true,
+      multipleLocations: true,
+      minimumStockAlerts: true,
+      toolTracking: true,
+      advancedVehicles: true,
+      recurringMaintenance: true,
+      automaticInterventions: true,
+      automaticMaintenanceBilling: true,
+      sla: true,
+      p1Translations: true
+    };
+    const external = {
+      ebill: !!process.env.EBILL_API_KEY,
+      banking: !!process.env.BANKING_API_KEY,
+      bexio: !!process.env.BEXIO_API_TOKEN,
+      abacus: !!process.env.ABACUS_API_TOKEN,
+      winbiz: !!process.env.WINBIZ_API_TOKEN,
+    };
+    const featureValues = Object.values(features);
     res.json({
-      ready: true,
-      counts,
-      external: {
-        ebill: !!process.env.EBILL_API_KEY,
-        banking: !!process.env.BANKING_API_KEY,
-        bexio: !!process.env.BEXIO_API_TOKEN,
-        abacus: !!process.env.ABACUS_API_TOKEN,
-        winbiz: !!process.env.WINBIZ_API_TOKEN,
+      ready: featureValues.every(Boolean),
+      completion: {
+        corePercent: Math.round((featureValues.filter(Boolean).length / featureValues.length) * 100),
+        coreReady: featureValues.every(Boolean),
+        externalConfigured: Object.values(external).filter(Boolean).length,
+        externalTotal: Object.keys(external).length,
       },
+      features,
+      counts,
+      external,
     });
   }));
 
