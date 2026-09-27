@@ -481,6 +481,21 @@ async function migrate(db = pool) {
     `CREATE TABLE IF NOT EXISTS file_contents(id TEXT PRIMARY KEY,content BYTEA NOT NULL)`,
   );
   await db.query(
+    `CREATE TABLE IF NOT EXISTS file_objects(
+      id TEXT PRIMARY KEY,
+      provider TEXT NOT NULL,
+      object_key TEXT NOT NULL,
+      mime TEXT,
+      size BIGINT NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`,
+  );
+  await db.query(
+    `CREATE INDEX IF NOT EXISTS file_objects_provider_idx
+     ON file_objects(provider,updated_at DESC)`,
+  );
+  await db.query(
     `CREATE TABLE IF NOT EXISTS message_reads(
       message_id TEXT NOT NULL,
       user_id INTEGER NOT NULL,
@@ -654,7 +669,8 @@ async function migrate(db = pool) {
   await db.query(
     `INSERT INTO schema_migrations(version) VALUES
       ('2026-09-27-entity-records-mirror'),
-      ('2026-09-27-webauthn-passkeys')
+      ('2026-09-27-webauthn-passkeys'),
+      ('2026-09-27-external-file-storage')
       ON CONFLICT(version) DO NOTHING`,
   );
   // Disable the previously published demo credentials, even on an existing installation.
