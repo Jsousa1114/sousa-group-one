@@ -3486,3 +3486,52 @@ body.offline-mode button[type="submit"],
 body.offline-mode .btn.primary:not([data-account-nav]) {
   opacity:.55;
 }
+
+
+/* Pilotage IA */
+.ops-ai-grid {
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:14px;
+}
+.ops-ai-form {
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:12px;
+  margin-top:12px;
+}
+.ops-ai-form .ops-ai-prompt {
+  grid-column:1/-1;
+}
+.ops-ai-warning {
+  margin:12px 0 0;
+  padding:10px 12px;
+  border:1px solid color-mix(in srgb,#e6a100 35%,var(--border));
+  border-radius:10px;
+  background:color-mix(in srgb,#e6a100 10%,transparent);
+  color:#c88a00;
+  font-size:.68rem;
+}
+.ops-ai-result-card {
+  grid-column:1/-1;
+}
+.ops-ai-result {
+  min-height:180px;
+  max-height:520px;
+  overflow:auto;
+  margin:0;
+  padding:14px;
+  border:1px solid var(--border);
+  border-radius:12px;
+  background:var(--panel2);
+  color:var(--text);
+  white-space:pre-wrap;
+  word-break:break-word;
+  font:inherit;
+  font-size:.7rem;
+  line-height:1.55;
+}
+@media (max-width:800px){
+  .ops-ai-grid,.ops-ai-form{grid-template-columns:1fr;}
+  .ops-ai-form .ops-ai-prompt,.ops-ai-result-card{grid-column:auto;}
+}
