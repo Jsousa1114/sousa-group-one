@@ -657,6 +657,10 @@ function applyCommand(
         salary: fromCents(cents(p.salary)),
         salaryPeriod,
         activity: num(p.activity, "Taux", 1, 100),
+        weeklyHours:
+          p.weeklyHours == null || String(p.weeklyHours).trim() === ""
+            ? 0
+            : num(p.weeklyHours, "Heures hebdomadaires contractuelles", 0, 80),
         vacation: num(p.vacation, "Solde vacances", 0, 366),
         entry: iso(p.entry),
         status: "Actif",
@@ -1160,6 +1164,15 @@ function applyCommand(
         salary: fromCents(cents(value.salary)),
         salaryPeriod,
         activity: num(value.activity, "Taux", 1, 100),
+        weeklyHours:
+          value.weeklyHours == null || String(value.weeklyHours).trim() === ""
+            ? 0
+            : num(
+                value.weeklyHours,
+                "Heures hebdomadaires contractuelles",
+                0,
+                80,
+              ),
         vacation: num(value.vacation, "Solde vacances", 0, 366),
         entry: iso(value.entry),
         ...employeeProfile(value),
