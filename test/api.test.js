@@ -320,7 +320,7 @@ test("message delivery isolates recipients and escapes via UI boundary", async (
   assert.equal((await call("state", client)).data.data.messages.length, 1);
   assert.equal((await call("state", employee)).data.data.messages.length, 0);
 });
-test("identity photos persist and cannot be read or uploaded by employees or clients", async () => {
+test("employees can access their own identity documents while clients remain blocked", async () => {
   const photo =
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=";
   const doc = {
@@ -349,17 +349,24 @@ test("identity photos persist and cannot be read or uploaded by employees or cli
     Buffer.from(photo, "base64"),
   );
   assert.equal(response.headers.get("cache-control"), "no-store");
-  assert.equal((await call("state/documents/" + id, employee)).status, 403);
+  const ownResponse = await fetch(url + "/api/state/documents/" + id, {
+    headers: { Authorization: "Bearer " + employee },
+  });
+  assert.equal(ownResponse.status, 200);
+  assert.deepEqual(
+    Buffer.from(await ownResponse.arrayBuffer()),
+    Buffer.from(photo, "base64"),
+  );
   assert.equal((await call("state/documents/" + id, client)).status, 403);
   assert.equal(
     (
       await call(
         "state/documents",
         employee,
-        payload(await rev(), { payload: doc }),
+        payload(await rev(), { payload: { ...doc, name: "self-upload.png" } }),
       )
     ).status,
-    403,
+    200,
   );
   assert.equal(
     (
