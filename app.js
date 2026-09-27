@@ -470,6 +470,7 @@ function render() {
     window.SGOMessagingSuite?.afterRender?.();
     window.SGOAccountCenter?.afterRender?.();
     window.SGOOperationsCenter?.afterRender?.();
+    window.SGOP1Suite?.afterRender?.();
   });
 }
 function projectRows(list) {
@@ -3219,11 +3220,16 @@ document.addEventListener("click", async (e) => {
       );
     } else if (
       ["clock.start", "clock.pause", "clock.resume", "clock.stop"].includes(a)
-    )
-      await mutate(
-        a,
-        a === "clock.start" ? { project: $("clockProject").value } : {},
-      );
+    ) {
+      const clockPayload =
+        a === "clock.start" ? { project: $("clockProject").value } : {};
+      if (
+        window.SGOP1Suite?.clockAction &&
+        ["clock.start", "clock.stop"].includes(a)
+      )
+        await window.SGOP1Suite.clockAction(a, clockPayload);
+      else await mutate(a, clockPayload);
+    }
     else if (["time.approve", "quote.issue", "invoice.issue"].includes(a))
       await mutate(a, { id });
     else if (a === "quote.accept") {
