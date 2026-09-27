@@ -74,7 +74,7 @@ test("P2 operational endpoints stay wired", () => {
     "/events","/cashflow","/client/:id/history","/appointments",
     "/appointments/:id/decision","/approvals","/approvals/:id/decision",
     "/permissions","/automation-templates","/quote-reminders",
-    "/calendar.ics","/communications/:provider","/api-keys",
+    "/calendar.ics","/calendar/push","/communications/:provider","/api-keys",
   ]) assert.ok(api.includes(endpoint),"missing P2 endpoint: "+endpoint);
   const server=fs.readFileSync("server.js","utf8");
   assert.match(server,/\/api\/p2/);
