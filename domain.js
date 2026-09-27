@@ -278,8 +278,9 @@ function canDocument(d, u, r) {
     return (
       !!e &&
       !e.deletedAt &&
-      privileged(u, HR) &&
-      employeeCompanies(e).some((c) => inCompany(u, c))
+      (same(e.id, u.employee_id) ||
+        (privileged(u, HR) &&
+          employeeCompanies(e).some((c) => inCompany(u, c))))
     );
   }
   if (u.role === "client" && r.visibility !== "client") return false;

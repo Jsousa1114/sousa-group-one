@@ -1,0 +1,41 @@
+name: Test page Mon compte
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - account-center.js
+      - account-routes.js
+      - account-security.js
+      - auth-routes.js
+      - auth-middleware.js
+      - app.js
+      - styles.css
+      - index.html
+      - domain.js
+      - state-routes.js
+      - messaging-routes.js
+      - service-worker.js
+      - test/account.test.js
+      - test/account-browser.cjs
+      - .github/workflows/account-browser.yml
+
+permissions:
+  contents: read
+
+jobs:
+  account-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install app and Chromium
+        run: |
+          npm ci
+          npm install --no-save playwright
+          npx playwright install --with-deps chromium
+      - name: Test Mon compte on desktop and phone
+        run: node test/account-browser.cjs

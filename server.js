@@ -25,6 +25,7 @@ function createApp(db = pool) {
     }
   });
   app.use("/api/auth", require("./auth-routes").routes(db));
+  app.use("/api/account", require("./account-routes").routes(db));
   app.use("/api/state", require("./state-routes").routes(db));
   app.use("/api/messaging", require("./messaging-routes").routes(db));
   app.get(["/favicon.ico", "/icon.svg"], (req, res) => {
@@ -37,6 +38,7 @@ function createApp(db = pool) {
     "finance.js",
     "messaging-crypto.js",
     "messaging-suite.js",
+    "account-center.js",
     "styles.css",
     "manifest.webmanifest",
     "service-worker.js",

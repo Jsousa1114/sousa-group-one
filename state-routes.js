@@ -415,6 +415,12 @@ function routes(db) {
             encodeURIComponent("thread:" + systemPush.threadId),
           tag: "project-" + systemPush.messageId,
           conversationKey: "thread:" + systemPush.threadId,
+          category:
+            req.body.action === "create" && req.body.collection === "planning"
+              ? "planning"
+              : /^(quote|invoice)\./.test(String(req.body.action || ""))
+                ? "finance"
+                : "projects",
         }).catch(() => {});
       res.json(out);
     }),
@@ -839,7 +845,19 @@ function routes(db) {
     "/messages/read",
     wrap(async (req, res) => {
       const p = req.body?.payload || {},
-        row = (
+        prefRow = (
+          await db.query("SELECT data FROM account_preferences WHERE user_id=$1", [
+            req.user.id,
+          ])
+        ).rows[0];
+      if (prefRow?.data?.privacy?.readReceipts === false)
+        return res.json({
+          result: { changed: 0, disabled: true },
+          revision: (
+            await db.query("SELECT revision FROM app_state WHERE id=1")
+          ).rows[0].revision,
+        });
+      const row = (
           await db.query("SELECT data,revision FROM app_state WHERE id=1")
         ).rows[0],
         visible = D.viewState(row.data, req.user);
@@ -1148,13 +1166,20 @@ function routes(db) {
                   "Passeport",
                   "Permis de conduire",
                   "Permis de séjour",
+                  "Contrat",
+                  "CFC",
+                  "Certificat",
+                  "Formation",
+                  "Attestation",
                   "Autre justificatif",
+                  "Autre document RH",
                 ].includes(p.documentType)
               )
                 D.fail("Type de justificatif invalide.");
               m.category = "identity";
               m.documentType = p.documentType;
               m.description = D.text(p.description, "Description", 200, true);
+              m.expiresAt = p.expiresAt ? D.iso(p.expiresAt) : "";
               m.visibility = "hr";
             }
             if (m.visibility === "client" && !D.privileged(req.user, D.OPS))

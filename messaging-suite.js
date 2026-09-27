@@ -1019,6 +1019,28 @@
     const content = $("content"),
       me = profile();
     if (!content || core().getPage() !== "settings" || !me) return;
+    if (content.querySelector("#accountCenter")) {
+      if (me.role === "admin" && !content.querySelector(".suite-system-settings")) {
+        const card = document.createElement("article");
+        card.className = "card section suite-system-settings";
+        card.innerHTML =
+          '<h3>Administration système</h3>' +
+          '<p id="suiteTurnStatus" class="muted">Relais TURN : vérification…</p>' +
+          '<div id="suiteRetentionSettings" class="spaced"><h4>Conservation des communications</h4><p class="muted">Chargement…</p></div>';
+        content.querySelector("#accountCenter")?.appendChild(card);
+      }
+      const turnStatus = $("suiteTurnStatus");
+      if (turnStatus) {
+        const callConfig = await core().api("state/calls/config").catch(() => null);
+        turnStatus.textContent =
+          "Relais TURN : " +
+          (callConfig?.turnAvailable
+            ? "configuré — appels renforcés sur les réseaux restrictifs"
+            : "non configuré — STUN uniquement");
+      }
+      if (me.role === "admin") await renderRetention();
+      return;
+    }
     if (!content.querySelector(".suite-messaging-settings")) {
       const card = document.createElement("article");
       card.className = "card section suite-messaging-settings";

@@ -16,9 +16,26 @@ function auth(db) {
         return res
           .status(401)
           .json({ error: "Session expirée. Reconnectez-vous." });
+      if (claims.sid) {
+        const session = (
+          await db.query(
+            "SELECT id FROM user_sessions WHERE id=$1 AND user_id=$2 AND revoked_at IS NULL",
+            [claims.sid, u.id],
+          )
+        ).rows[0];
+        if (!session)
+          return res
+            .status(401)
+            .json({ error: "Cette session a été déconnectée." });
+        await db.query(
+          "UPDATE user_sessions SET last_seen=NOW() WHERE id=$1 AND last_seen < NOW()-INTERVAL '1 minute'",
+          [claims.sid],
+        );
+      }
       const data = (await db.query("SELECT data FROM app_state WHERE id=1"))
         .rows[0]?.data;
       req.user = require("./domain").effectiveUser(data || {}, u);
+      req.authClaims = claims;
       next();
     } catch (e) {
       if (

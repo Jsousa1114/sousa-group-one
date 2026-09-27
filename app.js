@@ -18,12 +18,13 @@ const money = (n) =>
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(Number(n) || 0);
-const date = (v) =>
-  v
-    ? new Date(v.length === 10 ? v + "T12:00:00" : v).toLocaleDateString(
-        "fr-CH",
-      )
-    : "—";
+const date = (v) => {
+  if (!v) return "—";
+  const value = new Date(v.length === 10 ? v + "T12:00:00" : v);
+  return window.SGOAccountPreferences?.dateFormat === "ISO"
+    ? value.toISOString().slice(0, 10)
+    : value.toLocaleDateString("fr-CH");
+};
 const today = () =>
   new Intl.DateTimeFormat("en-CA", {
     timeZone: "Europe/Zurich",
@@ -185,6 +186,7 @@ async function api(path, body) {
     if (r.status === 401 && path !== "auth/login") clearSession();
     const e = new Error(data.error || "Réponse serveur invalide.");
     e.status = r.status;
+    e.code = data.code || "";
     throw e;
   }
   return data;
@@ -322,17 +324,24 @@ $("loginForm").onsubmit = async (e) => {
     const out = await api("auth/login", {
       email: $("email").value,
       password: $("password").value,
+      totpCode: $("totpCode")?.value || "",
     });
     token = out.token;
     sessionStorage.setItem("sgo_session", token);
     await refresh(false);
     $("password").value = "";
+    if ($("totpCode")) $("totpCode").value = "";
+    $("totpWrap")?.classList.add("hidden");
     $("login").classList.add("hidden");
     $("app").classList.remove("hidden");
     render();
   } catch (err) {
     $("loginError").textContent = err.message;
-    clearSession();
+    if (err.code === "TOTP_REQUIRED") {
+      $("totpWrap")?.classList.remove("hidden");
+      $("totpCode").required = true;
+      $("totpCode").focus();
+    } else clearSession();
   } finally {
     b.disabled = false;
   }
@@ -423,7 +432,10 @@ function render() {
     hydrateChatAttachments();
     queueMicrotask(() => markChatRead());
   }
-  queueMicrotask(() => window.SGOMessagingSuite?.afterRender?.());
+  queueMicrotask(() => {
+    window.SGOMessagingSuite?.afterRender?.();
+    window.SGOAccountCenter?.afterRender?.();
+  });
 }
 function projectRows(list) {
   return table(
@@ -861,7 +873,13 @@ async function hydrateChatAttachments() {
   }
 }
 async function markChatRead() {
-  if (!token || pending || page !== "messages") return;
+  if (
+    !token ||
+    pending ||
+    page !== "messages" ||
+    window.SGOAccountPreferences?.privacy?.readReceipts === false
+  )
+    return;
   const payload = selectedThreadId
     ? { threadId: selectedThreadId }
     : { recipientId: selectedRecipient };
@@ -1576,7 +1594,7 @@ const views = {
     heading("Journal serveur") + '<div id="auditList">Chargement…</div>',
   settings: () =>
     heading("Mon compte") +
-    `<article class="card"><p>${esc(profile.email)}</p><p>Authentification : mot de passe. Double authentification non configurée.</p>${btn("Changer mon mot de passe", "password-form")}<p class="muted">Les sauvegardes de la base et des fichiers doivent être configurées chez l’hébergeur. Aucun statut de sauvegarde automatique n’est présumé.</p></article>`,
+    '<div id="accountCenter" class="account-center-loading"><article class="card"><p>Chargement de votre compte…</p></article></div>',
 };
 const columns = {
   companies: [
@@ -3603,6 +3621,20 @@ window.SGOChatCore = {
   getProfile: () => profile,
   getContacts: () => contacts,
   getPage: () => page,
+  setPage: (next) => {
+    if (menus[next]?.[1]?.includes(profile?.role)) {
+      page = next;
+      render();
+    }
+  },
+  setCompany: (next) => {
+    const value = String(next || "");
+    if (!value || state?.companies?.some((c) => c.id === value)) {
+      company = value;
+      render();
+    }
+  },
+  getCompany: () => company,
   getRevision: () => revision,
   canRefreshMessages: () =>
     !pending &&

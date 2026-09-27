@@ -25,6 +25,8 @@ self.addEventListener("push", (event) => {
       badge: "/assets/logos/group.png?v=push-20260927",
       tag: data.tag || "sgo-notification",
       renotify: !!data.tag,
+      silent: !!data.silent,
+      vibrate: Array.isArray(data.vibrate) ? data.vibrate : [180, 90, 180],
       data: {
         url: data.url || "/",
         conversationKey: data.conversationKey || "",
