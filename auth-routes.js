@@ -3,11 +3,35 @@ const express = require("express"),
   bcrypt = require("bcryptjs"),
   jwt = require("jsonwebtoken");
 const { randomUUID } = require("node:crypto");
-const { verifyTotp, hashRecoveryCode } = require("./account-security");
+const {
+  verifyTotp,
+  hashRecoveryCode,
+  decryptTotpSecret,
+  encryptTotpSecret,
+  isEncryptedTotpSecret,
+} = require("./account-security");
 const { auth, profile } = require("./auth-middleware");
 const { AppError, text } = require("./domain");
 const wrap = (fn) => (req, res, next) =>
   Promise.resolve(fn(req, res, next)).catch(next);
+const SESSION_COOKIE = "sgo_session";
+function sessionCookieOptions(req) {
+  return {
+    httpOnly: true,
+    secure:
+      process.env.COOKIE_SECURE === "true" ||
+      !!process.env.RENDER ||
+      !!req.secure,
+    sameSite: "strict",
+    path: "/",
+    maxAge: 8 * 60 * 60 * 1000,
+  };
+}
+function clearSessionCookie(res, req) {
+  const options = sessionCookieOptions(req);
+  delete options.maxAge;
+  res.clearCookie(SESSION_COOKIE, options);
+}
 function routes(db) {
   const router = express.Router(),
     attempts = new Map();
@@ -39,14 +63,16 @@ function routes(db) {
         !(await bcrypt.compare(password, u.password_hash))
       )
         throw new AppError("E-mail ou mot de passe incorrect.", 401);
+      let shouldEncryptTotp = false;
       if (u.totp_enabled) {
         if (!req.body?.totpCode)
           return res.status(401).json({
             error: "Code de double authentification ou code de secours requis.",
             code: "TOTP_REQUIRED",
           });
-        const secondFactor = String(req.body.totpCode || "");
-        if (!verifyTotp(u.totp_secret, secondFactor)) {
+        const secondFactor = String(req.body.totpCode || ""),
+          totpSecret = decryptTotpSecret(u.totp_secret);
+        if (!verifyTotp(totpSecret, secondFactor)) {
           const recoveryHash = hashRecoveryCode(secondFactor),
             used = (
               await db.query(
@@ -62,8 +88,17 @@ function routes(db) {
               401,
             );
         }
+        shouldEncryptTotp =
+          !!process.env.TOTP_ENCRYPTION_KEY &&
+          !!u.totp_secret &&
+          !isEncryptedTotpSecret(u.totp_secret);
       }
       attempts.delete(key);
+      if (shouldEncryptTotp)
+        await db.query("UPDATE users SET totp_secret=$1 WHERE id=$2", [
+          encryptTotpSecret(u.totp_secret),
+          u.id,
+        ]);
       const sid = randomUUID(),
         token = jwt.sign(
           { sv: u.session_version, sid },
@@ -109,6 +144,7 @@ function routes(db) {
           category: "security",
         })
         .catch(() => {});
+      res.cookie(SESSION_COOKIE, token, sessionCookieOptions(req));
       res.json({ token, profile: profile(u) });
     }),
   );
@@ -127,6 +163,7 @@ function routes(db) {
           "UPDATE users SET session_version=session_version+1 WHERE id=$1",
           [req.user.id],
         );
+      clearSessionCookie(res, req);
       res.json({ ok: true });
     }),
   );
