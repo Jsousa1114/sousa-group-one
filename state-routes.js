@@ -415,6 +415,12 @@ function routes(db) {
             encodeURIComponent("thread:" + systemPush.threadId),
           tag: "project-" + systemPush.messageId,
           conversationKey: "thread:" + systemPush.threadId,
+          category:
+            req.body.action === "create" && req.body.collection === "planning"
+              ? "planning"
+              : /^(quote|invoice)\./.test(String(req.body.action || ""))
+                ? "finance"
+                : "projects",
         }).catch(() => {});
       res.json(out);
     }),
