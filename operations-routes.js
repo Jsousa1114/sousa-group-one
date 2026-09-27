@@ -1364,6 +1364,22 @@ function routes(db) {
   );
 
   r.get(
+    "/errors",
+    wrap(async (req, res) => {
+      if (!D.privileged(req.user, ["admin", "direction"]))
+        D.fail("Accès administrateur requis.", 403);
+      const rows = (
+        await db.query(
+          `SELECT id,request_id,user_id,method,path,status,message,metadata,created_at
+           FROM application_errors
+           ORDER BY created_at DESC LIMIT 200`,
+        )
+      ).rows;
+      res.json({ errors: rows });
+    }),
+  );
+
+  r.get(
     "/integrations",
     wrap(async (req, res) => {
       if (!D.privileged(req.user, D.STAFF)) D.fail("Accès direction requis.", 403);
