@@ -7,6 +7,7 @@ const { auth, profile } = require("./auth-middleware"),
   { mutate, loadState } = require("./db");
 const D = require("./domain");
 const { notifyUsers } = require("./messaging-routes");
+const { putFile, getFile, deleteFile } = require("./file-storage");
 function routes(db) {
   const r = express.Router();
   r.use(auth(db));
@@ -372,9 +373,7 @@ function routes(db) {
               D.fail("Cette entreprise possède encore des comptes liés.");
           }
           if (req.body.payload?.kind === "documents")
-            await c.query("DELETE FROM file_contents WHERE id=$1", [
-              String(result.id),
-            ]);
+            await deleteFile(c, String(result.id));
         }
         Object.assign(d, data);
         const event = commandProjectAndText(
@@ -742,11 +741,7 @@ function routes(db) {
         ).rows[0];
       if (override?.deleted_for_all) D.fail("Pièce jointe supprimée.", 404);
       if (!msg?.attachment?.fileId) D.fail("Pièce jointe introuvable.", 404);
-      const file = (
-        await db.query("SELECT content FROM file_contents WHERE id=$1", [
-          msg.attachment.fileId,
-        ])
-      ).rows[0];
+      const file = await getFile(db, msg.attachment.fileId);
       if (!file) D.fail("Pièce jointe introuvable.", 404);
       res
         .set({
@@ -757,7 +752,7 @@ function routes(db) {
           "Cache-Control": "private, no-store",
           "X-Content-Type-Options": "nosniff",
         })
-        .send(Buffer.from(file.content));
+        .send(file);
     }),
   );
   r.post(
@@ -1056,10 +1051,7 @@ function routes(db) {
             if (!content.length || content.length > 5 * 1024 * 1024)
               D.fail("Pièce jointe de 5 Mo maximum.");
             const fileId = randomUUID();
-            await c.query(
-              "INSERT INTO file_contents(id,content) VALUES($1,$2)",
-              [fileId, content],
-            );
+            await putFile(c, fileId, content);
             attachment = {
               fileId,
               name,
@@ -1236,10 +1228,7 @@ function routes(db) {
             }
             m.mime = mime;
             m.size = bytes.length;
-            await c.query(
-              "INSERT INTO file_contents(id,content) VALUES($1,$2)",
-              [m.id, bytes],
-            );
+            await putFile(c, m.id, bytes);
             d.documents.push(m);
             return { id: m.id };
           },
@@ -1496,9 +1485,7 @@ function routes(db) {
       const d = D.normalize(row.data),
         m = D.ref(d, "documents", req.params.id);
       if (!D.canDocument(d, req.user, m)) D.fail("Accès refusé.", 403);
-      const file = (
-        await db.query("SELECT content FROM file_contents WHERE id=$1", [m.id])
-      ).rows[0];
+      const file = await getFile(db, m.id);
       if (!file) D.fail("Fichier introuvable.", 404);
       res
         .set({
@@ -1507,7 +1494,7 @@ function routes(db) {
           "Cache-Control": "no-store",
           "X-Content-Type-Options": "nosniff",
         })
-        .send(Buffer.from(file.content));
+        .send(file);
     }),
   );
   return r;
