@@ -185,6 +185,7 @@ async function api(path, body) {
     if (r.status === 401 && path !== "auth/login") clearSession();
     const e = new Error(data.error || "Réponse serveur invalide.");
     e.status = r.status;
+    e.code = data.code || "";
     throw e;
   }
   return data;
@@ -322,17 +323,24 @@ $("loginForm").onsubmit = async (e) => {
     const out = await api("auth/login", {
       email: $("email").value,
       password: $("password").value,
+      totpCode: $("totpCode")?.value || "",
     });
     token = out.token;
     sessionStorage.setItem("sgo_session", token);
     await refresh(false);
     $("password").value = "";
+    if ($("totpCode")) $("totpCode").value = "";
+    $("totpWrap")?.classList.add("hidden");
     $("login").classList.add("hidden");
     $("app").classList.remove("hidden");
     render();
   } catch (err) {
     $("loginError").textContent = err.message;
-    clearSession();
+    if (err.code === "TOTP_REQUIRED") {
+      $("totpWrap")?.classList.remove("hidden");
+      $("totpCode").required = true;
+      $("totpCode").focus();
+    } else clearSession();
   } finally {
     b.disabled = false;
   }
@@ -423,7 +431,10 @@ function render() {
     hydrateChatAttachments();
     queueMicrotask(() => markChatRead());
   }
-  queueMicrotask(() => window.SGOMessagingSuite?.afterRender?.());
+  queueMicrotask(() => {
+    window.SGOMessagingSuite?.afterRender?.();
+    window.SGOAccountCenter?.afterRender?.();
+  });
 }
 function projectRows(list) {
   return table(
@@ -1576,7 +1587,7 @@ const views = {
     heading("Journal serveur") + '<div id="auditList">Chargement…</div>',
   settings: () =>
     heading("Mon compte") +
-    `<article class="card"><p>${esc(profile.email)}</p><p>Authentification : mot de passe. Double authentification non configurée.</p>${btn("Changer mon mot de passe", "password-form")}<p class="muted">Les sauvegardes de la base et des fichiers doivent être configurées chez l’hébergeur. Aucun statut de sauvegarde automatique n’est présumé.</p></article>`,
+    '<div id="accountCenter" class="account-center-loading"><article class="card"><p>Chargement de votre compte…</p></article></div>',
 };
 const columns = {
   companies: [
