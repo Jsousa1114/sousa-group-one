@@ -125,8 +125,9 @@ async function visitAll(page, expectedPages, mobile=false){
     await admin.page.locator("#modalWrap:not(.hidden)").waitFor();
     admin.page.once("dialog",dialog=>dialog.accept());
     await admin.page.locator('[data-action="project-delete"]').click();
+    await admin.page.locator("#modalWrap").waitFor({state:"hidden"});
     await admin.page.waitForTimeout(120);
-    assert.equal(await admin.page.getByText("Chantier supprimable",{exact:true}).count(),0);
+    assert.equal(await admin.page.locator("tr").filter({hasText:"Chantier supprimable"}).count(),0);
 
     await admin.page.locator('[data-page="pilotage"]').click();
     await admin.page.locator(".ops-center").waitFor({timeout:10000});
