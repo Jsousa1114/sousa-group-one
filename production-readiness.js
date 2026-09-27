@@ -19,6 +19,7 @@ function turnConfigured() {
 async function readiness(db) {
   let database = false;
   let schema = false;
+  let errorRateHealthy = true;
   try {
     await db.query("SELECT 1");
     database = true;
@@ -26,6 +27,14 @@ async function readiness(db) {
       "SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='schema_migrations' LIMIT 1"
     );
     schema = !!row.rows.length;
+    if (schema) {
+      const errors = await db.query(
+        `SELECT COUNT(*)::int AS count
+         FROM application_errors
+         WHERE status>=500 AND created_at > NOW()-INTERVAL '15 minutes'`,
+      );
+      errorRateHealthy = Number(errors.rows[0]?.count || 0) < 5;
+    }
   } catch {
     database = false;
   }
@@ -36,6 +45,7 @@ async function readiness(db) {
       process.env.COOKIE_SECURE === "true" || !!process.env.RENDER,
     webauthn:
       configured("WEBAUTHN_RP_ID") && configured("WEBAUTHN_ORIGIN"),
+    errorRateHealthy,
     totpEncryption: configured("TOTP_ENCRYPTION_KEY"),
     turn: turnConfigured(),
     objectStorage: objectStorageConfigured(),
@@ -45,7 +55,13 @@ async function readiness(db) {
       objectStorageConfigured() &&
       String(process.env.BACKUP_OBJECT_PREFIX || "backups").trim().length > 0,
   };
-  const critical = ["database", "schema", "secureCookies", "webauthn"];
+  const critical = [
+    "database",
+    "schema",
+    "secureCookies",
+    "webauthn",
+    "errorRateHealthy",
+  ];
   const recommended = [
     "totpEncryption",
     "turn",
