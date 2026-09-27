@@ -114,10 +114,9 @@ async function noOverflow(page,label) {
     assert.equal(await privacy.locator('[name="readReceipts"]').isChecked(), false);
     await privacy.locator('button[type="submit"]').click();
     await dp.waitForTimeout(250);
-    const pref = await dp.evaluate(async () => {
-      const token=sessionStorage.getItem("sgo_session");
-      return fetch("/api/account/preferences",{headers:{Authorization:"Bearer "+token}}).then(r=>r.json());
-    });
+    const pref = await dp.evaluate(async () =>
+      fetch("/api/account/preferences", { credentials: "same-origin" }).then((r) => r.json())
+    );
     assert.equal(pref.preferences.privacy.online,false);
     assert.equal(pref.preferences.privacy.readReceipts,false);
 
