@@ -106,8 +106,12 @@ async function noOverflow(page,label) {
     assert.match(await dp.locator("#accountCenter").innerText(), /Nyon/);
 
     const privacy = dp.locator("#accountPrivacyForm");
-    await privacy.locator('[name="online"]').uncheck();
-    await privacy.locator('[name="readReceipts"]').uncheck();
+    const onlineToggle = privacy.locator('label.account-switch:has(input[name="online"])');
+    const readToggle = privacy.locator('label.account-switch:has(input[name="readReceipts"])');
+    if (await privacy.locator('[name="online"]').isChecked()) await onlineToggle.click();
+    if (await privacy.locator('[name="readReceipts"]').isChecked()) await readToggle.click();
+    assert.equal(await privacy.locator('[name="online"]').isChecked(), false);
+    assert.equal(await privacy.locator('[name="readReceipts"]').isChecked(), false);
     await privacy.locator('button[type="submit"]').click();
     await dp.waitForTimeout(250);
     const pref = await dp.evaluate(async () => {
