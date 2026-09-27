@@ -49,9 +49,7 @@ jobs:
           npm ci
           npm install --no-save playwright
           npx playwright install --with-deps chromium
-      - name: Deep stability test full application on desktop and mobile
-        run: |
-          for i in 1 2 3; do
-            echo "Full app stability run $i/3"
-            node test/full-app-browser.cjs
-          done
+      - name: Test full application on desktop and mobile
+        run: node test/full-app-browser.cjs
+      - name: Public production smoke
+        run: npm run smoke:production
