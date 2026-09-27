@@ -98,13 +98,15 @@ absences et chantiers affectés. Les messages sont réservés aux participants.
 
 `GET /api/state` renvoie une projection filtrée. L'ancien `POST /api/state` est
 refusé. Les modifications passent par `/api/state/command` ou une route dédiée,
-avec une révision et un identifiant de requête. Les collections métier normalisées
-dans `entity_records` sont la source de lecture canonique ; `app_state` est
-conservé comme snapshot de compatibilité et compteur de révision pendant la
-transition. Le serveur verrouille la révision dans une transaction : une vue
-périmée reçoit HTTP 409 et le formulaire reste ouvert. Une répétition identique
-après perte de réponse n'est pas réappliquée. Les nouvelles évolutions de schéma
-passent par les fichiers SQL versionnés du dossier `migrations/`.
+avec une révision et un identifiant de requête. Chaque collection métier possède
+désormais sa propre table PostgreSQL (`sg_clients`, `sg_projects`,
+`sg_time_entries`, `sg_planning`, `sg_invoices`, etc.) et ces tables sont la
+source de lecture canonique. `entity_records` reste un miroir générique utile
+pour la transition et `app_state` n'est plus qu'un snapshot de compatibilité et
+compteur de révision. Le serveur verrouille la révision dans une transaction :
+une vue périmée reçoit HTTP 409 et le formulaire reste ouvert. Une répétition
+identique après perte de réponse n'est pas réappliquée. Les nouvelles évolutions
+de schéma passent par les fichiers SQL versionnés du dossier `migrations/`.
 
 Les comptes de démonstration ne sont plus créés. Les sessions navigateur utilisent
 des cookies Secure/HttpOnly ; les sessions sont révocables et les intégrations
