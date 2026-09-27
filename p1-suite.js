@@ -350,7 +350,16 @@
     try{
       const out=await api("dashboard"), prefs=out.preferences||{};
       const planning=prefs.showPlanning===false?"":`<article class="card"><h3>Prochaines interventions</h3><div class="p1-list">${(out.planning||[]).map(x=>`<div><span><b>${esc(projects().find(p=>String(p.id)===String(x.project))?.title||x.project)}</b><small>${date(x.date)} · ${esc(x.start)}–${esc(x.end)}</small></span></div>`).join("")||"<p>Aucune intervention planifiée.</p>"}</div></article>`;
-      content.insertAdjacentHTML("afterbegin",`<section class="p1-dashboard-extra ${prefs.compact?"compact":""}"><div class="p1-dashboard-head"><span>P1 · Tableau personnalisé</span>${btn("Personnaliser","dashboard-settings")}</div><div class="p1-dashboard-grid"><article class="card"><h3>Notifications</h3><b class="p1-big">${esc(out.kpis?.unread||0)}</b><small>non lues</small></article>${planning}</div></section>`);
+      const changeOrders = profile().role==="client" && (out.clientActions?.changeOrders||[]).length
+        ? `<article class="card"><h3>Plus-values à valider</h3><div class="p1-list">${out.clientActions.changeOrders.map(x=>`<div><span><b>${esc(x.title)} · ${money(x.amount)}</b><small>${esc(x.description||"")}</small></span>${btn("Approuver","client-change-approve",`data-id="${esc(x.id)}" data-project="${esc(x.project_id)}"`,"primary")}</div>`).join("")}</div></article>`
+        : "";
+      const workToSign = profile().role==="client"
+        ? (out.clientActions?.workOrders||[]).filter(x=>!x.customer_signature)
+        : [];
+      const signatures = workToSign.length
+        ? `<article class="card"><h3>Bons de travail à signer</h3><div class="p1-list">${workToSign.map(x=>`<div><span><b>${esc(x.title)}</b><small>${esc(x.description||"")} · ${date(x.scheduled_at)}</small></span>${btn("Signer","client-work-sign",`data-id="${esc(x.id)}"`,"primary")}</div>`).join("")}</div></article>`
+        : "";
+      content.insertAdjacentHTML("afterbegin",`<section class="p1-dashboard-extra ${prefs.compact?"compact":""}"><div class="p1-dashboard-head"><span>P1 · Tableau personnalisé</span>${btn("Personnaliser","dashboard-settings")}</div><div class="p1-dashboard-grid"><article class="card"><h3>Notifications</h3><b class="p1-big">${esc(out.kpis?.unread||0)}</b><small>non lues</small></article>${planning}${changeOrders}${signatures}</div></section>`);
     }catch{}
   }
 
@@ -394,6 +403,16 @@
       else if(a==="maintenance-plan")openForm("maintenance-plan");
       else if(a==="integration")openForm("integration",{provider:b.dataset.provider});
       else if(a==="run-jobs"){const out=await api("run-jobs",{});core().toast(`Jobs terminés : ${out.invoices} facture(s), ${out.maintenance} maintenance(s), ${out.reminders} relance(s).`);}
+      else if(a==="client-change-approve"){
+        if(confirm("Approuver cette plus-value ?")){
+          await opsApi("project/"+encodeURIComponent(b.dataset.project)+"/change-order",{action:"approve",id:b.dataset.id});
+          core().toast("Plus-value approuvée.");
+          await core().refresh();
+        }
+      }
+      else if(a==="client-work-sign"){
+        modal("Signer le bon de travail",`<form id="p1Form" data-kind="client-work-sign" data-id="${esc(b.dataset.id)}"><label>Nom du signataire<input name="signature" required maxlength="500" value="${esc(profile().name||"")}"></label><p>En enregistrant, vous confirmez la validation du bon de travail.</p><button class="btn primary" type="submit">Signer</button></form>`);
+      }
       else if(a==="dashboard-settings"){
         const out=await api("dashboard"),p=out.preferences||{};
         modal("Personnaliser le tableau de bord",`<form id="p1Form" data-kind="dashboard-settings"><label class="p1-check"><input type="checkbox" name="compact" ${p.compact?"checked":""}> Mode compact</label><label class="p1-check"><input type="checkbox" name="showPlanning" ${p.showPlanning!==false?"checked":""}> Afficher les prochaines interventions</label><label class="p1-check"><input type="checkbox" name="showAlerts" ${p.showAlerts!==false?"checked":""}> Afficher les alertes</label><button class="btn primary" type="submit">Enregistrer</button></form>`);
@@ -411,6 +430,11 @@
       const fd=new FormData(e.target);
       await api("dashboard/preferences",{compact:fd.get("compact")==="on",showPlanning:fd.get("showPlanning")==="on",showAlerts:fd.get("showAlerts")==="on"});
       core().closeModal(true);await core().render();return;
+    }
+    if(e.target.dataset.kind==="client-work-sign"){
+      const fd=new FormData(e.target);
+      await api("client/work-order/"+encodeURIComponent(e.target.dataset.id)+"/sign",{signature:fd.get("signature")});
+      core().closeModal(true);core().toast("Bon de travail signé.");await core().refresh();return;
     }
     await submit(e.target);
   });
