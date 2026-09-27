@@ -151,7 +151,7 @@
     ]);
     cache.timePolicy=policy.policy;
     root.querySelector("#p1Body").innerHTML=`
-      <div class="p1-toolbar"><label>Entreprise<select id="p1TimeCompany">${companyOptions(selectedCompany)}</select></label></div>
+      <div class="p1-toolbar"><label>Entreprise<select id="p1TimeCompany">${companyOptions(selectedCompany)}</select></label><div>${hr()?btn("Historique salarié","employee-history"):""}</div></div>
       <div class="p1-grid-2">
         ${card("Règles de pointage",`<form id="p1Form" data-kind="time-policy">
           <input type="hidden" name="company" value="${esc(selectedCompany)}">
@@ -170,7 +170,7 @@
     root.querySelector("#p1Body").innerHTML=`
       <div class="p1-actions">${btn("Modèle devis","finance-template","","primary")} ${btn("Prestation / prix","finance-catalog")} ${btn("Prix client","client-pricing")} ${btn("Facture récurrente","recurring-invoice")} ${btn("Avoir","credit-note")} ${btn("Lien paiement","payment-link")} ${btn("Lancer relances","run-reminders")}</div>
       <div class="p1-grid-2">
-        ${card("Modèles de devis",`<div class="p1-list">${(out.templates||[]).map(x=>`<div><span><b>${esc(x.name)}</b><small>${esc(x.company)} · ${x.lines?.length||0} ligne(s)</small></span></div>`).join("")||"<p>Aucun modèle.</p>"}</div>`)}
+        ${card("Modèles de devis",`<div class="p1-list">${(out.templates||[]).map(x=>`<div><span><b>${esc(x.name)}</b><small>${esc(x.company)} · ${x.lines?.length||0} ligne(s)</small></span>${btn("Créer devis","template-quote",`data-id="${esc(x.id)}"`,"primary")}</div>`).join("")||"<p>Aucun modèle.</p>"}</div>`)}
         ${card("Catalogue prestations / prix",`<div class="p1-list">${(out.catalog||[]).map(x=>`<div><span><b>${esc(x.name)}</b><small>${esc(x.sku||"")} · ${money(x.price)} / ${esc(x.unit)}</small></span></div>`).join("")||"<p>Aucune prestation.</p>"}</div>`)}
         ${card("Factures récurrentes",`<div class="p1-list">${(out.recurring||[]).map(x=>`<div><span><b>${esc(x.title)}</b><small>${esc(x.frequency)} · prochaine ${date(x.next_run)} · ${x.active?"active":"inactive"}</small></span></div>`).join("")||"<p>Aucune récurrence.</p>"}</div>`)}
         ${card("Avoirs",`<div class="p1-list">${(out.credits||[]).map(x=>`<div><span><b>${esc(x.number)} · ${money(x.amount)}</b><small>${esc(x.invoice_id)} · ${esc(x.reason)}</small></span></div>`).join("")||"<p>Aucun avoir.</p>"}</div>`)}
@@ -182,9 +182,9 @@
   async function renderProcurement(root){
     const out=await api("procurement"); cache.procurement=out;
     root.querySelector("#p1Body").innerHTML=`
-      <div class="p1-actions">${btn("Nouveau dépôt","new-location","","primary")} ${btn("Commande fournisseur","new-order")} ${btn("Associer code-barres / QR","new-barcode")} ${btn("Scanner article","scan-item")}</div>
+      <div class="p1-actions">${btn("Nouveau dépôt","new-location","","primary")} ${btn("Mouvement / transfert","stock-move")} ${btn("Commande fournisseur","new-order")} ${btn("Associer code-barres / QR","new-barcode")} ${btn("Scanner article","scan-item")}</div>
       <div class="p1-grid-2">
-        ${card("Dépôts",`<div class="p1-list">${(out.locations||[]).map(x=>`<div><span><b>${esc(x.name)}</b><small>${esc(x.company)} · ${esc(x.type)}</small></span></div>`).join("")||"<p>Aucun dépôt.</p>"}</div>`)}
+        ${card("Dépôts",`<div class="p1-list">${(out.locations||[]).map(x=>{const qty=(out.balances||[]).filter(b=>String(b.location_id)===String(x.id)).reduce((n,b)=>n+Number(b.quantity||0),0);return `<div><span><b>${esc(x.name)}</b><small>${esc(x.company)} · ${esc(x.type)} · ${qty.toFixed(2)} unité(s) suivie(s)</small></span></div>`}).join("")||"<p>Aucun dépôt.</p>"}</div>`)}
         ${card("Commandes fournisseurs",`<div class="p1-list">${(out.orders||[]).map(x=>`<div><span><b>${esc(x.supplier_name)} · ${money(x.total)}</b><small>${esc(x.status)} · prévu ${date(x.expected_at)}</small></span></div>`).join("")||"<p>Aucune commande.</p>"}</div>`)}
         ${card("Codes article",`<div class="p1-list">${(out.barcodes||[]).map(x=>`<div><span><b>${esc(inventory().find(i=>String(i.id)===String(x.inventory_id))?.name||x.inventory_id)}</b><small><code>${esc(x.code)}</code></small></span></div>`).join("")||"<p>Aucun code associé.</p>"}</div>`)}
         ${card("Stock minimum",`<div class="p1-list">${inventory().filter(x=>Number(x.min)>0&&Number(x.stock)<=Number(x.min)).map(x=>`<div><span><b>${esc(x.name)}</b><small>Stock ${esc(x.stock)} · minimum ${esc(x.min)}</small></span></div>`).join("")||"<p>Aucune alerte stock.</p>"}</div>`)}
@@ -258,10 +258,19 @@
     else if(kind==="payment-link") modal("Lien de paiement",`<form id="p1Form" data-kind="payment-link"><label>Facture<select name="invoiceId">${(cache.finance?.invoices||[]).filter(x=>x.status!=="Brouillon").map(x=>`<option value="${esc(x.id)}">${esc(x.id)} · ${money(x.amount)}</option>`).join("")}</select></label><label>Validité (jours)<input type="number" name="days" value="30" min="1" max="365"></label><button class="btn primary" type="submit">Créer le lien</button></form>`);
     else if(kind==="location") modal("Nouveau dépôt",`<form id="p1Form" data-kind="location"><label>Entreprise<select name="company">${companyOptions()}</select></label><label>Nom<input name="name" required></label><label>Type<select name="type"><option value="warehouse">Dépôt</option><option value="vehicle">Véhicule</option><option value="project">Chantier</option><option value="other">Autre</option></select></label><button class="btn primary" type="submit">Créer</button></form>`);
     else if(kind==="order") modal("Commande fournisseur",`<form id="p1Form" data-kind="order"><label>Fournisseur<select name="supplierId">${supplierOptions()}</select></label><label>Chantier<select name="projectId"><option value="">—</option>${projectOptions()}</select></label><label>Statut<select name="status"><option value="draft">Brouillon</option><option value="ordered">Commandée</option></select></label><label>Date commande<input type="date" name="orderedAt"></label><label>Livraison prévue<input type="date" name="expectedAt"></label>${lineEditor()}<button class="btn primary" type="submit">Créer</button></form>`);
+    else if(kind==="stock-move") modal("Mouvement / transfert de stock",`<form id="p1Form" data-kind="stock-move"><label>Article<select name="inventoryId">${inventoryOptions()}</select></label><label>Depuis<select name="fromLocationId"><option value="">Entrée externe</option>${option(cache.procurement?.locations||[],"id","name")}</select></label><label>Vers<select name="toLocationId"><option value="">Sortie externe / consommation</option>${option(cache.procurement?.locations||[],"id","name")}</select></label><label>Quantité<input type="number" min="0.001" step="0.001" name="quantity" required></label><label>Chantier<select name="projectId"><option value="">—</option>${projectOptions()}</select></label><label>Note<textarea name="note"></textarea></label><button class="btn primary" type="submit">Enregistrer</button></form>`);
     else if(kind==="barcode") modal("Associer un code article",`<form id="p1Form" data-kind="barcode"><label>Article<select name="inventoryId">${inventoryOptions()}</select></label><label>Code-barres / QR<input name="code" required></label><button class="btn primary" type="submit">Associer</button></form>`);
     else if(kind==="tool-event") modal("Événement outillage",`<form id="p1Form" data-kind="tool-event"><label>Outil<select name="toolId">${toolOptions()}</select></label><label>Événement<select name="eventType"><option value="assignment">Attribution</option><option value="return">Retour</option><option value="lost">Perdu</option><option value="broken">Cassé</option><option value="maintenance">Maintenance</option><option value="inspection">Contrôle</option></select></label><label>Salarié<select name="employeeId">${employeeOptions()}</select></label><label>Échéance<input type="date" name="dueDate"></label><label>Note<textarea name="note"></textarea></label><button class="btn primary" type="submit">Enregistrer</button></form>`);
     else if(kind==="vehicle-event") modal("Événement véhicule",`<form id="p1Form" data-kind="vehicle-event"><label>Véhicule<select name="vehicleId">${vehicleOptions()}</select></label><label>Type<select name="eventType"><option value="service">Entretien</option><option value="tires">Pneus</option><option value="insurance">Assurance</option><option value="inspection">Expertise</option><option value="damage">Dommage</option><option value="km">Kilométrage</option><option value="assignment">Attribution</option></select></label><label>Date<input type="date" name="eventDate" value="${new Date().toISOString().slice(0,10)}"></label><label>Prochaine échéance<input type="date" name="dueDate"></label><label>Km<input type="number" min="0" name="km"></label><label>Description<textarea name="note"></textarea></label><button class="btn primary" type="submit">Enregistrer</button></form>`);
     else if(kind==="maintenance-plan") modal("Plan de maintenance récurrente",`<form id="p1Form" data-kind="maintenance-plan"><label>Client<select name="clientId">${clientOptions()}</select></label><label>Titre<input name="title" required></label><label>Fréquence<select name="frequency"><option value="monthly">Mensuelle</option><option value="quarterly">Trimestrielle</option><option value="yearly">Annuelle</option><option value="weekly">Hebdomadaire</option></select></label><label>Prochaine intervention<input type="date" name="nextRun" required></label><label>Priorité<select name="priority"><option>normal</option><option>high</option><option>urgent</option><option>low</option></select></label><label>SLA / délai max (heures)<input type="number" min="1" max="720" name="slaHours"></label>${finance()?`<label class="p1-check"><input type="checkbox" name="autoInvoice"> Facturer automatiquement</label><label>Délai paiement<input type="number" name="paymentDays" value="30"></label>${lineEditor()}`:""}<button class="btn primary" type="submit">Créer</button></form>`);
+    else if(kind==="template-quote"){
+      const tpl=(cache.finance?.templates||[]).find(x=>String(x.id)===String(attrs.id));
+      if(!tpl)return;
+      modal("Créer un devis depuis "+tpl.name,`<form id="p1Form" data-kind="template-quote" data-id="${esc(tpl.id)}"><label>Client<select name="clientId">${option((cache.finance?.clients||[]).filter(x=>x.company===tpl.company),"id","name")}</select></label><label>Date<input type="date" name="date" value="${new Date().toISOString().slice(0,10)}"></label><label>Valable jusqu’au<input type="date" name="valid" value="${(()=>{const d=new Date();d.setDate(d.getDate()+30);return d.toISOString().slice(0,10)})()}"></label><button class="btn primary" type="submit">Créer le devis</button></form>`);
+    }
+    else if(kind==="employee-history"){
+      modal("Historique salarié",`<div class="p1-actions"><select id="p1HistoryEmployee">${employeeOptions()}</select>${btn("Afficher","show-employee-history","","primary")}</div><div id="p1HistoryResult"></div>`);
+    }
     else if(kind==="integration") modal("Connecteur "+String(attrs.provider||"").toUpperCase(),`<form id="p1Form" data-kind="integration"><input type="hidden" name="provider" value="${esc(attrs.provider||"")}"><label class="p1-check"><input type="checkbox" name="enabled"> Activer dans Sousa Group One</label><label>Mode<select name="mode"><option value="manual">Manuel</option><option value="export">Export</option><option value="api">API</option></select></label><label>Libellé<input name="label"></label><p class="muted">Aucun secret API n’est stocké ici. La clé doit être configurée côté serveur.</p><button class="btn primary" type="submit">Enregistrer</button></form>`);
   }
 
@@ -289,6 +298,17 @@
       else if(kind==="location") await api("procurement/location",p);
       else if(kind==="order"){p.lines=singleLine(form);await api("procurement/order",p);}
       else if(kind==="barcode") await api("procurement/barcode",p);
+      else if(kind==="stock-move"){p.quantity=Number(p.quantity);await api("procurement/stock-move",p);}
+      else if(kind==="template-quote"){
+        const tpl=(cache.finance?.templates||[]).find(x=>String(x.id)===String(form.dataset.id));
+        if(!tpl)throw new Error("Modèle introuvable.");
+        const client=(cache.finance?.clients||[]).find(x=>String(x.id)===String(p.clientId));
+        const pricing=(cache.finance?.pricing||[]).find(x=>String(x.client_id)===String(p.clientId));
+        const discount=Number(pricing?.discount_pct||0);
+        const lines=(tpl.lines||[]).map(x=>({...x,discount:Number(x.discount||0)||discount}));
+        await core().mutate("create",{company:tpl.company,clientId:p.clientId,project:"",title:tpl.title||tpl.name,lines,date:p.date,valid:p.valid,language:"fr",message:tpl.defaults?.message||"",terms:tpl.defaults?.terms||"",scope:tpl.defaults?.scope||tpl.title||tpl.name,exclusions:tpl.defaults?.exclusions||"",paymentNote:"",paymentReference:"",depositPercent:0,signature:true},"quotes");
+        core().setPage("quotes");
+      }
       else if(kind==="tool-event") await api("assets/tool-event",p);
       else if(kind==="vehicle-event"){if(p.km)p.km=Number(p.km);await api("assets/vehicle-event",p);}
       else if(kind==="maintenance-plan"){p.autoInvoice=fd.get("autoInvoice")==="on";p.paymentDays=Number(p.paymentDays||30);if(p.autoInvoice)p.invoiceLines=singleLine(form);await api("maintenance/plan",p);}
@@ -393,13 +413,23 @@
       else if(a==="recurring-invoice")openForm("recurring-invoice");
       else if(a==="credit-note")openForm("credit-note");
       else if(a==="payment-link")openForm("payment-link");
+      else if(a==="template-quote")openForm("template-quote",{id:b.dataset.id});
       else if(a==="run-reminders"){const out=await api("finance/run-reminders",{});core().toast(out.created+" relance(s) générée(s).");}
       else if(a==="new-location")openForm("location");
+      else if(a==="stock-move")openForm("stock-move");
       else if(a==="new-order")openForm("order");
       else if(a==="new-barcode")openForm("barcode");
       else if(a==="scan-item")await scanCode(async(code)=>{const out=await api("procurement/lookup/"+encodeURIComponent(code));modal("Article scanné",`<p><b>${esc(out.item.name)}</b></p><p>Stock : ${esc(out.item.stock)} ${esc(out.item.unit||"")}</p>`);});
       else if(a==="tool-event")openForm("tool-event");
       else if(a==="vehicle-event")openForm("vehicle-event");
+      else if(a==="employee-history")openForm("employee-history");
+      else if(a==="show-employee-history"){
+        const id=document.getElementById("p1HistoryEmployee")?.value;
+        if(!id)throw new Error("Choisissez un salarié.");
+        const out=await api("employee/"+encodeURIComponent(id)+"/history");
+        const host=document.getElementById("p1HistoryResult");
+        if(host)host.innerHTML=`<div class="p1-timeline">${(out.history||[]).map(x=>`<div><i></i><span><b>${esc(x.title)}</b><small>${date(x.at)} · ${esc(x.type)}</small></span></div>`).join("")||"<p>Aucun historique.</p>"}</div>`;
+      }
       else if(a==="maintenance-plan")openForm("maintenance-plan");
       else if(a==="integration")openForm("integration",{provider:b.dataset.provider});
       else if(a==="run-jobs"){const out=await api("run-jobs",{});core().toast(`Jobs terminés : ${out.invoices} facture(s), ${out.maintenance} maintenance(s), ${out.reminders} relance(s).`);}
