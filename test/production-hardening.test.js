@@ -84,3 +84,50 @@ test("/readyz returns a safe readiness report", async () => {
     await db.end();
   }
 });
+
+
+test("canonical entity mode compacts app_state and remains readable after rollback", async () => {
+  const db = await database();
+  const before = process.env.STATE_ENTITY_CANONICAL;
+  try {
+    delete process.env.STATE_ENTITY_CANONICAL;
+    await migrate(db);
+    const legacy = require("../domain").emptyState();
+    legacy.clients = [
+      { id: "c-canonical", name: "Canonical Client", company: "home" },
+    ];
+    legacy.projects = [
+      {
+        id: "p-canonical",
+        title: "Canonical Project",
+        clientId: "c-canonical",
+        company: "home",
+        team: [],
+        status: "Nouveau",
+      },
+    ];
+    await db.query("UPDATE app_state SET data=$1,revision=7 WHERE id=1", [
+      JSON.stringify(legacy),
+    ]);
+    await require("../db").syncEntityMirror(db, legacy);
+
+    process.env.STATE_ENTITY_CANONICAL = "true";
+    await migrate(db);
+    const compact = (await db.query("SELECT data FROM app_state WHERE id=1")).rows[0].data;
+    assert.deepEqual(compact.clients, []);
+    assert.deepEqual(compact.projects, []);
+    const canonical = await require("../db").loadState(db);
+    assert.equal(canonical.data.clients[0].name, "Canonical Client");
+    assert.equal(canonical.data.projects[0].title, "Canonical Project");
+
+    delete process.env.STATE_ENTITY_CANONICAL;
+    await migrate(db);
+    const rolledBack = await require("../db").loadState(db);
+    assert.equal(rolledBack.data.clients[0].name, "Canonical Client");
+    assert.equal(rolledBack.data.projects[0].title, "Canonical Project");
+  } finally {
+    if (before == null) delete process.env.STATE_ENTITY_CANONICAL;
+    else process.env.STATE_ENTITY_CANONICAL = before;
+    await db.end();
+  }
+});
