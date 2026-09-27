@@ -5,6 +5,7 @@
   "description": "Backend API + static hosting for Sousa Group One",
   "main": "server.js",
   "scripts": {
+    "prestart": "npm test",
     "start": "node server.js",
     "test": "node --test test/*.test.js"
   },
@@ -12,6 +13,7 @@
     "node": ">=22.13"
   },
   "dependencies": {
+    "@simplewebauthn/server": "14.0.3",
     "bcryptjs": "^2.4.3",
     "express": "^4.19.2",
     "jsonwebtoken": "^9.0.2",

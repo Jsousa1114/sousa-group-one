@@ -43,6 +43,11 @@ function createApp(db = pool) {
       "Content-Security-Policy":
         "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob: data:; media-src 'self' blob:; worker-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
     });
+    if (req.secure || process.env.RENDER)
+      res.set(
+        "Strict-Transport-Security",
+        "max-age=31536000; includeSubDomains",
+      );
     if (req.path.startsWith("/api")) res.set("Cache-Control", "no-store");
     next();
   });
@@ -57,6 +62,7 @@ function createApp(db = pool) {
   });
   app.use("/api/auth", require("./auth-routes").routes(db));
   app.use("/api/account", require("./account-routes").routes(db));
+  app.use("/api/passkeys", require("./passkey-routes").routes(db));
   app.use("/api/state", require("./state-routes").routes(db));
   app.use("/api/messaging", require("./messaging-routes").routes(db));
   app.use("/api/operations", require("./operations-routes").routes(db));
@@ -71,6 +77,7 @@ function createApp(db = pool) {
     "messaging-crypto.js",
     "messaging-suite.js",
     "account-center.js",
+    "passkeys.js",
     "operations-center.js",
     "styles.css",
     "manifest.webmanifest",
