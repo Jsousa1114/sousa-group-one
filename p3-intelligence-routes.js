@@ -139,16 +139,20 @@ function buildWorkload(ctx, user, weeks = 4, startDate = todayIso()) {
   };
 }
 
+function aiApiKey() {
+  return process.env.AI_API_KEY || process.env.OPENAI_API_KEY || "";
+}
+
 function aiConfigured() {
   return !!(
     process.env.AI_API_URL &&
-    process.env.AI_API_KEY &&
+    aiApiKey() &&
     process.env.AI_MODEL
   );
 }
 
 function transcriptionConfigured() {
-  return !!(process.env.AI_TRANSCRIBE_API_URL && process.env.AI_API_KEY);
+  return !!(process.env.AI_TRANSCRIBE_API_URL && aiApiKey());
 }
 
 function providerText(payload) {
@@ -181,7 +185,7 @@ function parseJsonText(value) {
 }
 
 async function callAi({ system, user, imageDataUrl = "", json = false }) {
-  if (!aiConfigured()) D.fail("Le fournisseur IA n'est pas configuré (AI_API_URL, AI_API_KEY et AI_MODEL).", 424);
+  if (!aiConfigured()) D.fail("Le fournisseur IA n'est pas configuré (AI_API_URL, AI_API_KEY/OPENAI_API_KEY et AI_MODEL).", 424);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 30000);
   try {
@@ -191,20 +195,25 @@ async function callAi({ system, user, imageDataUrl = "", json = false }) {
           { type: "image_url", image_url: { url: imageDataUrl } },
         ]
       : user;
+    const model = process.env.AI_MODEL;
+    const reasoningEffort =
+      process.env.AI_REASONING_EFFORT ||
+      (/^gpt-6(?:-|$)/i.test(model) ? "none" : "");
     const body = {
-      model: process.env.AI_MODEL,
-      temperature: 0.2,
+      model,
       messages: [
         { role: "system", content: system },
         { role: "user", content: userContent },
       ],
     };
+    if (reasoningEffort) body.reasoning_effort = reasoningEffort;
+    if (!reasoningEffort || reasoningEffort === "none") body.temperature = 0.2;
     if (json) body.response_format = { type: "json_object" };
     const response = await fetch(process.env.AI_API_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: "Bearer " + process.env.AI_API_KEY,
+        Authorization: "Bearer " + aiApiKey(),
       },
       body: JSON.stringify(body),
       signal: controller.signal,
@@ -616,7 +625,7 @@ function routes(db) {
             : "audio";
       const form = new FormData();
       form.append("file", new Blob([buffer], { type: mime }), "compte-rendu." + extension);
-      form.append("model", process.env.AI_TRANSCRIBE_MODEL || "whisper-1");
+      form.append("model", process.env.AI_TRANSCRIBE_MODEL || "gpt-transcribe");
       if (process.env.AI_TRANSCRIBE_LANGUAGE)
         form.append("language", process.env.AI_TRANSCRIBE_LANGUAGE);
       const controller = new AbortController();
@@ -624,7 +633,7 @@ function routes(db) {
       try {
         const response = await fetch(process.env.AI_TRANSCRIBE_API_URL, {
           method: "POST",
-          headers: { Authorization: "Bearer " + process.env.AI_API_KEY },
+          headers: { Authorization: "Bearer " + aiApiKey() },
           body: form,
           signal: controller.signal,
           redirect: "error",
