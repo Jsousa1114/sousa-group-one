@@ -10,6 +10,12 @@ on:
       - account-routes.js
       - operations-center.js
       - operations-routes.js
+      - p1-suite.js
+      - p1-routes.js
+      - p1.css
+      - pay.html
+      - pay.js
+      - test/p1.test.js
       - p3-center.js
       - p3-intelligence-routes.js
       - test/p3.test.js
