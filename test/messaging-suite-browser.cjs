@@ -225,9 +225,8 @@ async function noOverflow(page, label) {
     assert.match(await client.page.locator("#callState").innerText(), /vidéo/i);
     await client.page.locator("#callAccept").click();
     await admin.page.waitForFunction(async () => {
-      const token = sessionStorage.getItem("sgo_session");
       const r = await fetch("/api/state/calls/pending", {
-        headers: { Authorization: "Bearer " + token },
+        credentials: "same-origin",
       });
       const j = await r.json();
       return j.call?.status === "accepted" && j.call?.callType === "video";
@@ -254,9 +253,8 @@ async function noOverflow(page, label) {
     await client.page.locator('[data-suite-action="group-accept"]').click();
     await client.page.locator("#groupCallOverlay:not(.hidden)").waitFor({ timeout: 10000 });
     await admin.page.waitForFunction(async () => {
-      const token = sessionStorage.getItem("sgo_session");
       const r = await fetch("/api/messaging/group-calls/pending", {
-        headers: { Authorization: "Bearer " + token },
+        credentials: "same-origin",
       });
       const j = await r.json();
       return j.rooms?.[0]?.status === "active";
