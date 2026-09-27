@@ -208,6 +208,13 @@ async function ensureSchema(db) {
       updated_by INTEGER NOT NULL,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )`);
+    await q(`CREATE TABLE IF NOT EXISTS p1_inventory_location_stock(
+      inventory_id TEXT NOT NULL,
+      location_id TEXT NOT NULL,
+      quantity NUMERIC(16,3) NOT NULL DEFAULT 0,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY(inventory_id,location_id)
+    )`);
     await q(`CREATE TABLE IF NOT EXISTS p1_tool_events(
       id TEXT PRIMARY KEY,
       tool_id TEXT NOT NULL,
@@ -352,14 +359,23 @@ async function createInvoiceFromPlan(db, plan, source) {
     const client = data.clients.find((x) => D.same(x.id, plan.client_id));
     if (!client) throw new Error("Client récurrent introuvable.");
     const issueDate = today();
+    const pricing = (
+      await c.query("SELECT discount_pct,payment_days FROM p1_client_pricing WHERE client_id=$1", [String(plan.client_id)])
+    ).rows[0];
+    const defaultDiscount = Number(pricing?.discount_pct || 0);
+    const sourceLines = Array.isArray(plan.lines) ? plan.lines : (plan.invoice_lines || []);
+    const invoiceLines = sourceLines.map((line) => ({
+      ...line,
+      discount: Number(line.discount || 0) || defaultDiscount,
+    }));
     const payload = {
       company: plan.company,
       clientId: plan.client_id,
       project: plan.project_id || "",
       title: plan.title,
-      lines: plan.lines || plan.invoice_lines,
+      lines: invoiceLines,
       date: issueDate,
-      due: plusDays(issueDate, plan.payment_days || 30),
+      due: plusDays(issueDate, Number(pricing?.payment_days || plan.payment_days || 30)),
       language: "fr",
       message: source === "maintenance.recurring.invoice" ? "Facturation automatique du contrat de maintenance." : "Facturation récurrente.",
       terms: "",
@@ -801,7 +817,7 @@ function routes(db) {
     if(!inv) D.fail("Facture émise inaccessible.",403);
     const token=randomBytes(32).toString("hex"), id=randomUUID(), days=Math.round(num(req.body?.days??30,1,365));
     await db.query("INSERT INTO p1_payment_links(id,invoice_id,token,expires_at,created_by) VALUES($1,$2,$3,NOW()+($4::text||' days')::interval,$5)",[id,String(inv.id),token,String(days),req.user.id]);
-    res.json({ok:true,id,url:"/api/p1/payment/"+token,expiresInDays:days});
+    res.json({ok:true,id,url:"/pay.html?token="+encodeURIComponent(token),apiUrl:"/api/p1/payment/"+token,expiresInDays:days});
   }));
   r.post("/finance/run-reminders", wrap(async (req,res) => {
     if(!finance(req.user)) D.fail("Accès comptabilité requis.",403);
@@ -811,12 +827,15 @@ function routes(db) {
   r.get("/procurement", wrap(async (req,res) => {
     if(!ops(req.user)) D.fail("Accès achats requis.",403);
     const ctx=await stateContext(db,req.user), companies=scopeCompanies(req.user), filter=(x)=>companies==null||companies.includes(x.company);
-    const [locations,orders,barcodes]=await Promise.all([
+    const [locations,orders,barcodes,balances]=await Promise.all([
       db.query("SELECT * FROM inventory_locations ORDER BY company,name"),
       db.query("SELECT * FROM p1_purchase_orders ORDER BY created_at DESC LIMIT 300"),
-      db.query("SELECT * FROM p1_inventory_barcodes")
+      db.query("SELECT * FROM p1_inventory_barcodes"),
+      db.query("SELECT * FROM p1_inventory_location_stock ORDER BY inventory_id,location_id")
     ]);
-    res.json({locations:locations.rows.filter(filter),orders:orders.rows.filter(filter),barcodes:barcodes.rows,inventory:ctx.view.inventory,suppliers:ctx.view.suppliers});
+    const allowedLocations = locations.rows.filter(filter);
+    const locationIds = new Set(allowedLocations.map((x)=>String(x.id)));
+    res.json({locations:allowedLocations,orders:orders.rows.filter(filter),barcodes:barcodes.rows,balances:balances.rows.filter((x)=>locationIds.has(String(x.location_id))),inventory:ctx.view.inventory,suppliers:ctx.view.suppliers});
   }));
   r.post("/procurement/location", wrap(async (req,res) => {
     if(!ops(req.user)) D.fail("Accès achats requis.",403);
@@ -840,6 +859,67 @@ function routes(db) {
       [id,supplier.company,String(supplier.id),supplier.name,b.projectId?String(b.projectId):null,allowed(String(b.status||"draft"),["draft","ordered","partially_received","received","cancelled"],"Statut"),isoDate(b.orderedAt),isoDate(b.expectedAt),JSON.stringify(lines),total,req.user.id]
     ); res.json({ok:true,id,total});
   }));
+  r.post("/procurement/stock-move", wrap(async (req,res) => {
+    if(!ops(req.user)) D.fail("Accès stock requis.",403);
+    const b=req.body||{}, ctx=await stateContext(db,req.user),
+      item=ctx.view.inventory.find((x)=>D.same(x.id,b.inventoryId));
+    if(!item) D.fail("Article inaccessible.",403);
+    const quantity=num(b.quantity,0.001,1e9),
+      fromId=b.fromLocationId?String(b.fromLocationId):null,
+      toId=b.toLocationId?String(b.toLocationId):null;
+    if(!fromId&&!toId) D.fail("Choisissez une origine ou une destination.");
+    if(fromId&&toId&&fromId===toId) D.fail("Origine et destination identiques.");
+    const ids=[fromId,toId].filter(Boolean),
+      locs=ids.length?(await db.query("SELECT * FROM inventory_locations WHERE id=ANY($1::text[])",[ids])).rows:[];
+    if(locs.length!==ids.length||locs.some((x)=>x.company!==item.company))
+      D.fail("Dépôt incompatible.",403);
+    const client=await db.connect();
+    try{
+      await client.query("BEGIN");
+      if(fromId){
+        const current=Number((await client.query(
+          "SELECT quantity FROM p1_inventory_location_stock WHERE inventory_id=$1 AND location_id=$2 FOR UPDATE",
+          [String(item.id),fromId]
+        )).rows[0]?.quantity||0);
+        if(current<quantity) D.fail("Stock insuffisant dans le dépôt source.");
+        await client.query(
+          `INSERT INTO p1_inventory_location_stock(inventory_id,location_id,quantity)
+           VALUES($1,$2,$3)
+           ON CONFLICT(inventory_id,location_id) DO UPDATE SET quantity=p1_inventory_location_stock.quantity+$3,updated_at=NOW()`,
+          [String(item.id),fromId,-quantity]
+        );
+        await client.query(
+          `INSERT INTO inventory_movements(id,inventory_id,company,location_id,project_id,employee_id,quantity,movement_type,note,created_by)
+           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+          [randomUUID(),String(item.id),item.company,fromId,b.projectId?String(b.projectId):null,req.user.employee_id||null,-quantity,toId?"transfer":"out",clean(String(b.note||""),1000,true)||null,req.user.id]
+        );
+      }
+      if(toId){
+        await client.query(
+          `INSERT INTO p1_inventory_location_stock(inventory_id,location_id,quantity)
+           VALUES($1,$2,$3)
+           ON CONFLICT(inventory_id,location_id) DO UPDATE SET quantity=p1_inventory_location_stock.quantity+$3,updated_at=NOW()`,
+          [String(item.id),toId,quantity]
+        );
+        await client.query(
+          `INSERT INTO inventory_movements(id,inventory_id,company,location_id,project_id,employee_id,quantity,movement_type,note,created_by)
+           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+          [randomUUID(),String(item.id),item.company,toId,b.projectId?String(b.projectId):null,req.user.employee_id||null,quantity,fromId?"transfer":"in",clean(String(b.note||""),1000,true)||null,req.user.id]
+        );
+      }
+      await client.query("COMMIT");
+    }catch(e){await client.query("ROLLBACK");throw e;}finally{client.release();}
+    if(!fromId||!toId){
+      await withStateWrite(db,req.user.id,"inventory.location.move",async(_c,data)=>{
+        const live=data.inventory.find((x)=>D.same(x.id,item.id));
+        if(!live) D.fail("Article introuvable.");
+        live.stock=Math.max(0,Number(live.stock||0)+(toId?quantity:-quantity));
+        return {data,changed:["inventory"],audit:{inventoryId:item.id,fromId,toId,quantity}};
+      });
+    }
+    res.json({ok:true,inventoryId:item.id,fromLocationId:fromId,toLocationId:toId,quantity});
+  }));
+
   r.post("/procurement/barcode", wrap(async (req,res) => {
     if(!ops(req.user)) D.fail("Accès stock requis.",403);
     const ctx=await stateContext(db,req.user), item=ctx.view.inventory.find((x)=>D.same(x.id,req.body?.inventoryId));
@@ -870,6 +950,16 @@ function routes(db) {
     if(!tool) D.fail("Outil inaccessible.",403);
     const id=randomUUID(), type=allowed(String(b.eventType||"assignment"),["assignment","return","lost","broken","maintenance","inspection"],"Événement");
     await db.query("INSERT INTO p1_tool_events(id,tool_id,company,event_type,employee_id,note,due_date,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8)",[id,String(tool.id),tool.company,type,b.employeeId?String(b.employeeId):null,clean(String(b.note||""),2000,true)||null,isoDate(b.dueDate),req.user.id]);
+    await withStateWrite(db,req.user.id,"tool.event",async(_c,data)=>{
+      const live=data.tools.find((x)=>D.same(x.id,tool.id));
+      if(!live) D.fail("Outil introuvable.");
+      if(type==="assignment"){if(!b.employeeId)D.fail("Salarié requis pour une attribution.");live.employeeId=String(b.employeeId);live.status="Attribué";}
+      else if(type==="return"){delete live.employeeId;live.status="Disponible";}
+      else if(type==="lost") live.status="Perdu";
+      else if(type==="broken") live.status="Cassé";
+      else if(type==="maintenance") live.status="Maintenance";
+      return {data,changed:["tools"],audit:{toolId:tool.id,eventType:type}};
+    });
     res.json({ok:true,id});
   }));
   r.post("/assets/vehicle-event", wrap(async (req,res) => {
@@ -878,6 +968,15 @@ function routes(db) {
     if(!v) D.fail("Véhicule inaccessible.",403);
     const id=randomUUID(), type=allowed(String(b.eventType||"service"),["service","tires","insurance","inspection","damage","fuel","km","assignment"],"Événement");
     await db.query("INSERT INTO p1_vehicle_events(id,vehicle_id,company,event_type,event_date,due_date,km,note,metadata,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",[id,String(v.id),v.company,type,isoDate(b.eventDate||today(),false),isoDate(b.dueDate),b.km==null?null:num(b.km,0,1e8),clean(String(b.note||""),3000,true)||null,JSON.stringify(b.metadata&&typeof b.metadata==="object"?b.metadata:{}),req.user.id]);
+    await withStateWrite(db,req.user.id,"vehicle.event",async(_c,data)=>{
+      const live=data.vehicles.find((x)=>D.same(x.id,v.id));
+      if(!live) D.fail("Véhicule introuvable.");
+      if(b.km!=null) live.km=Number(b.km);
+      if(type==="damage") live.status="À réparer";
+      else if(type==="service"){live.status="Disponible";live.service=b.dueDate?String(b.dueDate):live.service;}
+      else if(type==="assignment"&&b.employeeId){live.employeeId=String(b.employeeId);live.status="Attribué";}
+      return {data,changed:["vehicles"],audit:{vehicleId:v.id,eventType:type}};
+    });
     res.json({ok:true,id});
   }));
 
