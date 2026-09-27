@@ -27,7 +27,7 @@ function extractText(response) {
   return parts.join("\n").trim();
 }
 async function responseApi(input, instructions) {
-  if (!configured()) D.fail("Assistant IA non configuré sur le serveur.", 503);
+  if (!configured()) D.fail("Assistant IA non configuré sur le serveur.", 424);
   const r = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: {
@@ -339,7 +339,7 @@ function routes(db) {
   r.post(
     "/transcribe",
     wrap(async (req, res) => {
-      if (!configured()) D.fail("Assistant IA non configuré sur le serveur.", 503);
+      if (!configured()) D.fail("Assistant IA non configuré sur le serveur.", 424);
       const mime = clean(req.body?.mime, 80),
         content = clean(req.body?.content, 12 * 1024 * 1024);
       if (!/^audio\/(webm|ogg|mpeg|mp4|wav|x-m4a|m4a)$/.test(mime) || !content)
