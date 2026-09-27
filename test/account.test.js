@@ -277,7 +277,19 @@ test("personal data export and deactivation request are available", async () => 
 
 
 test("passkey registration options require password and persist a short-lived challenge", async () => {
-  const token = (await login()).data.token;
+  const current = (
+    await db.query("SELECT totp_secret FROM users WHERE email=$1", [
+      "employee-account@test.invalid",
+    ])
+  ).rows[0];
+  const token = (
+    await login(
+      codeAt(
+        decryptTotpSecret(current.totp_secret),
+        Math.floor(Date.now() / 30000),
+      ),
+    )
+  ).data.token;
   const unavailable = await call("passkeys/login/options", null, {
     email: "employee-account@test.invalid",
   });
