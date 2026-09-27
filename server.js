@@ -157,6 +157,16 @@ if (require.main === module) {
     .then(() => {
       const app = createApp();
       const server = app.listen(process.env.PORT || 3000);
+      require("./backup-service").startBackupScheduler(pool);
+      readiness(pool)
+        .then((report) => {
+          if (!report.productionReady)
+            console.warn(
+              "Production readiness incomplete:",
+              report.missingCritical.concat(report.missingRecommended).join(", "),
+            );
+        })
+        .catch((error) => console.error("Readiness check failed", error));
       const cleanup = async () =>
         require("./messaging-routes").cleanupRetention(pool).catch((e) =>
           console.error("Messaging retention cleanup failed", e),
