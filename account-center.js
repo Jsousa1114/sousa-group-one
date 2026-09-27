@@ -158,7 +158,9 @@
           <div class="account-security-actions">
             <button class="btn" data-action="password-form">Changer le mot de passe</button>
             <button class="btn ${summary.security.twoFactorEnabled ? "danger" : "primary"}" data-account-action="${summary.security.twoFactorEnabled ? "2fa-disable" : "2fa-setup"}">${summary.security.twoFactorEnabled ? "Désactiver la 2FA" : "Activer la 2FA"}</button>
+            ${summary.security.twoFactorEnabled ? '<button class="btn" data-account-action="2fa-recovery">Régénérer les codes de secours</button>' : ""}
           </div>
+          ${summary.security.twoFactorEnabled ? `<p class="muted">Codes de secours disponibles : ${esc(summary.security.recoveryCodesRemaining ?? 0)}. Chaque code est utilisable une seule fois.</p>` : ""}
           <p class="muted">Dernière connexion : ${esc(fmt(summary.security.lastLoginAt))} · ${esc(summary.security.lastLoginIp || "IP non disponible")}</p>
           <h4>Appareils connectés</h4>
           <div class="account-sessions">
@@ -337,6 +339,30 @@
         <button class="btn danger" type="submit">Désactiver la 2FA</button>
       </form>`);
   }
+  function showRecoveryCodes(codes) {
+    const list = Array.isArray(codes) ? codes : [];
+    core().modal(
+      "Codes de secours 2FA",
+      `<div class="account-recovery-codes">
+        <p><b>Conservez ces codes dans un endroit sûr.</b> Ils ne seront plus affichés après fermeture.</p>
+        <div class="account-recovery-grid">${list.map((code) => `<code>${esc(code)}</code>`).join("")}</div>
+        <p class="muted">Chaque code remplace une fois le code à 6 chiffres si vous perdez votre téléphone.</p>
+        <button type="button" class="btn primary" data-account-copy="${esc(list.join("\n"))}">Copier tous les codes</button>
+      </div>`,
+    );
+  }
+  function regenerateRecoveryCodes() {
+    core().modal(
+      "Régénérer les codes de secours",
+      `<form id="accountRecoveryForm">
+        <p>Les anciens codes seront immédiatement invalidés.</p>
+        <label>Mot de passe actuel<input type="password" name="currentPassword" required autocomplete="current-password"></label>
+        <label>Code 2FA à 6 chiffres<input name="code" inputmode="numeric" maxlength="6" required></label>
+        <p id="formError" class="error"></p>
+        <button class="btn primary" type="submit">Régénérer</button>
+      </form>`,
+    );
+  }
   function uploadDocument() {
     core().modal("Ajouter un document personnel", `
       <form id="accountDocumentForm">
@@ -363,6 +389,7 @@
       if (a === "edit-profile") editProfile();
       else if (a === "2fa-setup") setup2fa();
       else if (a === "2fa-disable") disable2fa();
+      else if (a === "2fa-recovery") regenerateRecoveryCodes();
       else if (a === "upload-document") uploadDocument();
       else if (a === "logout-others") {
         await core().api("account/sessions/logout-others", {});
@@ -433,8 +460,14 @@
             <button class="btn primary" type="submit">Vérifier et activer</button>
           </form>`);
       } else if (f.id === "account2faEnableForm") {
-        await core().api("account/2fa/enable", { code: data.get("code") });
-        core().closeModal(true); await load(true); core().toast("Double authentification activée.");
+        const out = await core().api("account/2fa/enable", { code: data.get("code") });
+        await load(true);
+        showRecoveryCodes(out.recoveryCodes || []);
+        core().toast("Double authentification activée.");
+      } else if (f.id === "accountRecoveryForm") {
+        const out = await core().api("account/2fa/recovery-codes", Object.fromEntries(data));
+        await load(true);
+        showRecoveryCodes(out.recoveryCodes || []);
       } else if (f.id === "account2faDisableForm") {
         await core().api("account/2fa/disable", Object.fromEntries(data));
         core().closeModal(true); await load(true); core().toast("Double authentification désactivée.");
