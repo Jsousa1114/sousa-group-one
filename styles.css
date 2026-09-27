@@ -3437,3 +3437,29 @@ html[data-text-size="large"] { font-size: 18px; }
   .ops-kanban,.ops-crm-board { grid-template-columns:repeat(4,82vw); }
   .ops-crm-board { grid-template-columns:repeat(5,82vw); }
 }
+
+.ops-center,
+.ops-center > *,
+.ops-center .card,
+.ops-kanban,
+.ops-crm-board,
+.ops-kanban-col,
+.ops-crm-col {
+  min-width: 0;
+  max-width: 100%;
+}
+.ops-kanban,
+.ops-crm-board {
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-inline: contain;
+}
+.ops-task,
+.ops-crm-card,
+.ops-workorder,
+.ops-simple-list,
+.ops-notification {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
