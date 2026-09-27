@@ -14,11 +14,18 @@
   const opsApi = (path, body) => core().api("operations/" + path, body);
   const money = (v) => new Intl.NumberFormat("fr-CH",{style:"currency",currency:"CHF"}).format(Number(v)||0);
   const date = (v) => v ? new Date(String(v).length===10?v+"T12:00:00":v).toLocaleDateString("fr-CH") : "—";
-  const staff = () => ["admin","direction","hr","manager","accounting"].includes(profile().role);
-  const operational = () => ["admin","direction","manager","accounting","employee"].includes(profile().role);
-  const finance = () => ["admin","direction","accounting"].includes(profile().role);
-  const direction = () => ["admin","direction"].includes(profile().role);
-  const hr = () => ["admin","direction","hr"].includes(profile().role);
+  const roleAllowed = (roles) => {
+    const p=profile(), base=roles.includes(p.role);
+    if(p.role==="admin") return base;
+    const denied=p.permission_denials||[];
+    if(base&&denied.includes(p.role)) return false;
+    return base||(p.permission_grants||[]).some((r)=>roles.includes(r)&&!denied.includes(r));
+  };
+  const staff = () => roleAllowed(["admin","direction","hr","manager","accounting"]);
+  const operational = () => roleAllowed(["admin","direction","manager","accounting","employee"]);
+  const finance = () => roleAllowed(["admin","direction","accounting"]);
+  const direction = () => roleAllowed(["admin","direction"]);
+  const hr = () => roleAllowed(["admin","direction","hr"]);
   const companies = () => (state().companies||[]).filter((x)=>x.id!=="group");
   const projects = () => state().projects||[];
   const employees = () => (state().employees||[]).filter((x)=>!x.deletedAt);
