@@ -34,10 +34,14 @@ const pageLimit = (value, fallback = 50, max = 200) => {
   const n = Number.parseInt(String(value || ""), 10);
   return Number.isInteger(n) && n > 0 ? Math.min(n, max) : fallback;
 };
-const encodeCursor = (row) =>
-  Buffer.from(String(row.created_at) + "|" + String(row.id), "utf8").toString(
-    "base64url",
-  );
+const encodeCursor = (row) => {
+  const createdAt = new Date(row.created_at);
+  if (!Number.isFinite(createdAt.getTime())) D.fail("Date de pagination invalide.");
+  return Buffer.from(
+    createdAt.toISOString() + "|" + String(row.id),
+    "utf8",
+  ).toString("base64url");
+};
 const decodeCursor = (value) => {
   if (!value) return null;
   try {
