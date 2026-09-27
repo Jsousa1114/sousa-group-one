@@ -1973,7 +1973,7 @@ test("operations platform covers tasks CRM stock work orders analytics insights 
   assert.equal(work.status, 200, JSON.stringify(work.data));
   const workOrders = await call("operations/work-orders", admin);
   assert.ok(workOrders.data.workOrders.some((x) => x.id === work.data.id));
-  const summaryDate = "2026-09-27";
+  const summaryDate = "2026-08-27";
   const summaryStateRow = (
     await db.query("SELECT data FROM app_state WHERE id=1")
   ).rows[0];
