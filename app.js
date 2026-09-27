@@ -256,11 +256,40 @@ function clearSession() {
   $("login").classList.remove("hidden");
 }
 async function refresh(renderNow = true) {
-  const out = await api("state");
-  state = out.data;
-  revision = out.revision;
-  profile = out.profile;
-  contacts = out.contacts;
+  try {
+    const out = await api("state");
+    state = out.data;
+    revision = out.revision;
+    profile = out.profile;
+    contacts = out.contacts;
+    sessionStorage.setItem(
+      "sgo_offline_snapshot",
+      JSON.stringify({
+        data: state,
+        revision,
+        profile,
+        contacts,
+        savedAt: new Date().toISOString(),
+      }),
+    );
+    document.body.classList.remove("offline-mode");
+  } catch (error) {
+    if (!navigator.onLine && token) {
+      const cached = JSON.parse(
+        sessionStorage.getItem("sgo_offline_snapshot") || "null",
+      );
+      if (cached?.data && cached?.profile) {
+        state = cached.data;
+        revision = cached.revision || 0;
+        profile = cached.profile;
+        contacts = cached.contacts || [];
+        document.body.classList.add("offline-mode");
+        notice(
+          "Mode hors ligne : dernière copie locale affichée. Les modifications sont désactivées jusqu’au retour du réseau.",
+        );
+      } else throw error;
+    } else throw error;
+  }
   if (renderNow) render();
 }
 async function mutate(
@@ -270,6 +299,10 @@ async function mutate(
   endpoint = "state/command",
   form,
 ) {
+  if (!navigator.onLine) {
+    notice("Connexion requise pour enregistrer des modifications.");
+    return;
+  }
   if (pending) return;
   pending = true;
   const buttons = [...document.querySelectorAll("button[type=submit]")];
@@ -3598,6 +3631,15 @@ document.addEventListener("keydown", (e) => {
 });
 document.addEventListener("pointerdown", unlockRingtoneAudio, {
   passive: true,
+});
+window.addEventListener("offline", () => {
+  document.body.classList.add("offline-mode");
+  notice("Connexion perdue. Consultation possible, modifications temporairement désactivées.");
+});
+window.addEventListener("online", () => {
+  document.body.classList.remove("offline-mode");
+  notice("");
+  refresh().catch(() => {});
 });
 window.SGOChatCore = {
   api,
