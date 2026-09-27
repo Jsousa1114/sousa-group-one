@@ -3312,3 +3312,26 @@ html[data-text-size="large"] { font-size: 18px; }
   .account-kpis { grid-template-columns: 1fr; }
   .account-shortcuts .btn, .account-security-actions .btn { width: 100%; }
 }
+
+.account-center,
+.account-center > *,
+.account-center .account-grid,
+.account-center .account-grid > *,
+.account-center form,
+.account-center label,
+.account-center div {
+  min-width: 0;
+}
+.account-center input:not([type="checkbox"]),
+.account-center select,
+.account-center textarea {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+.account-center code,
+.account-center .muted,
+.account-center .suite-system-settings {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
