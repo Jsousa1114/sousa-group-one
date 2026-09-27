@@ -1,14 +1,108 @@
 "use strict";
 
-self.addEventListener("install", () => self.skipWaiting());
+const STATIC_CACHE = "sgo-shell-2026-09-27-v2",
+  STATIC_ASSETS = [
+    "/",
+    "/index.html",
+    "/styles.css",
+    "/app.js",
+    "/finance.js",
+    "/messaging-crypto.js",
+    "/messaging-suite.js",
+    "/account-center.js",
+    "/operations-center.js",
+    "/manifest.webmanifest",
+    "/assets/logos/group.png",
+    "/assets/logos/home.png",
+    "/assets/logos/electricite.png",
+    "/assets/logos/tech.png",
+    "/assets/logos/moving.png",
+    "/assets/logos/solar.png",
+    "/assets/logos/events.png",
+  ];
+
+self.addEventListener("install", (event) => {
+  event.waitUntil(
+    caches
+      .open(STATIC_CACHE)
+      .then((cache) =>
+        Promise.allSettled(
+          STATIC_ASSETS.map((url) =>
+            fetch(url, { cache: "reload" }).then((response) => {
+              if (response.ok) return cache.put(url, response);
+            }),
+          ),
+        ),
+      )
+      .then(() => self.skipWaiting()),
+  );
+});
 
 self.addEventListener("activate", (event) => {
   event.waitUntil(
     Promise.all([
-      caches.keys().then((keys) => Promise.all(keys.map((key) => caches.delete(key)))),
+      caches
+        .keys()
+        .then((keys) =>
+          Promise.all(
+            keys
+              .filter((key) => key !== STATIC_CACHE)
+              .map((key) => caches.delete(key)),
+          ),
+        ),
       self.clients.claim(),
     ]),
   );
+});
+
+self.addEventListener("fetch", (event) => {
+  const req = event.request;
+  if (req.method !== "GET") return;
+  const url = new URL(req.url);
+  if (url.origin !== self.location.origin || url.pathname.startsWith("/api/"))
+    return;
+
+  if (req.mode === "navigate") {
+    event.respondWith(
+      fetch(req)
+        .then((response) => {
+          if (response.ok) {
+            const copy = response.clone();
+            caches.open(STATIC_CACHE).then((cache) => cache.put("/index.html", copy));
+          }
+          return response;
+        })
+        .catch(async () => {
+          const cache = await caches.open(STATIC_CACHE);
+          return (
+            (await cache.match("/index.html")) ||
+            new Response(
+              "<!doctype html><title>Sousa Group One</title><p>Connexion indisponible. Reconnectez-vous pour synchroniser vos données.</p>",
+              { headers: { "Content-Type": "text/html; charset=utf-8" } },
+            )
+          );
+        }),
+    );
+    return;
+  }
+
+  if (
+    /\.(?:js|css|png|svg|webmanifest)$/.test(url.pathname) ||
+    STATIC_ASSETS.includes(url.pathname)
+  ) {
+    event.respondWith(
+      caches.open(STATIC_CACHE).then(async (cache) => {
+        const cached = await cache.match(req);
+        const network = fetch(req)
+          .then((response) => {
+            if (response.ok) cache.put(req, response.clone());
+            return response;
+          })
+          .catch(() => null);
+        return cached || (await network) || Response.error();
+      }),
+    );
+  }
 });
 
 self.addEventListener("push", (event) => {
