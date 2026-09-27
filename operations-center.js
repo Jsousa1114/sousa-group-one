@@ -3,7 +3,11 @@
   let activeTab = "overview",
     loaded = false,
     projectFilter = "",
-    searchTimer = null;
+    searchTimer = null,
+    notificationCursor = null,
+    notificationRows = [],
+    stockCursor = null,
+    stockRows = [];
 
   const core = () => window.SGOChatCore;
   const esc = (v) => core()?.esc?.(v) ?? String(v ?? "");
@@ -269,19 +273,28 @@
         .join("")}
       </div>`;
   }
-  async function renderStock() {
-    const out = await get("inventory/movements"),
-      movements = out.movements || [];
+  async function renderStock(reset = true) {
+    if (reset) {
+      stockCursor = null;
+      stockRows = [];
+    }
+    const out = await get(
+        "inventory/movements?limit=100" +
+          (stockCursor ? "&cursor=" + encodeURIComponent(stockCursor) : ""),
+      ),
+      fresh = out.movements || [];
+    stockRows = [...stockRows, ...fresh];
+    stockCursor = out.nextCursor || null;
+    const movements = stockRows;
     root().querySelector("#opsBody").innerHTML = `
-      <div class="ops-toolbar"><div><b>Mouvements de stock</b><span class="muted"> ${movements.length} mouvement(s)</span></div>${operational() ? button("Nouveau mouvement", "new-stock", "", "primary") : ""}</div>
+      <div class="ops-toolbar"><div><b>Mouvements de stock</b><span class="muted"> ${movements.length} mouvement(s) chargé(s)</span></div>${operational() ? button("Nouveau mouvement", "new-stock", "", "primary") : ""}</div>
       <article class="card"><div class="table"><table><thead><tr><th>Date</th><th>Article</th><th>Type</th><th>Quantité</th><th>Chantier</th><th>Note</th></tr></thead><tbody>
       ${movements
-        .slice(0, 250)
         .map(
           (x) => `<tr><td>${esc(dt(x.created_at))}</td><td>${esc((state().inventory || []).find((i) => String(i.id) === String(x.inventory_id))?.name || x.inventory_id)}</td><td>${esc(x.movement_type)}</td><td>${esc(x.quantity)}</td><td>${esc(x.project_id || "—")}</td><td>${esc(x.note || "")}</td></tr>`,
         )
         .join("")}
-      </tbody></table></div></article>`;
+      </tbody></table></div>${stockCursor ? `<div class="form-actions">${button("Charger plus", "stock-more")}</div>` : ""}</article>`;
   }
   async function renderWorkOrders() {
     const out = await get("work-orders"),
@@ -401,11 +414,23 @@
       </article>`;
   }
 
-  async function renderNotifications() {
-    const out = await get("notifications"),
-      rows = out.notifications || [];
+  async function renderNotifications(reset = true) {
+    if (reset) {
+      notificationCursor = null;
+      notificationRows = [];
+    }
+    const out = await get(
+        "notifications?limit=50" +
+          (notificationCursor
+            ? "&cursor=" + encodeURIComponent(notificationCursor)
+            : ""),
+      ),
+      fresh = out.notifications || [];
+    notificationRows = [...notificationRows, ...fresh];
+    notificationCursor = out.nextCursor || null;
+    const rows = notificationRows;
     root().querySelector("#opsBody").innerHTML = `
-      <div class="ops-toolbar"><b>Centre de notifications</b>${button("Tout marquer comme lu", "read-all", "", "primary")}</div>
+      <div class="ops-toolbar"><div><b>Centre de notifications</b><span class="muted"> ${rows.length} chargée(s)</span></div>${button("Tout marquer comme lu", "read-all", "", "primary")}</div>
       <div class="ops-notifications">
         ${rows.length
           ? rows.map((x) => `<article class="card ops-notification ${x.read_at ? "" : "unread"}">
@@ -414,7 +439,8 @@
               ${x.url ? button("Ouvrir", "notification-open", `data-id="${esc(x.id)}" data-url="${esc(x.url)}"`) : ""}
             </article>`).join("")
           : '<article class="card empty">Aucune notification.</article>'}
-      </div>`;
+      </div>
+      ${notificationCursor ? `<div class="form-actions">${button("Charger plus", "notifications-more")}</div>` : ""}`;
   }
   async function renderTab() {
     if (!root()) return;
@@ -669,6 +695,10 @@
         link.click();
         setTimeout(() => URL.revokeObjectURL(url), 1000);
         core().toast("Export paie téléchargé.");
+      } else if (a === "stock-more") {
+        await renderStock(false);
+      } else if (a === "notifications-more") {
+        await renderNotifications(false);
       } else if (a === "read-all") {
         await post("notifications/read", { all: true });
         await renderNotifications();
