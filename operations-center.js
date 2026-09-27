@@ -278,7 +278,7 @@
                 <small>${esc(x.probability)} % · ${esc(x.company || "")}</small>
                 ${x.next_action ? `<p>➡ ${esc(x.next_action)}</p>` : ""}
                 ${x.email || x.phone ? `<small>${esc(x.email || "")}${x.email && x.phone ? " · " : ""}${esc(x.phone || "")}</small>` : ""}
-                <div class="form-actions">${button("Historique", "crm-history", `data-id="${esc(x.id)}" data-name="${esc(x.name)}"`)} ${button("Modifier", "edit-crm", `data-id="${esc(x.id)}"`)}</div>
+                <div class="form-actions">${button("Historique", "crm-history", `data-id="${esc(x.id)}" data-name="${esc(x.name)}"`)} ${!x.client_id ? button("Créer client + devis", "crm-convert", `data-id="${esc(x.id)}"`, "primary") : ""} ${button("Modifier", "edit-crm", `data-id="${esc(x.id)}"`)}</div>
               </article>`,
             )
             .join("") || '<p class="muted">Aucune opportunité.</p>'}
@@ -893,6 +893,14 @@
       } else if (a === "new-crm") await crmForm();
       else if (a === "edit-crm") await crmForm(b.dataset.id);
       else if (a === "crm-history") await crmActivityForm(b.dataset.id, b.dataset.name || "");
+      else if (a === "crm-convert") {
+        if (!confirm("Créer le client et un devis brouillon depuis ce prospect ?")) return;
+        const converted = await core().api("pro/crm/" + encodeURIComponent(b.dataset.id) + "/convert", {});
+        await core().refresh(false);
+        core().toast("Prospect converti en client et devis.");
+        core().setPage("quotes");
+        setTimeout(() => core().documentModal("quotes", converted.quoteId), 0);
+      }
       else if (a === "new-stock") stockForm();
       else if (a === "new-workorder") await workOrderForm();
       else if (a === "edit-workorder") await workOrderForm(b.dataset.id);
