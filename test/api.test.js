@@ -1993,7 +1993,7 @@ test("P3 AI routes are permissioned and make no external call when unconfigured"
     const assistant = await call("ai/assistant", admin, {
       prompt: "Résume les chantiers visibles.",
     });
-    assert.equal(assistant.status, 503);
+    assert.equal(assistant.status, 424);
     assert.match(assistant.data.error, /non configuré/i);
 
     const employeeStatus = await call("ai/status", employee);
