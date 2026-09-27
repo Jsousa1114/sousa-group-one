@@ -5,6 +5,7 @@ const dns = require("node:dns").promises;
 const net = require("node:net");
 const D = require("./domain");
 const { auth } = require("./auth-middleware");
+const realtime = require("./realtime-hub");
 
 const wrap = (fn) => (req, res, next) =>
   Promise.resolve(fn(req, res, next)).catch(next);
@@ -371,6 +372,7 @@ async function emitEvent(db, input) {
   ).rows;
   for (const hook of hooks)
     deliverWebhook(db, hook, event).catch(() => {});
+  realtime.publish(event);
   return event;
 }
 function routes(db) {
