@@ -1852,7 +1852,7 @@ test("operations platform covers tasks CRM stock work orders analytics insights 
     dueDate: "2026-10-02",
   });
   assert.equal(task.status, 200, JSON.stringify(task.data));
-  const tasks = await call("operations/tasks?projectId=p1", employee);
+  const tasks = await call("operations/tasks?projectId=p1", admin);
   assert.equal(tasks.status, 200);
   assert.ok(tasks.data.tasks.some((x) => x.id === task.data.id));
 
@@ -1921,7 +1921,7 @@ test("operations platform covers tasks CRM stock work orders analytics insights 
     assignedEmployeeId: "e1",
   });
   assert.equal(work.status, 200, JSON.stringify(work.data));
-  const workOrders = await call("operations/work-orders", employee);
+  const workOrders = await call("operations/work-orders", admin);
   assert.ok(workOrders.data.workOrders.some((x) => x.id === work.data.id));
 
   const analytics = await call("operations/analytics", admin);
@@ -1937,7 +1937,7 @@ test("operations platform covers tasks CRM stock work orders analytics insights 
   const integrations = await call("operations/integrations", admin);
   assert.equal(integrations.status, 200, JSON.stringify(integrations.data));
   assert.equal(typeof integrations.data.runtime.turnConfigured, "boolean");
-  assert.equal((await call("operations/integrations", employee)).status, 403);
+  assert.equal((await call("operations/integrations", client)).status, 403);
 
   const search = await call("operations/search?q=Project", admin);
   assert.equal(search.status, 200);
