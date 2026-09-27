@@ -1906,6 +1906,14 @@ test("operations platform covers tasks CRM stock work orders analytics insights 
   );
   assert.equal(inventory.status, 200, JSON.stringify(inventory.data));
   const inventoryId = inventory.data.result.id;
+  const mirroredInventory = (
+    await db.query(
+      "SELECT data FROM entity_records WHERE collection='inventory' AND entity_id=$1",
+      [inventoryId],
+    )
+  ).rows[0];
+  assert.ok(mirroredInventory, "inventory should be mirrored into normalized entity_records");
+  assert.equal(mirroredInventory.data.name, "Article test Pilotage");
   const movement = await call("operations/inventory/movement", admin, {
     inventoryId,
     movementType: "out",
