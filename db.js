@@ -681,10 +681,17 @@ async function migrate(db = pool) {
     "INSERT INTO app_state(id,data) VALUES(1,$1) ON CONFLICT(id) DO NOTHING",
     [JSON.stringify(emptyState())],
   );
-  const mirrorState = (
-    await db.query("SELECT data FROM app_state WHERE id=1")
-  ).rows[0]?.data;
-  await syncEntityMirror(db, normalize(mirrorState));
+  const canonicalReady = (
+    await db.query(
+      "SELECT 1 FROM schema_migrations WHERE version='2026-09-27-entity-records-canonical-v1'",
+    )
+  ).rows.length > 0;
+  if (!canonicalReady) {
+    const mirrorState = (
+      await db.query("SELECT data FROM app_state WHERE id=1")
+    ).rows[0]?.data;
+    await syncEntityMirror(db, normalize(mirrorState));
+  }
   await db.query(
     `INSERT INTO schema_migrations(version) VALUES
       ('2026-09-27-entity-records-mirror'),
