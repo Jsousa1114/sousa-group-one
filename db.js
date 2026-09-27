@@ -61,6 +61,7 @@ async function migrate(db = pool) {
     "session_version INTEGER NOT NULL DEFAULT 0",
     "totp_secret TEXT",
     "totp_enabled BOOLEAN NOT NULL DEFAULT false",
+    "webauthn_user_id TEXT",
     "last_login_at TIMESTAMPTZ",
     "last_login_ip TEXT",
     "last_login_agent TEXT",
@@ -92,6 +93,40 @@ async function migrate(db = pool) {
   );
   await db.query(
     `CREATE INDEX IF NOT EXISTS user_sessions_user_idx ON user_sessions(user_id,last_seen DESC)`,
+  );
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS user_passkeys(
+      id TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      public_key BYTEA NOT NULL,
+      counter BIGINT NOT NULL DEFAULT 0,
+      transports TEXT[] NOT NULL DEFAULT '{}',
+      device_type TEXT,
+      backed_up BOOLEAN NOT NULL DEFAULT false,
+      name VARCHAR(120) NOT NULL DEFAULT 'Passkey',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      last_used_at TIMESTAMPTZ
+    )`,
+  );
+  await db.query(
+    `CREATE INDEX IF NOT EXISTS user_passkeys_user_idx
+     ON user_passkeys(user_id,created_at DESC)`,
+  );
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS webauthn_challenges(
+      id TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      purpose VARCHAR(30) NOT NULL,
+      challenge TEXT NOT NULL,
+      rp_id TEXT NOT NULL,
+      origin TEXT NOT NULL,
+      expires_at TIMESTAMPTZ NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`,
+  );
+  await db.query(
+    `CREATE INDEX IF NOT EXISTS webauthn_challenges_expiry_idx
+     ON webauthn_challenges(expires_at)`,
   );
   await db.query(
     `CREATE TABLE IF NOT EXISTS account_preferences(
@@ -618,7 +653,8 @@ async function migrate(db = pool) {
   await syncEntityMirror(db, normalize(mirrorState));
   await db.query(
     `INSERT INTO schema_migrations(version) VALUES
-      ('2026-09-27-entity-records-mirror')
+      ('2026-09-27-entity-records-mirror'),
+      ('2026-09-27-webauthn-passkeys')
       ON CONFLICT(version) DO NOTHING`,
   );
   // Disable the previously published demo credentials, even on an existing installation.
