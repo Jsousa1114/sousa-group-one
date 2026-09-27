@@ -2004,6 +2004,25 @@ test("operations platform covers tasks CRM stock work orders analytics insights 
     JSON.stringify(complianceState),
   ]);
 
+  const projectSummary = await call(
+    "operations/project/p1/daily-summary?date=" + payrollMonth + "-01",
+    admin,
+  );
+  assert.equal(projectSummary.status, 200, JSON.stringify(projectSummary.data));
+  assert.equal(projectSummary.data.project.id, "p1");
+  assert.ok(projectSummary.data.totalHours >= 7.5);
+  assert.ok(projectSummary.data.team.some((x) => x.employeeId === "e1"));
+  assert.match(projectSummary.data.summary, /Résumé automatique/);
+  assert.equal(
+    (
+      await call(
+        "operations/project/p1/daily-summary?date=" + payrollMonth + "-01",
+        viewer,
+      )
+    ).status,
+    403,
+  );
+
   const insights = await call("operations/insights", admin);
   assert.equal(insights.status, 200, JSON.stringify(insights.data));
   assert.ok(Array.isArray(insights.data.insights));
