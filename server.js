@@ -66,6 +66,7 @@ function createApp(db = pool) {
   app.use("/api/state", require("./state-routes").routes(db));
   app.use("/api/messaging", require("./messaging-routes").routes(db));
   app.use("/api/operations", require("./operations-routes").routes(db));
+  app.use("/api/p1", require("./p1-routes").routes(db));
   app.get(["/favicon.ico", "/icon.svg"], (req, res) => {
     res.set("Cache-Control", "no-cache");
     res.redirect(302, "/assets/logos/group.png?v=group-20260926");
@@ -80,7 +81,11 @@ function createApp(db = pool) {
     "passkeys.js",
     "p3-center.js",
     "operations-center.js",
+    "p1-suite.js",
     "styles.css",
+    "p1.css",
+    "pay.html",
+    "pay.js",
     "manifest.webmanifest",
     "service-worker.js",
     ...[
@@ -156,6 +161,13 @@ if (require.main === module) {
       runRecurring();
       const recurringTimer = setInterval(runRecurring, 60 * 60 * 1000);
       recurringTimer.unref?.();
+      const runP1 = async () =>
+        require("./p1-routes")
+          .runDueJobs(pool)
+          .catch((e) => console.error("P1 recurring jobs failed", e));
+      runP1();
+      const p1Timer = setInterval(runP1, 60 * 60 * 1000);
+      p1Timer.unref?.();
       return server;
     })
     .catch((e) => {
