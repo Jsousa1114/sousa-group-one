@@ -4,7 +4,7 @@ const bcrypt = require("bcryptjs");
 const { auth } = require("./auth-middleware");
 const { wrap } = require("./auth-routes");
 const D = require("./domain");
-const { transaction } = require("./db");
+const { transaction, loadState, persistedState, syncEntityMirror } = require("./db");
 const {
   generateTotpSecret,
   verifyTotp,
@@ -151,10 +151,7 @@ function routes(db) {
   r.get(
     "/summary",
     wrap(async (req, res) => {
-      const stateRow = (
-          await db.query("SELECT data FROM app_state WHERE id=1")
-        ).rows[0],
-        data = D.normalize(stateRow?.data),
+      const { data } = await loadState(db),
         view = D.viewState(data, req.user),
         employee = req.user.employee_id
           ? data.employees.find((e) => D.same(e.id, req.user.employee_id) && !e.deletedAt)
@@ -353,10 +350,8 @@ function routes(db) {
     wrap(async (req, res) => {
       const p = req.body || {};
       const result = await transaction(db, async (c) => {
-        const row = (
-            await c.query("SELECT data,revision FROM app_state WHERE id=1 FOR UPDATE")
-          ).rows[0],
-          data = D.normalize(row.data);
+        const row = await loadState(c, { forUpdate: true }),
+          data = row.data;
         if (req.user.employee_id) {
           const e = data.employees.find((x) => D.same(x.id, req.user.employee_id));
           if (!e || e.deletedAt) D.fail("Fiche salarié introuvable.", 404);
@@ -389,7 +384,12 @@ function routes(db) {
           `UPDATE app_state
            SET data=$1,revision=revision+1,updated_at=NOW(),updated_by=$2
            WHERE id=1`,
-          [JSON.stringify(data), req.user.email],
+          [JSON.stringify(persistedState(data)), req.user.email],
+        );
+        await syncEntityMirror(
+          c,
+          data,
+          req.user.employee_id ? ["employees"] : ["clients"],
         );
         await c.query(
           "INSERT INTO audit_logs(user_email,action,metadata) VALUES($1,$2,$3)",
@@ -557,10 +557,7 @@ function routes(db) {
   r.get(
     "/export",
     wrap(async (req, res) => {
-      const stateRow = (
-          await db.query("SELECT data FROM app_state WHERE id=1")
-        ).rows[0],
-        data = D.normalize(stateRow?.data),
+      const { data } = await loadState(db),
         view = D.viewState(data, req.user),
         prefs = await getPrefs(db, req.user.id),
         activity = (
