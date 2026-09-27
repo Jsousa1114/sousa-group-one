@@ -39,5 +39,9 @@ jobs:
           npm ci
           npm install --no-save playwright
           npx playwright install --with-deps chromium
-      - name: Test E2EE, video, group calls, mobile and search
-        run: node test/messaging-suite-browser.cjs
+      - name: Deep stability test E2EE, video, group calls, mobile and search
+        run: |
+          for i in 1 2 3; do
+            echo "Messaging stability run $i/3"
+            node test/messaging-suite-browser.cjs
+          done
