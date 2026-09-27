@@ -57,15 +57,14 @@ jobs:
         run: |
           npm install --no-save playwright
           npx playwright install --with-deps ${{ matrix.browser }}
-      - name: Test P2 on Chromium Android, Firefox and WebKit iPhone
+      - name: Deep stability test P2 on Chromium Android, Firefox and WebKit iPhone
         env:
           P2_BROWSER: ${{ matrix.browser }}
         run: |
-          node test/p2-browser.cjs || {
-            echo "First browser attempt failed; retrying once after render warm-up."
-            sleep 2
+          for i in 1 2 3 4 5; do
+            echo "P2 stability run $i/5 on ${P2_BROWSER}"
             node test/p2-browser.cjs
-          }
+          done
       - name: Upload P2 visual captures
         if: always()
         uses: actions/upload-artifact@v4
