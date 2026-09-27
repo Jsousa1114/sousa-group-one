@@ -253,6 +253,18 @@ function routes(db) {
     next();
   }));
 
+  router.get("/config", wrap(async (_req, res) => {
+    const row = (await db.query("SELECT company_name,logo_url,primary_color,accent_color,modules,white_label FROM pro_workspace_settings WHERE id=1")).rows[0];
+    res.json({
+      companyName: row.company_name,
+      logoUrl: row.logo_url,
+      primaryColor: row.primary_color,
+      accentColor: row.accent_color,
+      modules: { ...defaultModules, ...(row.modules || {}) },
+      supportEmail: row.white_label?.supportEmail || "",
+    });
+  }));
+
   router.get("/status", wrap(async (req, res) => {
     const settings = (await db.query("SELECT * FROM pro_workspace_settings WHERE id=1")).rows[0];
     res.json({
@@ -303,7 +315,7 @@ function routes(db) {
       [new Date(`${date}T00:00:00+02:00`).toISOString(), new Date(`${date}T23:59:59+02:00`).toISOString()],
     )).rows.filter((x) => (x.status !== "cancelled") && companyAllowed(req.user, x.company) && (!currentCompany || x.company === currentCompany));
     const urgentWork = (await db.query(
-      "SELECT id,company,project_id,title,status,priority,scheduled_at FROM work_orders WHERE status NOT IN ('completed','cancelled') AND priority='urgent' ORDER BY scheduled_at NULLS LAST,created_at DESC LIMIT 100",
+      "SELECT id,company,project_id,title,status,priority,scheduled_at FROM work_orders WHERE status NOT IN ('completed','done','cancelled') AND priority='urgent' ORDER BY scheduled_at NULLS LAST,created_at DESC LIMIT 100",
     )).rows.filter((x) => companyAllowed(req.user, x.company) && (!currentCompany || x.company === currentCompany));
     const unread = Number((await db.query("SELECT COUNT(*)::int n FROM user_notifications WHERE user_id=$1 AND read_at IS NULL", [req.user.id])).rows[0]?.n || 0);
     const revenue = invoices.filter((x) => x.status !== "Brouillon").reduce((n, x) => n + Number(x.amount || 0), 0);
