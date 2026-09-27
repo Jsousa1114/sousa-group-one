@@ -4,7 +4,7 @@ const { randomUUID } = require("node:crypto");
 const { auth, profile } = require("./auth-middleware");
 const { wrap } = require("./auth-routes");
 const D = require("./domain");
-const { loadState, syncEntityMirror } = require("./db");
+const { loadState, syncEntityMirror, transaction } = require("./db");
 const { deleteFile } = require("./file-storage");
 
 let webPush = null;
@@ -883,30 +883,32 @@ async function cleanupRetention(db) {
     "DELETE FROM rtc_group_rooms WHERE ended_at IS NOT NULL AND ended_at < NOW() - ($1::text || ' days')::interval",
     [String(callDays)],
   );
-  const messageDays = Math.max(1, policies.messages || 3650),
-    row = await loadState(db),
-    data = D.normalize(row.data),
-    cutoff = Date.now() - messageDays * 86400000,
-    expired = data.messages.filter(
-      (m) => m.createdAt && new Date(m.createdAt).getTime() < cutoff,
-    );
-  if (expired.length) {
+  const messageDays = Math.max(1, policies.messages || 3650);
+  const cleanup = await transaction(db, async (c) => {
+    const row = await loadState(c, { forUpdate: true }),
+      data = D.normalize(row.data),
+      cutoff = Date.now() - messageDays * 86400000,
+      expired = data.messages.filter(
+        (m) => m.createdAt && new Date(m.createdAt).getTime() < cutoff,
+      );
+    if (!expired.length) return { fileIds: [], ids: [] };
     const fileIds = expired
       .map((m) => m.attachment?.fileId)
       .filter(Boolean);
+    const ids = expired.map((m) => String(m.id));
     data.messages = data.messages.filter((m) => !expired.includes(m));
-    await db.query(
+    await c.query(
       "UPDATE app_state SET data=$1,revision=revision+1,updated_at=NOW(),updated_by='retention-policy' WHERE id=1",
       [JSON.stringify(data)],
     );
-    await syncEntityMirror(db, data, ["messages"]);
-    for (const fileId of fileIds) await deleteFile(db, fileId);
-    const ids = expired.map((m) => String(m.id));
-    await db.query("DELETE FROM message_reads WHERE message_id=ANY($1::text[])", [ids]);
-    await db.query("DELETE FROM message_reactions WHERE message_id=ANY($1::text[])", [ids]);
-    await db.query("DELETE FROM message_favorites WHERE message_id=ANY($1::text[])", [ids]);
-    await db.query("DELETE FROM message_overrides WHERE message_id=ANY($1::text[])", [ids]);
-  }
+    await syncEntityMirror(c, data, ["messages"]);
+    await c.query("DELETE FROM message_reads WHERE message_id=ANY($1::text[])", [ids]);
+    await c.query("DELETE FROM message_reactions WHERE message_id=ANY($1::text[])", [ids]);
+    await c.query("DELETE FROM message_favorites WHERE message_id=ANY($1::text[])", [ids]);
+    await c.query("DELETE FROM message_overrides WHERE message_id=ANY($1::text[])", [ids]);
+    return { fileIds, ids };
+  });
+  for (const fileId of cleanup.fileIds) await deleteFile(db, fileId);
 }
 
 module.exports = { routes, notifyUsers, cleanupRetention };
