@@ -3,7 +3,7 @@ const express = require("express");
 const { randomUUID, randomBytes } = require("node:crypto");
 const D = require("./domain");
 const { auth } = require("./auth-middleware");
-const { syncEntityMirror } = require("./db");
+const { syncEntityMirror, loadState, persistedState } = require("./db");
 
 const schemaPromises = new WeakMap();
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
@@ -281,9 +281,9 @@ async function ensureSchema(db) {
 }
 
 async function stateContext(db, user) {
-  const row = (await db.query("SELECT data,revision FROM app_state WHERE id=1")).rows[0];
-  const data = D.normalize(row?.data);
-  return { data, view: D.viewState(data, user), revision: row?.revision || 0 };
+  const row = await loadState(db);
+  const data = row.data;
+  return { data, view: D.viewState(data, user), revision: row.revision || 0 };
 }
 function projectFor(ctx, user, id, write = false) {
   const visible = ctx.view.projects.find((p) => D.same(p.id, id));
@@ -329,15 +329,15 @@ async function withStateWrite(db, actorId, action, fn) {
   const c = await db.connect();
   try {
     await c.query("BEGIN");
-    const row = (await c.query("SELECT data,revision FROM app_state WHERE id=1 FOR UPDATE")).rows[0];
+    const row = await loadState(c, { forUpdate: true });
     const rawUser = (await c.query("SELECT * FROM users WHERE id=$1", [actorId])).rows[0];
     if (!rawUser || rawUser.disabled || rawUser.deleted_at) throw new Error("Utilisateur automatisation indisponible.");
-    const data = D.normalize(row.data);
+    const data = row.data;
     const user = D.effectiveUser(data, rawUser);
     const result = await fn(c, data, user);
     await c.query(
       "UPDATE app_state SET data=$1,revision=revision+1,updated_at=NOW(),updated_by=$2 WHERE id=1",
-      [JSON.stringify(result.data || data), user.email],
+      [JSON.stringify(persistedState(result.data || data)), user.email],
     );
     await syncEntityMirror(c, result.data || data, result.changed || undefined);
     await c.query(
@@ -392,7 +392,7 @@ async function createInvoiceFromPlan(db, plan, source) {
   return created;
 }
 async function processInvoiceReminders(db) {
-  const state = D.normalize((await db.query("SELECT data FROM app_state WHERE id=1")).rows[0]?.data);
+  const state = (await loadState(db)).data;
   const now = Date.now();
   let count = 0;
   for (const invoice of state.invoices.filter((x) => !x.deletedAt && x.status !== "Brouillon" && x.status !== "Payée" && x.due)) {
@@ -463,7 +463,7 @@ function routes(db) {
       [String(req.params.token)]
     )).rows[0];
     if (!link) return res.status(404).json({ error: "Lien invalide ou expiré." });
-    const data = D.normalize((await db.query("SELECT data FROM app_state WHERE id=1")).rows[0]?.data);
+    const data = (await loadState(db)).data;
     const invoice = data.invoices.find((x) => D.same(x.id, link.invoice_id) && !x.deletedAt && x.status !== "Brouillon");
     if (!invoice) return res.status(404).json({ error: "Facture introuvable." });
     const client = data.clients.find((x) => D.same(x.id, invoice.clientId));
@@ -768,7 +768,7 @@ function routes(db) {
     const c=await db.connect();
     try{
       await c.query("BEGIN");
-      const row=(await c.query("SELECT data FROM app_state WHERE id=1 FOR UPDATE")).rows[0], data=D.normalize(row.data);
+      const row=await loadState(c,{forUpdate:true}), data=row.data;
       const entry=data.time.find((x)=>D.same(x.id,timeId));
       if(!entry||!D.same(entry.employeeId,req.user.employee_id)) D.fail("Heures introuvables.",404);
       const project=data.projects.find((x)=>D.same(x.id,entry.project));
@@ -785,7 +785,7 @@ function routes(db) {
       entry.seconds=Math.max(0,Number(entry.seconds||0)-Math.round(extra*60));
       entry.hours=Math.round(entry.seconds/3.6)/1000;
       entry.autoBreakApplied=true;
-      await c.query("UPDATE app_state SET data=$1,revision=revision+1,updated_at=NOW(),updated_by=$2 WHERE id=1",[JSON.stringify(data),req.user.email]);
+      await c.query("UPDATE app_state SET data=$1,revision=revision+1,updated_at=NOW(),updated_by=$2 WHERE id=1",[JSON.stringify(persistedState(data)),req.user.email]);
       await syncEntityMirror(c,data,["time"]);
       await c.query("COMMIT");
       res.json({ok:true,applied:true,minutes:entry.break,hours:entry.hours});
