@@ -32,7 +32,7 @@
       ?.companies?.find((c) => String(c.id) === String(id))?.name || id || "—";
   function initials(name) {
     return String(name || "?")
-      .split(/s+/)
+      .split(" ")
       .filter(Boolean)
       .slice(0, 2)
       .map((x) => x[0]?.toUpperCase())
@@ -51,13 +51,13 @@
   }
   function sessionLabel(agent = "") {
     const a = String(agent);
-    const browser = /Edg//.test(a)
+    const browser = a.includes("Edg/")
       ? "Edge"
-      : /Chrome//.test(a)
+      : a.includes("Chrome/")
         ? "Chrome"
-        : /Safari//.test(a) && !/Chrome//.test(a)
+        : a.includes("Safari/") && !a.includes("Chrome/")
           ? "Safari"
-          : /Firefox//.test(a)
+          : a.includes("Firefox/")
             ? "Firefox"
             : "Navigateur";
     const device = /iPhone/.test(a)
