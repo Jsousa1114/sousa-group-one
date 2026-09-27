@@ -4,6 +4,7 @@ const { randomUUID } = require("node:crypto");
 const { auth, profile } = require("./auth-middleware");
 const { wrap } = require("./auth-routes");
 const D = require("./domain");
+const { loadState, syncEntityMirror } = require("./db");
 
 let webPush = null;
 try {
@@ -15,7 +16,7 @@ function routes(db) {
   r.use(auth(db));
 
   async function stateRow() {
-    return (await db.query("SELECT data,revision FROM app_state WHERE id=1")).rows[0];
+    return loadState(db);
   }
   async function context(user) {
     const row = await stateRow();
@@ -884,7 +885,7 @@ async function cleanupRetention(db) {
     [String(callDays)],
   );
   const messageDays = Math.max(1, policies.messages || 3650),
-    row = (await db.query("SELECT data,revision FROM app_state WHERE id=1")).rows[0],
+    row = await loadState(db),
     data = D.normalize(row.data),
     cutoff = Date.now() - messageDays * 86400000,
     expired = data.messages.filter(
@@ -899,6 +900,7 @@ async function cleanupRetention(db) {
       "UPDATE app_state SET data=$1,revision=revision+1,updated_at=NOW(),updated_by='retention-policy' WHERE id=1",
       [JSON.stringify(data)],
     );
+    await syncEntityMirror(db, data, ["messages"]);
     if (fileIds.length)
       await db.query("DELETE FROM file_contents WHERE id=ANY($1::text[])", [fileIds]);
     const ids = expired.map((m) => String(m.id));
