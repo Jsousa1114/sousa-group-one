@@ -47,6 +47,7 @@
   function tabs() {
     const items = [
       ["overview", "Vue d’ensemble"],
+      ["p1", "P1 complet"],
       ["tasks", "Tâches / Kanban"],
       ...(commercial() ? [["crm", "CRM"]] : []),
       ...(operational() ? [["stock", "Stock"], ["workorders", "Bons de travail"]] : []),
@@ -562,6 +563,11 @@
     root().querySelector("#opsBody").innerHTML = '<article class="card"><p>Chargement…</p></article>';
     try {
       if (activeTab === "overview") await renderOverview();
+      else if (activeTab === "p1") {
+        const host = root().querySelector("#opsBody");
+        if (window.SGOP1Suite?.render) await window.SGOP1Suite.render(host);
+        else host.innerHTML = '<article class="card empty">Module P1 indisponible.</article>';
+      }
       else if (activeTab === "tasks") await renderTasks();
       else if (activeTab === "crm") await renderCrm();
       else if (activeTab === "stock") await renderStock();
