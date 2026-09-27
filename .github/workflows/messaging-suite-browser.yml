@@ -14,6 +14,11 @@ on:
       - index.html
       - server.js
       - service-worker.js
+      - account-center.js
+      - account-routes.js
+      - account-security.js
+      - auth-routes.js
+      - auth-middleware.js
       - test/messaging-suite-browser.cjs
       - .github/workflows/messaging-suite-browser.yml
 
