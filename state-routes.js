@@ -1148,13 +1148,20 @@ function routes(db) {
                   "Passeport",
                   "Permis de conduire",
                   "Permis de séjour",
+                  "Contrat",
+                  "CFC",
+                  "Certificat",
+                  "Formation",
+                  "Attestation",
                   "Autre justificatif",
+                  "Autre document RH",
                 ].includes(p.documentType)
               )
                 D.fail("Type de justificatif invalide.");
               m.category = "identity";
               m.documentType = p.documentType;
               m.description = D.text(p.description, "Description", 200, true);
+              m.expiresAt = p.expiresAt ? D.iso(p.expiresAt) : "";
               m.visibility = "hr";
             }
             if (m.visibility === "client" && !D.privileged(req.user, D.OPS))
