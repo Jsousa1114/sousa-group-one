@@ -203,6 +203,7 @@ async function api(path, body) {
   return data;
 }
 const chatTextDrafts = new Map();
+const chatMessageLimits = new Map();
 const chatKey = () =>
   selectedThreadId
     ? "thread:" + selectedThreadId
@@ -1516,7 +1517,10 @@ function messagesView() {
     selectedRecipient = String(active.contact.id);
     selectedThreadId = "";
   }
-  const list = active.messages;
+  const fullList = active.messages,
+    messageLimit = chatMessageLimits.get(active.key) || 120,
+    list = fullList.slice(-messageLimit),
+    hiddenMessageCount = Math.max(0, fullList.length - list.length);
   let day = "";
   const bubbles =
     list
@@ -1541,7 +1545,7 @@ function messagesView() {
             ${m.forwardedFromId ? '<span class="message-forwarded">↪ Transféré</span>' : ""}
             ${m.system ? '<span class="message-system-label">⚙ Sousa Group One</span>' : ""}
             ${active.kind === "thread" && !mine && !m.system ? `<b class="message-sender">${esc(m.sender || "Participant")}</b>` : ""}
-            ${m.deletedForAll ? '<p class="message-deleted-text">🚫 Ce message a été supprimé pour tout le monde.</p>' : `${chatReplyHtml(m, list)}${chatAttachmentHtml(m)}${m.encryption ? `<p class="prewrap encrypted-text" data-encrypted-text="${esc(m.id)}">🔐 Déchiffrement…</p>` : m.text ? `<p class="prewrap">${esc(m.text)}</p>` : ""}${m.sharedRef ? `<div class="shared-ref-placeholder" data-shared-ref="${esc(m.id)}"></div>` : ""}`}
+            ${m.deletedForAll ? '<p class="message-deleted-text">🚫 Ce message a été supprimé pour tout le monde.</p>' : `${chatReplyHtml(m, fullList)}${chatAttachmentHtml(m)}${m.encryption ? `<p class="prewrap encrypted-text" data-encrypted-text="${esc(m.id)}">🔐 Déchiffrement…</p>` : m.text ? `<p class="prewrap">${esc(m.text)}</p>` : ""}${m.sharedRef ? `<div class="shared-ref-placeholder" data-shared-ref="${esc(m.id)}"></div>` : ""}`}
             <div class="message-meta"><time datetime="${esc(m.createdAt)}">${esc(chatTime(m.createdAt))}</time>${m.editedAt ? '<span class="message-edited">modifié</span>' : ""}${check}</div>
             <div class="message-actions">
               <button type="button" data-action="chat-reply" data-id="${esc(m.id)}">↩ Répondre</button>
@@ -1579,11 +1583,11 @@ function messagesView() {
         <div class="chat-header-person"><strong>${esc(active.title)}</strong><span>${esc(active.subtitle)}</span></div>${active.kind === "direct" ? `<div class="chat-call-actions"><button type="button" class="chat-call-button" data-action="call-start" data-id="${esc(active.contact.id)}" aria-label="Appeler ${esc(active.title)}" title="Appel audio">📞</button><button type="button" class="chat-call-button" data-action="call-video" data-id="${esc(active.contact.id)}" aria-label="Appel vidéo ${esc(active.title)}" title="Appel vidéo">📹</button></div>` : ""}
       </header>
       <div class="chat-history">
-        <div id="messageThread" class="messages chat-thread" role="log" tabindex="0" aria-live="polite" aria-label="Messages avec ${esc(active.title)}">${bubbles}</div>
+        <div id="messageThread" class="messages chat-thread" role="log" tabindex="0" aria-live="polite" aria-label="Messages avec ${esc(active.title)}">${hiddenMessageCount ? `<button type="button" class="chat-load-older" data-action="chat-load-older" data-id="${esc(list[0]?.id || "")}">↑ Charger ${Math.min(100, hiddenMessageCount)} message(s) précédent(s)</button>` : ""}${bubbles}</div>
         <button type="button" id="chatLatest" class="chat-latest hidden" data-action="chat-latest" aria-controls="messageThread">↓ Derniers messages</button>
       </div>
       <div id="chatReplyBar" class="chat-reply-bar ${chatReplyToId ? "" : "hidden"}">
-        <div><b>Réponse</b><span>${chatReplyToId ? esc((list.find((m) => same(m.id, chatReplyToId))?.text || "Message").slice(0, 100)) : ""}</span></div>
+        <div><b>Réponse</b><span>${chatReplyToId ? esc((fullList.find((m) => same(m.id, chatReplyToId))?.text || "Message").slice(0, 100)) : ""}</span></div>
         <button type="button" data-action="chat-cancel-reply" aria-label="Annuler la réponse">✕</button>
       </div>
       <div id="chatAttachmentBar" class="chat-attachment-bar ${chatAttachmentDraft ? "" : "hidden"}">
@@ -2847,6 +2851,15 @@ document.addEventListener("click", async (e) => {
         thread.focus({ preventScroll: true });
       }
       updateChatScrollButton();
+    } else if (a === "chat-load-older") {
+      const key = chatKey(),
+        current = chatMessageLimits.get(key) || 120,
+        anchorId = id;
+      chatMessageLimits.set(key, current + 100);
+      render();
+      requestAnimationFrame(() =>
+        document.getElementById("msg-" + anchorId)?.scrollIntoView({ block: "start" }),
+      );
     } else if (a === "chat-back") {
       mobileChatOpen = false;
       render();
