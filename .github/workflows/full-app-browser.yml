@@ -16,6 +16,10 @@ on:
       - domain.js
       - finance.js
       - test/full-app-browser.cjs
+      - db.js
+      - migration-runner.js
+      - migrations/**
+      - file-storage.js
       - .github/workflows/full-app-browser.yml
 
 permissions:
