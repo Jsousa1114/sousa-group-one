@@ -13,6 +13,11 @@ on:
       - p1-suite.js
       - p1-routes.js
       - p1.css
+      - p2-runtime.js
+      - p2-center.js
+      - p2-routes.js
+      - p2.css
+      - test/p2.test.js
       - pay.html
       - pay.js
       - test/p1.test.js
