@@ -6,6 +6,8 @@ on:
     paths:
       - .github/workflows/live-browser.yml
       - test/live-browser.cjs
+  schedule:
+    - cron: '37 3 * * *'
 
 permissions:
   contents: read
@@ -24,7 +26,11 @@ jobs:
           npm ci
           npm install --no-save playwright
           npx playwright install --with-deps chromium
-      - name: Test live site in desktop and mobile Chromium
+      - name: Test live site in desktop/mobile Chromium + authenticated account
+        env:
+          E2E_BASE_URL: https://sousa-group-one.onrender.com
+          E2E_EMAIL: ${{ secrets.E2E_EMAIL }}
+          E2E_PASSWORD: ${{ secrets.E2E_PASSWORD }}
         run: node test/live-browser.cjs
       - name: Upload public login screenshots
         if: always()
