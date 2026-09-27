@@ -117,8 +117,7 @@ async function controlWithinViewport(page, selector, label) {
 
     // Signaling must reach accepted state and peer should normally connect on localhost fake media.
     await admin.p.waitForFunction(async () => {
-      const token = sessionStorage.getItem("sgo_session");
-      const r = await fetch("/api/state/calls/pending", { headers: { Authorization: "Bearer " + token } });
+      const r = await fetch("/api/state/calls/pending", { credentials: "same-origin" });
       const j = await r.json();
       return j.call?.status === "accepted";
     }, null, { timeout: 10000 });

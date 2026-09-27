@@ -1,9 +1,27 @@
 "use strict";
 const jwt = require("jsonwebtoken");
+function sessionCookieToken(req) {
+  const raw = String(req.headers.cookie || "");
+  for (const part of raw.split(";")) {
+    const i = part.indexOf("=");
+    if (i < 0) continue;
+    const name = part.slice(0, i).trim();
+    if (name !== "sgo_session") continue;
+    try {
+      return decodeURIComponent(part.slice(i + 1).trim());
+    } catch {
+      return part.slice(i + 1).trim();
+    }
+  }
+  return "";
+}
 function auth(db) {
   return async (req, res, next) => {
     try {
-      const token = (req.headers.authorization || "").replace(/^Bearer /, "");
+      const bearer = String(req.headers.authorization || "").match(/^Bearer\s+(.+)$/i),
+        token = bearer?.[1] || sessionCookieToken(req);
+      if (!token)
+        return res.status(401).json({ error: "Authentification requise." });
       const claims = jwt.verify(token, process.env.JWT_SECRET, {
         algorithms: ["HS256"],
         issuer: "sousa-group-one",

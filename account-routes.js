@@ -11,6 +11,8 @@ const {
   otpauthUri,
   generateRecoveryCodes,
   hashRecoveryCode,
+  encryptTotpSecret,
+  decryptTotpSecret,
 } = require("./account-security");
 
 const DEFAULT_PREFS = Object.freeze({
@@ -414,7 +416,7 @@ function routes(db) {
       const secret = generateTotpSecret();
       await db.query(
         "UPDATE users SET totp_secret=$1,totp_enabled=false WHERE id=$2",
-        [secret, req.user.id],
+        [encryptTotpSecret(secret), req.user.id],
       );
       await db.query("DELETE FROM user_recovery_codes WHERE user_id=$1", [
         req.user.id,
@@ -434,7 +436,7 @@ function routes(db) {
         await db.query("SELECT totp_secret FROM users WHERE id=$1", [req.user.id])
       ).rows[0];
       if (!user?.totp_secret) D.fail("Commencez la configuration 2FA.");
-      if (!verifyTotp(user.totp_secret, req.body?.code))
+      if (!verifyTotp(decryptTotpSecret(user.totp_secret), req.body?.code))
         D.fail("Code de vérification invalide.", 403);
       const recoveryCodes = generateRecoveryCodes();
       await transaction(db, async (c) => {
@@ -471,7 +473,10 @@ function routes(db) {
         ))
       )
         D.fail("Mot de passe actuel incorrect.", 403);
-      if (user.totp_enabled && !verifyTotp(user.totp_secret, req.body?.code))
+      if (
+        user.totp_enabled &&
+        !verifyTotp(decryptTotpSecret(user.totp_secret), req.body?.code)
+      )
         D.fail("Code de sécurité invalide.", 403);
       await db.query(
         "UPDATE users SET totp_enabled=false,totp_secret=NULL WHERE id=$1",
@@ -502,7 +507,7 @@ function routes(db) {
         ))
       )
         D.fail("Mot de passe actuel incorrect.", 403);
-      if (!verifyTotp(user.totp_secret, req.body?.code))
+      if (!verifyTotp(decryptTotpSecret(user.totp_secret), req.body?.code))
         D.fail("Code de sécurité invalide.", 403);
       const recoveryCodes = generateRecoveryCodes();
       await transaction(db, async (c) => {

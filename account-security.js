@@ -1,5 +1,11 @@
 "use strict";
-const { randomBytes, createHmac, createHash } = require("node:crypto");
+const {
+  randomBytes,
+  createHmac,
+  createHash,
+  createCipheriv,
+  createDecipheriv,
+} = require("node:crypto");
 const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 function base32Encode(buffer) {
   let bits = "", out = "";
@@ -44,6 +50,65 @@ function verifyTotp(secret, code, now = Date.now()) {
 function generateTotpSecret() {
   return base32Encode(randomBytes(20));
 }
+function totpEncryptionKey() {
+  const raw = String(process.env.TOTP_ENCRYPTION_KEY || "").trim();
+  if (!raw) return null;
+  let key = null;
+  if (/^[a-f0-9]{64}$/i.test(raw)) key = Buffer.from(raw, "hex");
+  else {
+    try {
+      key = Buffer.from(raw, "base64");
+    } catch {
+      key = null;
+    }
+  }
+  if (!key || key.length !== 32)
+    throw new Error(
+      "TOTP_ENCRYPTION_KEY must be a 32-byte base64 or 64-character hex key.",
+    );
+  return key;
+}
+function isEncryptedTotpSecret(value) {
+  return String(value || "").startsWith("enc:v1:");
+}
+function encryptTotpSecret(secret) {
+  const value = String(secret || "");
+  if (!value || isEncryptedTotpSecret(value)) return value;
+  const key = totpEncryptionKey();
+  if (!key) return value;
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", key, iv);
+  const encrypted = Buffer.concat([cipher.update(value, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return [
+    "enc",
+    "v1",
+    iv.toString("base64url"),
+    tag.toString("base64url"),
+    encrypted.toString("base64url"),
+  ].join(":");
+}
+function decryptTotpSecret(secret) {
+  const value = String(secret || "");
+  if (!isEncryptedTotpSecret(value)) return value;
+  const key = totpEncryptionKey();
+  if (!key)
+    throw new Error(
+      "TOTP_ENCRYPTION_KEY is required to decrypt stored 2FA secrets.",
+    );
+  const parts = value.split(":");
+  if (parts.length !== 5) throw new Error("Stored 2FA secret is malformed.");
+  const decipher = createDecipheriv(
+    "aes-256-gcm",
+    key,
+    Buffer.from(parts[2], "base64url"),
+  );
+  decipher.setAuthTag(Buffer.from(parts[3], "base64url"));
+  return Buffer.concat([
+    decipher.update(Buffer.from(parts[4], "base64url")),
+    decipher.final(),
+  ]).toString("utf8");
+}
 function otpauthUri(secret, email) {
   const issuer = "Sousa Group One";
   return (
@@ -85,4 +150,7 @@ module.exports = {
   normalizeRecoveryCode,
   hashRecoveryCode,
   generateRecoveryCodes,
+  encryptTotpSecret,
+  decryptTotpSecret,
+  isEncryptedTotpSecret,
 };

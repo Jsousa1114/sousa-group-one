@@ -7,7 +7,11 @@ const { database } = require("./database");
 const { migrate } = require("../db");
 const { createApp } = require("../server");
 const { emptyState } = require("../domain");
-const { codeAt } = require("../account-security");
+const {
+  codeAt,
+  encryptTotpSecret,
+  decryptTotpSecret,
+} = require("../account-security");
 
 let db, server, url;
 const PASSWORD = "Account-Center-Test-Password-2026";
@@ -100,6 +104,40 @@ test.before(async () => {
 test.after(async () => {
   await new Promise((resolve) => server.close(resolve));
   await db.end();
+});
+
+test("login issues an HttpOnly SameSite cookie that authenticates protected routes", async () => {
+  const signed = await login();
+  assert.equal(signed.status, 200);
+  const setCookie = signed.headers.get("set-cookie") || "";
+  assert.match(setCookie, /sgo_session=/);
+  assert.match(setCookie, /HttpOnly/i);
+  assert.match(setCookie, /SameSite=Strict/i);
+  const cookie = setCookie.split(";")[0];
+  const response = await fetch(url + "/api/account/summary", {
+    headers: { Cookie: cookie },
+  });
+  assert.equal(response.status, 200);
+  const logout = await fetch(url + "/api/auth/logout", {
+    method: "POST",
+    headers: { Cookie: cookie },
+  });
+  assert.equal(logout.status, 200);
+});
+
+test("TOTP secrets can be encrypted and decrypted with AES-GCM", () => {
+  const previous = process.env.TOTP_ENCRYPTION_KEY;
+  process.env.TOTP_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString("base64");
+  try {
+    const secret = "JBSWY3DPEHPK3PXP";
+    const encrypted = encryptTotpSecret(secret);
+    assert.match(encrypted, /^enc:v1:/);
+    assert.notEqual(encrypted, secret);
+    assert.equal(decryptTotpSecret(encrypted), secret);
+  } finally {
+    if (previous === undefined) delete process.env.TOTP_ENCRYPTION_KEY;
+    else process.env.TOTP_ENCRYPTION_KEY = previous;
+  }
 });
 
 test("account center exposes own profile, professional data and a tracked current session", async () => {
