@@ -1,5 +1,5 @@
 "use strict";
-const { randomBytes, createHmac } = require("node:crypto");
+const { randomBytes, createHmac, createHash } = require("node:crypto");
 const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 function base32Encode(buffer) {
   let bits = "", out = "";
@@ -56,4 +56,33 @@ function otpauthUri(secret, email) {
     "&algorithm=SHA1&digits=6&period=30"
   );
 }
-module.exports = { generateTotpSecret, verifyTotp, otpauthUri, codeAt };
+function normalizeRecoveryCode(value) {
+  return String(value || "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "");
+}
+function hashRecoveryCode(value) {
+  return createHash("sha256")
+    .update(normalizeRecoveryCode(value))
+    .digest("hex");
+}
+function generateRecoveryCodes(count = 10) {
+  return Array.from({ length: count }, () => {
+    const raw = randomBytes(9)
+      .toString("base64url")
+      .replace(/[^A-Za-z0-9]/g, "")
+      .toUpperCase()
+      .slice(0, 12)
+      .padEnd(12, "X");
+    return raw.match(/.{1,4}/g).join("-");
+  });
+}
+module.exports = {
+  generateTotpSecret,
+  verifyTotp,
+  otpauthUri,
+  codeAt,
+  normalizeRecoveryCode,
+  hashRecoveryCode,
+  generateRecoveryCodes,
+};

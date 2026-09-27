@@ -101,6 +101,7 @@ const menus = {
   documents: ["Documents", Object.keys(roles)],
   messages: ["Messages", Object.keys(roles)],
   reports: ["Rapports", [...core, "hr", "accounting", "manager"]],
+  pilotage: ["Pilotage", [...core, "hr", "manager", "accounting", "employee"]],
   users: ["Comptes", ["admin"]],
   audit: ["Journal", hr],
   settings: ["Mon compte", Object.keys(roles)],
@@ -435,6 +436,7 @@ function render() {
   queueMicrotask(() => {
     window.SGOMessagingSuite?.afterRender?.();
     window.SGOAccountCenter?.afterRender?.();
+    window.SGOOperationsCenter?.afterRender?.();
   });
 }
 function projectRows(list) {
@@ -1576,6 +1578,9 @@ const views = {
   documents: documentsView,
   messages: messagesView,
   reports: reportsView,
+  pilotage: () =>
+    heading("Pilotage") +
+    '<div id="operationsCenter"><article class="card"><p>Chargement du pilotage…</p></article></div>',
   employees: () =>
     genericPage("employees") +
     (profile.role === "admin" && profile.company === "group"

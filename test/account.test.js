@@ -174,6 +174,13 @@ test("TOTP two-factor authentication can be enabled and is required on later log
   const code = codeAt(setup.data.secret, Math.floor(Date.now() / 30000));
   const enabled = await call("account/2fa/enable", token, { code });
   assert.equal(enabled.status, 200);
+  assert.equal(enabled.data.recoveryCodes.length, 10);
+
+  const recovery = enabled.data.recoveryCodes[0];
+  const recoveryLogin = await login(recovery);
+  assert.equal(recoveryLogin.status, 200);
+  const reusedRecovery = await login(recovery);
+  assert.equal(reusedRecovery.status, 401);
 
   const missing = await login();
   assert.equal(missing.status, 401);

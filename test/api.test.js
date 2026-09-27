@@ -1835,3 +1835,132 @@ test("complete messaging suite secures presence, preferences, reactions, E2EE tr
   assert.equal((await call("messaging/retention", suiteClient)).status, 403);
   assert.equal((await call("messaging/retention", admin)).status, 200);
 });
+
+
+test("operations platform covers tasks CRM stock work orders analytics insights and permissions", async () => {
+  const viewerEmail = "ops-viewer-" + Date.now() + "@test.invalid",
+    viewerHash = await bcrypt.hash("Ops-Viewer-Password-2026", 4);
+  await db.query(
+    "INSERT INTO users(email,password_hash,role,name,avatar,company) VALUES($1,$2,'client','Ops Viewer','','home')",
+    [viewerEmail, viewerHash],
+  );
+  const viewerLogin = await call("auth/login", null, {
+      email: viewerEmail,
+      password: "Ops-Viewer-Password-2026",
+    }),
+    viewer = viewerLogin.data.token;
+  assert.equal(viewerLogin.status, 200);
+
+  const overview = await call("operations/overview", admin);
+  assert.equal(overview.status, 200, JSON.stringify(overview.data));
+  assert.ok(overview.data.tasks);
+
+  const task = await call("operations/tasks", admin, {
+    projectId: "p1",
+    title: "Tester le tableau électrique",
+    description: "Contrôle complet avant réception",
+    status: "todo",
+    priority: "high",
+    assignedEmployeeId: "e1",
+    dueDate: "2026-10-02",
+  });
+  assert.equal(task.status, 200, JSON.stringify(task.data));
+  const tasks = await call("operations/tasks?projectId=p1", admin);
+  assert.equal(tasks.status, 200);
+  assert.ok(tasks.data.tasks.some((x) => x.id === task.data.id));
+
+  const crm = await call("operations/crm", admin, {
+    company: "home",
+    clientId: "c1",
+    name: "Extension installation client",
+    stage: "proposal",
+    value: 4200,
+    probability: 65,
+    nextAction: "Relancer le client",
+    nextActionAt: "2026-10-01T09:00:00",
+    source: "Client existant",
+    notes: "Opportunité créée par le test P0-P3",
+  });
+  assert.equal(crm.status, 200, JSON.stringify(crm.data));
+  const crmList = await call("operations/crm", admin);
+  assert.ok(crmList.data.opportunities.some((x) => x.id === crm.data.id));
+  assert.equal((await call("operations/crm", viewer)).status, 403);
+
+  const inventory = await call(
+    "state/command",
+    admin,
+    payload(await rev(), {
+      action: "create",
+      collection: "inventory",
+      payload: {
+        company: "home",
+        sku: "OPS-TEST",
+        name: "Article test Pilotage",
+        stock: 10,
+        min: 2,
+        unit: "pcs",
+        buy: 5,
+        sell: 9,
+      },
+    }),
+  );
+  assert.equal(inventory.status, 200, JSON.stringify(inventory.data));
+  const inventoryId = inventory.data.result.id;
+  const mirroredInventory = (
+    await db.query(
+      "SELECT data FROM entity_records WHERE collection='inventory' AND entity_id=$1",
+      [inventoryId],
+    )
+  ).rows[0];
+  assert.ok(mirroredInventory, "inventory should be mirrored into normalized entity_records");
+  assert.equal(mirroredInventory.data.name, "Article test Pilotage");
+  const movement = await call("operations/inventory/movement", admin, {
+    inventoryId,
+    movementType: "out",
+    quantity: 2,
+    projectId: "p1",
+    employeeId: "e1",
+    note: "Utilisé sur chantier",
+  });
+  assert.equal(movement.status, 200, JSON.stringify(movement.data));
+  assert.equal(movement.data.quantity, -2);
+  const movements = await call(
+    "operations/inventory/movements?inventoryId=" + encodeURIComponent(inventoryId),
+    admin,
+  );
+  assert.ok(movements.data.movements.some((x) => x.id === movement.data.id));
+
+  const work = await call("operations/work-orders", admin, {
+    company: "home",
+    clientId: "c1",
+    projectId: "p1",
+    title: "Bon d’intervention test",
+    description: "Intervention planifiée depuis Pilotage",
+    status: "planned",
+    priority: "normal",
+    scheduledAt: "2026-10-03T08:00:00",
+    assignedEmployeeId: "e1",
+  });
+  assert.equal(work.status, 200, JSON.stringify(work.data));
+  const workOrders = await call("operations/work-orders", admin);
+  assert.ok(workOrders.data.workOrders.some((x) => x.id === work.data.id));
+
+  const analytics = await call("operations/analytics", admin);
+  assert.equal(analytics.status, 200, JSON.stringify(analytics.data));
+  assert.ok(analytics.data.kpis);
+  assert.ok(Array.isArray(analytics.data.byProject));
+  assert.equal((await call("operations/analytics", viewer)).status, 403);
+
+  const insights = await call("operations/insights", admin);
+  assert.equal(insights.status, 200, JSON.stringify(insights.data));
+  assert.ok(Array.isArray(insights.data.insights));
+
+  const integrations = await call("operations/integrations", admin);
+  assert.equal(integrations.status, 200, JSON.stringify(integrations.data));
+  assert.equal(typeof integrations.data.runtime.turnConfigured, "boolean");
+  assert.equal((await call("operations/integrations", viewer)).status, 403);
+
+  const search = await call("operations/search?q=Project", admin);
+  assert.equal(search.status, 200);
+  assert.ok(search.data.results.some((x) => x.type === "project" && x.id === "p1"));
+});

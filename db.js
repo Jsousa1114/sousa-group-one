@@ -3,6 +3,48 @@ const { Pool } = require("pg");
 const bcrypt = require("bcryptjs");
 const { createHash } = require("node:crypto");
 const { emptyState, normalize, AppError } = require("./domain");
+const MIRRORED_COLLECTIONS = [
+  "companies",
+  "employees",
+  "clients",
+  "projects",
+  "time",
+  "planning",
+  "absences",
+  "quotes",
+  "invoices",
+  "payments",
+  "expenses",
+  "inventory",
+  "suppliers",
+  "vehicles",
+  "tools",
+  "maintenance",
+  "documents",
+  "messageThreads",
+];
+async function syncEntityCollection(c, collection, rows) {
+  const list = Array.isArray(rows) ? rows.filter((x) => x && x.id != null) : [];
+  await c.query("DELETE FROM entity_records WHERE collection=$1", [collection]);
+  for (const row of list)
+    await c.query(
+      `INSERT INTO entity_records(collection,entity_id,company,data,updated_at)
+       VALUES($1,$2,$3,$4,NOW())
+       ON CONFLICT(collection,entity_id) DO UPDATE SET
+       company=EXCLUDED.company,data=EXCLUDED.data,updated_at=NOW()`,
+      [
+        collection,
+        String(row.id),
+        row.company ? String(row.company) : null,
+        JSON.stringify(row),
+      ],
+    );
+}
+async function syncEntityMirror(c, data, changedOnly = null) {
+  const collections = changedOnly || MIRRORED_COLLECTIONS;
+  for (const collection of collections)
+    await syncEntityCollection(c, collection, data?.[collection]);
+}
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: process.env.PGSSL === "disable" ? false : { rejectUnauthorized: false },
@@ -24,6 +66,19 @@ async function migrate(db = pool) {
     "last_login_agent TEXT",
   ])
     await db.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS " + column);
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS user_recovery_codes(
+      user_id INTEGER NOT NULL,
+      code_hash TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      used_at TIMESTAMPTZ,
+      PRIMARY KEY(user_id,code_hash)
+    )`,
+  );
+  await db.query(
+    `CREATE INDEX IF NOT EXISTS user_recovery_codes_unused_idx
+     ON user_recovery_codes(user_id,used_at)`,
+  );
   await db.query(
     `CREATE TABLE IF NOT EXISTS user_sessions(
       id TEXT PRIMARY KEY,
@@ -54,6 +109,296 @@ async function migrate(db = pool) {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       resolved_at TIMESTAMPTZ
     )`,
+  );
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS schema_migrations(
+      version TEXT PRIMARY KEY,
+      applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`,
+  );
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS entity_records(
+      collection TEXT NOT NULL,
+      entity_id TEXT NOT NULL,
+      company TEXT,
+      data JSONB NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY(collection,entity_id)
+    )`,
+  );
+  await db.query(
+    `CREATE INDEX IF NOT EXISTS entity_records_company_idx ON entity_records(collection,company)`,
+  );
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS application_errors(
+      id BIGSERIAL PRIMARY KEY,
+      request_id TEXT,
+      user_id INTEGER,
+      method VARCHAR(12),
+      path TEXT,
+      status INTEGER NOT NULL,
+      message TEXT,
+      stack TEXT,
+      metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`,
+  );
+  await db.query(
+    `CREATE INDEX IF NOT EXISTS application_errors_created_idx
+     ON application_errors(created_at DESC)`,
+  );
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS app_events(
+      id BIGSERIAL PRIMARY KEY,
+      event_type TEXT NOT NULL,
+      actor_user_id INTEGER,
+      company TEXT,
+      project_id TEXT,
+      entity_type TEXT,
+      entity_id TEXT,
+      payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`,
+  );
+  await db.query(
+    `CREATE INDEX IF NOT EXISTS app_events_project_idx ON app_events(project_id,created_at DESC)`,
+  );
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS user_notifications(
+      id TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      category TEXT NOT NULL,
+      title TEXT NOT NULL,
+      body TEXT,
+      url TEXT,
+      entity_type TEXT,
+      entity_id TEXT,
+      read_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`,
+  );
+  await db.query(
+    `CREATE INDEX IF NOT EXISTS user_notifications_user_idx ON user_notifications(user_id,read_at,created_at DESC)`,
+  );
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS project_tasks(
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      company TEXT NOT NULL,
+      title TEXT NOT NULL,
+      description TEXT,
+      status TEXT NOT NULL DEFAULT 'todo',
+      priority TEXT NOT NULL DEFAULT 'normal',
+      assigned_employee_id TEXT,
+      due_date DATE,
+      position INTEGER NOT NULL DEFAULT 0,
+      created_by INTEGER NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`,
+  );
+  await db.query(
+    `CREATE INDEX IF NOT EXISTS project_tasks_project_idx ON project_tasks(project_id,status,position)`,
+  );
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS project_checklist_items(
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      company TEXT NOT NULL,
+      label TEXT NOT NULL,
+      completed BOOLEAN NOT NULL DEFAULT false,
+      completed_by INTEGER,
+      completed_at TIMESTAMPTZ,
+      created_by INTEGER NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`,
+  );
+  await db.query(
+    `CREATE INDEX IF NOT EXISTS project_checklist_project_idx ON project_checklist_items(project_id,completed)`,
+  );
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS project_daily_reports(
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      company TEXT NOT NULL,
+      report_date DATE NOT NULL,
+      weather TEXT,
+      summary TEXT NOT NULL,
+      issues TEXT,
+      materials TEXT,
+      team TEXT,
+      created_by INTEGER NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(project_id,report_date,created_by)
+    )`,
+  );
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS project_punch_items(
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      company TEXT NOT NULL,
+      title TEXT NOT NULL,
+      description TEXT,
+      status TEXT NOT NULL DEFAULT 'open',
+      severity TEXT NOT NULL DEFAULT 'normal',
+      assigned_employee_id TEXT,
+      due_date DATE,
+      resolved_at TIMESTAMPTZ,
+      created_by INTEGER NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`,
+  );
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS project_change_orders(
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      company TEXT NOT NULL,
+      title TEXT NOT NULL,
+      description TEXT,
+      amount NUMERIC(14,2) NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'draft',
+      client_note TEXT,
+      approved_by_user_id INTEGER,
+      approved_at TIMESTAMPTZ,
+      created_by INTEGER NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`,
+  );
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS crm_opportunities(
+      id TEXT PRIMARY KEY,
+      company TEXT NOT NULL,
+      client_id TEXT,
+      name TEXT NOT NULL,
+      stage TEXT NOT NULL DEFAULT 'lead',
+      value NUMERIC(14,2) NOT NULL DEFAULT 0,
+      probability INTEGER NOT NULL DEFAULT 0,
+      owner_user_id INTEGER,
+      next_action TEXT,
+      next_action_at TIMESTAMPTZ,
+      source TEXT,
+      notes TEXT,
+      created_by INTEGER NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`,
+  );
+  await db.query(
+    `CREATE INDEX IF NOT EXISTS crm_pipeline_idx ON crm_opportunities(company,stage,updated_at DESC)`,
+  );
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS inventory_locations(
+      id TEXT PRIMARY KEY,
+      company TEXT NOT NULL,
+      name TEXT NOT NULL,
+      type TEXT NOT NULL DEFAULT 'warehouse',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`,
+  );
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS inventory_movements(
+      id TEXT PRIMARY KEY,
+      inventory_id TEXT NOT NULL,
+      company TEXT NOT NULL,
+      location_id TEXT,
+      project_id TEXT,
+      employee_id TEXT,
+      quantity NUMERIC(14,3) NOT NULL,
+      movement_type TEXT NOT NULL,
+      note TEXT,
+      created_by INTEGER NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`,
+  );
+  await db.query(
+    `CREATE INDEX IF NOT EXISTS inventory_movements_item_idx ON inventory_movements(inventory_id,created_at DESC)`,
+  );
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS work_orders(
+      id TEXT PRIMARY KEY,
+      company TEXT NOT NULL,
+      client_id TEXT,
+      project_id TEXT,
+      maintenance_id TEXT,
+      title TEXT NOT NULL,
+      description TEXT,
+      status TEXT NOT NULL DEFAULT 'planned',
+      priority TEXT NOT NULL DEFAULT 'normal',
+      scheduled_at TIMESTAMPTZ,
+      assigned_employee_id TEXT,
+      customer_signature TEXT,
+      signed_at TIMESTAMPTZ,
+      created_by INTEGER NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`,
+  );
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS recurring_jobs(
+      id TEXT PRIMARY KEY,
+      company TEXT NOT NULL,
+      maintenance_id TEXT,
+      title TEXT NOT NULL,
+      frequency TEXT NOT NULL,
+      next_run DATE NOT NULL,
+      active BOOLEAN NOT NULL DEFAULT true,
+      created_by INTEGER NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`,
+  );
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS automation_rules(
+      id TEXT PRIMARY KEY,
+      company TEXT,
+      name TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      conditions JSONB NOT NULL DEFAULT '{}'::jsonb,
+      actions JSONB NOT NULL DEFAULT '[]'::jsonb,
+      enabled BOOLEAN NOT NULL DEFAULT true,
+      created_by INTEGER NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`,
+  );
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS outgoing_webhooks(
+      id TEXT PRIMARY KEY,
+      company TEXT,
+      name TEXT NOT NULL,
+      url TEXT NOT NULL,
+      secret TEXT NOT NULL,
+      event_types TEXT[] NOT NULL DEFAULT '{}',
+      enabled BOOLEAN NOT NULL DEFAULT true,
+      created_by INTEGER NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`,
+  );
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS webhook_deliveries(
+      id BIGSERIAL PRIMARY KEY,
+      webhook_id TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      status_code INTEGER,
+      success BOOLEAN NOT NULL DEFAULT false,
+      error TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`,
+  );
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS integration_settings(
+      provider TEXT PRIMARY KEY,
+      enabled BOOLEAN NOT NULL DEFAULT false,
+      config JSONB NOT NULL DEFAULT '{}'::jsonb,
+      updated_by INTEGER,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`,
+  );
+  await db.query(
+    `INSERT INTO schema_migrations(version) VALUES
+      ('2026-09-27-platform-p0-p3-baseline')
+      ON CONFLICT(version) DO NOTHING`,
   );
   await db.query(
     `CREATE TABLE IF NOT EXISTS app_state(id INTEGER PRIMARY KEY DEFAULT 1,data JSONB NOT NULL,updated_at TIMESTAMPTZ DEFAULT NOW(),updated_by VARCHAR(255))`,
@@ -240,6 +585,15 @@ async function migrate(db = pool) {
     "INSERT INTO app_state(id,data) VALUES(1,$1) ON CONFLICT(id) DO NOTHING",
     [JSON.stringify(emptyState())],
   );
+  const mirrorState = (
+    await db.query("SELECT data FROM app_state WHERE id=1")
+  ).rows[0]?.data;
+  await syncEntityMirror(db, normalize(mirrorState));
+  await db.query(
+    `INSERT INTO schema_migrations(version) VALUES
+      ('2026-09-27-entity-records-mirror')
+      ON CONFLICT(version) DO NOTHING`,
+  );
   // Disable the previously published demo credentials, even on an existing installation.
   const users = await db.query(
     "SELECT id,password_hash FROM users WHERE disabled=false",
@@ -332,11 +686,23 @@ async function mutate(db, user, body, fn) {
         409,
       );
     const data = normalize(row.data),
-      result = await fn(c, data);
+      beforeSignatures = Object.fromEntries(
+        MIRRORED_COLLECTIONS.map((collection) => [
+          collection,
+          JSON.stringify(data[collection] || []),
+        ]),
+      ),
+      result = await fn(c, data),
+      changedCollections = MIRRORED_COLLECTIONS.filter(
+        (collection) =>
+          JSON.stringify(data[collection] || []) !== beforeSignatures[collection],
+      );
     await c.query(
       "UPDATE app_state SET data=$1,revision=revision+1,updated_at=NOW(),updated_by=$2 WHERE id=1",
       [JSON.stringify(data), user.email],
     );
+    if (changedCollections.length)
+      await syncEntityMirror(c, data, changedCollections);
     await c.query(
       "INSERT INTO audit_logs(user_email,action,metadata) VALUES($1,$2,$3)",
       [
@@ -357,4 +723,11 @@ async function mutate(db, user, body, fn) {
     return receipt;
   });
 }
-module.exports = { pool, migrate, transaction, mutate };
+module.exports = {
+  pool,
+  migrate,
+  transaction,
+  mutate,
+  syncEntityMirror,
+  MIRRORED_COLLECTIONS,
+};

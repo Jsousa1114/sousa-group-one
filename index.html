@@ -22,6 +22,7 @@
     <script src="messaging-crypto.js" defer></script>
     <script src="messaging-suite.js" defer></script>
     <script src="account-center.js" defer></script>
+    <script src="operations-center.js" defer></script>
   </head>
   <body data-brand="group">
     <section id="login" class="login">
@@ -69,15 +70,14 @@
             autocomplete="current-password"
             required
           /><div id="totpWrap" class="hidden">
-            <label for="totpCode">Code de sécurité</label
+            <label for="totpCode">Code 2FA ou code de secours</label
             ><input
               id="totpCode"
               name="totpCode"
-              inputmode="numeric"
-              pattern="[0-9]{6}"
-              maxlength="6"
+              inputmode="text"
+              maxlength="14"
               autocomplete="one-time-code"
-              placeholder="000000"
+              placeholder="000000 ou XXXX-XXXX-XXXX"
             />
           </div>
           <p id="loginError" class="error" role="alert"></p>
