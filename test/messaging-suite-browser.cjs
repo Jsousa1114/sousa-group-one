@@ -83,6 +83,10 @@ async function make(viewport) {
   page.on("console", (m) => {
     if (m.type() === "error") errors.push("console:" + m.text());
   });
+  page.on("response", (r) => {
+    if (r.status() >= 400)
+      errors.push("http:" + r.status() + " " + new URL(r.url()).pathname);
+  });
   return { context, page, errors };
 }
 async function login(page, email) {
