@@ -95,6 +95,14 @@ async function visitAll(page, expectedPages, mobile=false){
     await login(admin.page,"audit-admin@test.invalid");
     const adminPages=["dashboard","companies","employees","time","planning","absences","projects","clients","quotes","invoices","payments","expenses","inventory","suppliers","vehicles","tools","maintenance","documents","messages","reports","pilotage","audit","settings"];
     await visitAll(admin.page,adminPages,false);
+    await admin.page.locator('[data-page="pilotage"]').click();
+    await admin.page.locator('[data-ops-tab="ai"]').click();
+    await admin.page.locator("#opsAiForm").waitFor({ timeout: 10000 });
+    assert.match(await admin.page.locator("#opsBody").innerText(), /Assistant IA Sousa Group One/);
+    assert.match(await admin.page.locator("#opsBody").innerText(), /Non configuré/);
+    assert.equal(await admin.page.locator("#opsAiForm button[type=submit]").isDisabled(), true);
+    await noOverflow(admin.page, "desktop Pilotage IA");
+
     await admin.page.locator('[data-page="projects"]').click();
     await admin.page.locator('[data-action="project"]').first().click();
     await admin.page.locator("#modalWrap:not(.hidden)").waitFor();
