@@ -1142,6 +1142,105 @@ function routes(db) {
   );
 
   r.get(
+    "/insights",
+    wrap(async (req, res) => {
+      const ctx = await stateContext(db, req.user),
+        today = new Date().toISOString().slice(0, 10),
+        insights = [];
+      for (const invoice of ctx.view.invoices) {
+        const outstanding = Math.max(
+          0,
+          (Number(invoice.amount) || 0) - (Number(invoice.paid) || 0),
+        );
+        if (outstanding > 0 && invoice.due && invoice.due < today)
+          insights.push({
+            severity: "high",
+            type: "invoice.overdue",
+            title: "Facture en retard",
+            body: invoice.id + " · " + outstanding.toFixed(2) + " CHF restant",
+            page: "invoices",
+            entityId: invoice.id,
+          });
+      }
+      for (const project of ctx.view.projects) {
+        const budget = Number(project.budget) || 0,
+          cost = Number(project.cost) || 0;
+        if (budget > 0 && cost > budget)
+          insights.push({
+            severity: "critical",
+            type: "project.over_budget",
+            title: "Budget chantier dépassé",
+            body:
+              project.title +
+              " · " +
+              (cost - budget).toFixed(2) +
+              " CHF au-dessus du budget",
+            page: "projects",
+            entityId: project.id,
+          });
+        else if (budget > 0 && cost / budget >= 0.85)
+          insights.push({
+            severity: "high",
+            type: "project.budget_warning",
+            title: "Budget chantier à surveiller",
+            body:
+              project.title +
+              " · " +
+              Math.round((cost / budget) * 100) +
+              " % du budget consommé",
+            page: "projects",
+            entityId: project.id,
+          });
+      }
+      for (const item of ctx.view.inventory) {
+        const stock = Number(item.stock) || 0,
+          min = Number(item.min) || 0;
+        if (min > 0 && stock <= min)
+          insights.push({
+            severity: stock <= 0 ? "critical" : "high",
+            type: "inventory.low",
+            title: "Stock à réapprovisionner",
+            body: item.name + " · stock " + stock + " / minimum " + min,
+            page: "inventory",
+            entityId: item.id,
+          });
+      }
+      const future = ctx.view.planning.filter(
+        (x) => x.date && x.date >= today,
+      );
+      const byEmployee = {};
+      for (const row of future) {
+        const [sh, sm] = String(row.start || "00:00").split(":").map(Number),
+          [eh, em] = String(row.end || "00:00").split(":").map(Number),
+          hours = Math.max(0, eh + em / 60 - sh - sm / 60);
+        byEmployee[row.employeeId] =
+          (byEmployee[row.employeeId] || 0) + hours;
+      }
+      for (const [employeeId, hours] of Object.entries(byEmployee))
+        if (hours > 50)
+          insights.push({
+            severity: "medium",
+            type: "team.overload",
+            title: "Charge équipe élevée",
+            body:
+              (ctx.view.employees.find((e) => D.same(e.id, employeeId))?.name ||
+                employeeId) +
+              " · " +
+              Math.round(hours * 10) / 10 +
+              " h planifiées",
+            page: "planning",
+            entityId: employeeId,
+          });
+      insights.sort(
+        (a, b) =>
+          ["critical", "high", "medium", "low"].indexOf(a.severity) -
+          ["critical", "high", "medium", "low"].indexOf(b.severity),
+      );
+      res.json({ insights: insights.slice(0, 100) });
+    }),
+  );
+
+  r.get(
     "/automations",
     wrap(async (req, res) => {
       if (!D.privileged(req.user, D.STAFF)) D.fail("Accès direction requis.", 403);
