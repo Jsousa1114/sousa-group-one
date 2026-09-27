@@ -67,6 +67,8 @@ function createApp(db = pool) {
   app.use("/api/messaging", require("./messaging-routes").routes(db));
   app.use("/api/operations", require("./operations-routes").routes(db));
   app.use("/api/p1", require("./p1-routes").routes(db));
+  app.use("/api/p2", require("./p2-routes").routes(db));
+  app.use("/api/public/v1", require("./p2-routes").publicRoutes(db));
   app.get(["/favicon.ico", "/icon.svg"], (req, res) => {
     res.set("Cache-Control", "no-cache");
     res.redirect(302, "/assets/logos/group.png?v=group-20260926");
@@ -82,8 +84,11 @@ function createApp(db = pool) {
     "p3-center.js",
     "operations-center.js",
     "p1-suite.js",
+    "p2-runtime.js",
+    "p2-center.js",
     "styles.css",
     "p1.css",
+    "p2.css",
     "pay.html",
     "pay.js",
     "manifest.webmanifest",
