@@ -1085,7 +1085,15 @@ function routes(db) {
         ["lead", "qualified", "proposal", "won", "lost"],
         "Étape",
       );
-      const probability = Math.max(0, Math.min(100, Number(p.probability) || 0));
+      const probability = Math.max(0, Math.min(100, Number(p.probability) || 0)),
+        email = clean(p.email, 255, true) || null,
+        phone = clean(p.phone, 80, true) || null,
+        street = clean(p.street, 250, true) || null,
+        zip = clean(p.zip, 30, true) || null,
+        city = clean(p.city, 120, true) || null,
+        country = clean(p.country || "CH", 2).toUpperCase();
+      if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+        D.fail("E-mail prospect invalide.");
       const existing = (
         await db.query("SELECT id FROM crm_opportunities WHERE id=$1", [id])
       ).rows[0];
@@ -1093,7 +1101,8 @@ function routes(db) {
         await db.query(
           `UPDATE crm_opportunities SET client_id=$1,name=$2,stage=$3,value=$4,
            probability=$5,owner_user_id=$6,next_action=$7,next_action_at=$8,
-           source=$9,notes=$10,updated_at=NOW() WHERE id=$11`,
+           source=$9,notes=$10,email=$11,phone=$12,street=$13,zip=$14,city=$15,country=$16,
+           updated_at=NOW() WHERE id=$17`,
           [
             p.clientId ? String(p.clientId) : null,
             clean(p.name, 250),
@@ -1105,14 +1114,20 @@ function routes(db) {
             p.nextActionAt ? new Date(p.nextActionAt) : null,
             clean(p.source, 200, true) || null,
             clean(p.notes, 5000, true) || null,
+            email,
+            phone,
+            street,
+            zip,
+            city,
+            country,
             id,
           ],
         );
       else
         await db.query(
           `INSERT INTO crm_opportunities
-           (id,company,client_id,name,stage,value,probability,owner_user_id,next_action,next_action_at,source,notes,created_by)
-           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+           (id,company,client_id,name,stage,value,probability,owner_user_id,next_action,next_action_at,source,notes,email,phone,street,zip,city,country,created_by)
+           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
           [
             id,
             company,
@@ -1126,6 +1141,12 @@ function routes(db) {
             p.nextActionAt ? new Date(p.nextActionAt) : null,
             clean(p.source, 200, true) || null,
             clean(p.notes, 5000, true) || null,
+            email,
+            phone,
+            street,
+            zip,
+            city,
+            country,
             req.user.id,
           ],
         );
@@ -1137,6 +1158,90 @@ function routes(db) {
         entityType: "crm",
         entityId: id,
         payload: { name: p.name, stage, value: Number(p.value) || 0 },
+      });
+      res.json({ ok: true, id });
+    }),
+  );
+
+  r.get(
+    "/crm/:id/activities",
+    wrap(async (req, res) => {
+      if (!D.privileged(req.user, [...D.OPS, "accounting"]))
+        D.fail("Accès commercial requis.", 403);
+      const opportunity = (
+        await db.query("SELECT id,company FROM crm_opportunities WHERE id=$1", [
+          String(req.params.id),
+        ])
+      ).rows[0];
+      if (!opportunity || !companyAllowed(req.user, opportunity.company))
+        D.fail("Opportunité inaccessible.", 404);
+      const rows = (
+        await db.query(
+          `SELECT id,opportunity_id,company,type,subject,notes,occurred_at,next_action_at,created_by,created_at
+           FROM crm_activities WHERE opportunity_id=$1
+           ORDER BY occurred_at DESC,created_at DESC LIMIT 300`,
+          [opportunity.id],
+        )
+      ).rows;
+      res.json({ activities: rows });
+    }),
+  );
+  r.post(
+    "/crm/:id/activities",
+    wrap(async (req, res) => {
+      if (!D.privileged(req.user, [...D.OPS, "accounting"]))
+        D.fail("Accès commercial requis.", 403);
+      const opportunity = (
+        await db.query("SELECT id,company,name FROM crm_opportunities WHERE id=$1", [
+          String(req.params.id),
+        ])
+      ).rows[0];
+      if (!opportunity || !companyAllowed(req.user, opportunity.company))
+        D.fail("Opportunité inaccessible.", 404);
+      const p = req.body || {},
+        type = oneOf(
+          String(p.type || "note"),
+          ["call", "email", "meeting", "note", "followup"],
+          "Type d'activité",
+        ),
+        id = randomUUID(),
+        occurredAt = p.occurredAt ? new Date(p.occurredAt) : new Date(),
+        nextActionAt = p.nextActionAt ? new Date(p.nextActionAt) : null;
+      if (!Number.isFinite(occurredAt.getTime()) || (nextActionAt && !Number.isFinite(nextActionAt.getTime())))
+        D.fail("Date CRM invalide.");
+      await db.query(
+        `INSERT INTO crm_activities
+         (id,opportunity_id,company,type,subject,notes,occurred_at,next_action_at,created_by)
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+        [
+          id,
+          opportunity.id,
+          opportunity.company,
+          type,
+          clean(p.subject, 250),
+          clean(p.notes, 5000, true) || null,
+          occurredAt,
+          nextActionAt,
+          req.user.id,
+        ],
+      );
+      if (p.nextAction || nextActionAt) {
+        await db.query(
+          `UPDATE crm_opportunities SET
+           next_action=COALESCE($1,next_action),
+           next_action_at=COALESCE($2,next_action_at),
+           updated_at=NOW() WHERE id=$3`,
+          [clean(p.nextAction, 1000, true) || null, nextActionAt, opportunity.id],
+        );
+      }
+      await emitEvent(db, {
+        eventType: "crm.activity",
+        actorUserId: req.user.id,
+        user: req.user,
+        company: opportunity.company,
+        entityType: "crm",
+        entityId: opportunity.id,
+        payload: { type, subject: p.subject },
       });
       res.json({ ok: true, id });
     }),
