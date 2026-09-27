@@ -57,6 +57,7 @@
       ...(profile()?.role === "admin" || profile()?.role === "direction"
         ? [["automations", "Automatisations"], ["integrations", "Intégrations"]]
         : []),
+      ["p2", "P2 avancé"],
       ["notifications", "Notifications"],
     ];
     if (!items.some(([id]) => id === activeTab)) activeTab = "overview";
@@ -571,6 +572,11 @@
       else if (activeTab === "lifecycle") await renderLifecycle();
       else if (activeTab === "automations") await renderAutomations();
       else if (activeTab === "integrations") await renderIntegrations();
+      else if (activeTab === "p2") {
+        if (!window.SGOP2?.renderPanel)
+          throw new Error("Module P2 indisponible.");
+        await window.SGOP2.renderPanel(root().querySelector("#opsBody"));
+      }
       else if (activeTab === "notifications") await renderNotifications();
     } catch (e) {
       root().querySelector("#opsBody").innerHTML = `<article class="card empty"><b>Impossible de charger ce module.</b><p>${esc(e.message)}</p></article>`;
