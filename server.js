@@ -92,9 +92,25 @@ function createApp(db = pool) {
   app.get("/", (req, res) => res.sendFile(path.join(__dirname, "index.html")));
   app.use((req, res) => res.status(404).json({ error: "Page introuvable." }));
   app.use((err, req, res, next) => {
+    const status = err.status || (err.code === "23505" ? 409 : 500);
+    if (status >= 500)
+      db.query(
+        `INSERT INTO application_errors
+         (request_id,user_id,method,path,status,message,stack,metadata)
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,
+        [
+          req.id || req.headers["x-request-id"] || null,
+          req.user?.id || null,
+          req.method,
+          req.originalUrl || req.path,
+          status,
+          String(err.message || "Erreur serveur").slice(0, 4000),
+          String(err.stack || "").slice(0, 12000),
+          JSON.stringify({ code: err.code || null }),
+        ],
+      ).catch(() => {});
     if (err.code === "23505")
       return res.status(409).json({ error: "Cet élément existe déjà." });
-    const status = err.status || 500;
     if (status >= 500) console.error(err);
     res.status(status).json({
       error:
