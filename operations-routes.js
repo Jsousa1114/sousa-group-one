@@ -428,14 +428,15 @@ function routes(db) {
       }
       if (D.privileged(req.user, [...D.OPS, "accounting"])) {
         const scope = companyScopeSql(req.user);
-        const crm = (
-          await db.query(
-            `SELECT * FROM crm_opportunities WHERE ${scope.sql}
-             AND (LOWER(name) LIKE $2 OR LOWER(COALESCE(notes,'')) LIKE $2)
-             ORDER BY updated_at DESC LIMIT 30`,
-            [...scope.params, "%" + q.replace(/[%_]/g, "") + "%"],
-          )
-        ).rows;
+        const queryParam = "$" + (scope.params.length + 1),
+          crm = (
+            await db.query(
+              `SELECT * FROM crm_opportunities WHERE ${scope.sql}
+               AND (LOWER(name) LIKE ${queryParam} OR LOWER(COALESCE(notes,'')) LIKE ${queryParam})
+               ORDER BY updated_at DESC LIMIT 30`,
+              [...scope.params, "%" + q.replace(/[%_]/g, "") + "%"],
+            )
+          ).rows;
         for (const x of crm)
           add("crm", x.id, x.name, x.stage, "pilotage", { company: x.company });
       }
