@@ -17,8 +17,44 @@ async function migrate(db = pool) {
     "disabled BOOLEAN NOT NULL DEFAULT false",
     "deleted_at TIMESTAMPTZ",
     "session_version INTEGER NOT NULL DEFAULT 0",
+    "totp_secret TEXT",
+    "totp_enabled BOOLEAN NOT NULL DEFAULT false",
+    "last_login_at TIMESTAMPTZ",
+    "last_login_ip TEXT",
+    "last_login_agent TEXT",
   ])
     await db.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS " + column);
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS user_sessions(
+      id TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      last_seen TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      user_agent TEXT,
+      ip TEXT,
+      revoked_at TIMESTAMPTZ
+    )`,
+  );
+  await db.query(
+    `CREATE INDEX IF NOT EXISTS user_sessions_user_idx ON user_sessions(user_id,last_seen DESC)`,
+  );
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS account_preferences(
+      user_id INTEGER PRIMARY KEY,
+      data JSONB NOT NULL DEFAULT '{}'::jsonb,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`,
+  );
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS account_deactivation_requests(
+      id BIGSERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      reason TEXT,
+      status VARCHAR(20) NOT NULL DEFAULT 'pending',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      resolved_at TIMESTAMPTZ
+    )`,
+  );
   await db.query(
     `CREATE TABLE IF NOT EXISTS app_state(id INTEGER PRIMARY KEY DEFAULT 1,data JSONB NOT NULL,updated_at TIMESTAMPTZ DEFAULT NOW(),updated_by VARCHAR(255))`,
   );
