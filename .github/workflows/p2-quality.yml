@@ -1,0 +1,86 @@
+name: P2 quality
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - p2-routes.js
+      - p2-runtime.js
+      - p2-center.js
+      - p2.css
+      - app.js
+      - domain.js
+      - auth-middleware.js
+      - server.js
+      - service-worker.js
+      - index.html
+      - test/p2.test.js
+      - test/p2-browser.cjs
+      - test/p2-load.cjs
+      - .github/workflows/p2-quality.yml
+  pull_request:
+    paths:
+      - p2-routes.js
+      - p2-runtime.js
+      - p2-center.js
+      - p2.css
+      - app.js
+      - domain.js
+      - auth-middleware.js
+      - server.js
+      - service-worker.js
+      - index.html
+      - test/p2.test.js
+      - test/p2-browser.cjs
+      - test/p2-load.cjs
+      - .github/workflows/p2-quality.yml
+
+permissions:
+  contents: read
+
+jobs:
+  cross-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - name: Install Playwright browser
+        run: |
+          npm install --no-save playwright
+          npx playwright install --with-deps ${{ matrix.browser }}
+      - name: Test P2 on Chromium Android, Firefox and WebKit iPhone
+        env:
+          P2_BROWSER: ${{ matrix.browser }}
+        run: node test/p2-browser.cjs
+      - name: Upload P2 visual captures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2-visual-${{ matrix.browser }}
+          path: p2-browser-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  load-security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - name: P2 load smoke 50 100 500
+        run: node test/p2-load.cjs
+      - name: Dependency security scan
+        run: npm audit --audit-level=high
