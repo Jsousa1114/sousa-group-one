@@ -130,6 +130,24 @@ async function migrate(db = pool) {
     `CREATE INDEX IF NOT EXISTS entity_records_company_idx ON entity_records(collection,company)`,
   );
   await db.query(
+    `CREATE TABLE IF NOT EXISTS application_errors(
+      id BIGSERIAL PRIMARY KEY,
+      request_id TEXT,
+      user_id INTEGER,
+      method VARCHAR(12),
+      path TEXT,
+      status INTEGER NOT NULL,
+      message TEXT,
+      stack TEXT,
+      metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`,
+  );
+  await db.query(
+    `CREATE INDEX IF NOT EXISTS application_errors_created_idx
+     ON application_errors(created_at DESC)`,
+  );
+  await db.query(
     `CREATE TABLE IF NOT EXISTS app_events(
       id BIGSERIAL PRIMARY KEY,
       event_type TEXT NOT NULL,
