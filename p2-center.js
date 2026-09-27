@@ -45,6 +45,8 @@
           ${button("Synchroniser maintenant","sync","", "primary")}
           ${window.SGOP2Runtime?.canInstall?.()?button("Installer l’application","install","", "primary"):""}
           <a class="btn secondary" href="/api/p2/calendar.ics">Exporter mon planning (.ics)</a>
+          ${external.googleCalendar ? button("Synchroniser Google", "calendar-sync", 'data-provider="google"') : ""}
+          ${external.microsoftCalendar ? button("Synchroniser Outlook", "calendar-sync", 'data-provider="microsoft"') : ""}
         </div>
         <p class="muted">Temps réel SSE, cache PWA, consultation hors ligne, file de synchronisation pour pointages et documents, installation mobile et passkeys biométriques.</p>
       `)}
@@ -177,11 +179,12 @@
       else if(a==="tablet"){window.SGOP2Runtime.setTabletMode(!window.SGOP2Runtime.tabletMode());await renderCurrent();}
       else if(a==="sync"){const out=await window.SGOP2Runtime.flushQueue();core().toast(`Synchronisation : ${out.sent} envoyée(s), ${out.remaining} restante(s).`);await renderCurrent();}
       else if(a==="install"){await window.SGOP2Runtime.installApp();await renderCurrent();}
+      else if(a==="calendar-sync"){const out=await api("calendar/push",{provider:b.dataset.provider});core().toast(out.count+" événement(s) synchronisé(s).");}
       else if(a==="appointment-new")appointmentForm();
       else if(a==="approval-new")approvalForm();
       else if(a==="approval-decide"){await api("approvals/"+b.dataset.id+"/decision",{status:b.dataset.status});await renderCurrent();}
       else if(a==="appointment-decision"){await api("appointments/"+b.dataset.id+"/decision",{status:b.dataset.status});await renderCurrent();}
-      else if(a==="quote-remind"){await api("quote-reminders/"+b.dataset.id,{channel:b.dataset.channel});core().toast("Relance enregistrée.");}
+      else if(a==="quote-remind"){const out=await api("quote-reminders/"+b.dataset.id,{channel:b.dataset.channel});core().toast(out.status==="sent"?"Relance envoyée.":"Relance enregistrée.");}
       else if(a==="template-install"){await api("automation-templates/"+b.dataset.id+"/install",{});core().toast("Automatisation installée.");}
       else if(a==="permission-edit")permissionForm(b.dataset.id);
       else if(a==="api-key-new")apiKeyForm();
