@@ -211,6 +211,29 @@ function routes(db) {
             : false,
       );
 
+      const lastTime = [...view.time]
+          .filter((x) => x.date)
+          .sort((a, b) =>
+            String(b.date + " " + (b.end || b.start || "")).localeCompare(
+              String(a.date + " " + (a.end || a.start || "")),
+            ),
+          )[0] || null,
+        lastMessage = [...view.messages]
+          .filter(
+            (m) =>
+              D.same(m.senderId, req.user.id) ||
+              D.same(m.recipientId, req.user.id) ||
+              (m.threadId &&
+                view.messageThreads.some((t) =>
+                  D.same(t.id, m.threadId),
+                )),
+          )
+          .sort(
+            (a, b) =>
+              new Date(b.createdAt || 0).getTime() -
+              new Date(a.createdAt || 0).getTime(),
+          )[0] || null;
+
       res.json({
         account: {
           id: req.user.id,
@@ -288,6 +311,24 @@ function routes(db) {
           createdAt: d.createdAt,
           expiresAt: d.expiresAt || "",
         })),
+        recentUsage: {
+          lastTime: lastTime
+            ? {
+                date: lastTime.date,
+                start: lastTime.start || "",
+                end: lastTime.end || "",
+                hours: Number(lastTime.hours || 0),
+                project: lastTime.project || "",
+              }
+            : null,
+          lastMessage: lastMessage
+            ? {
+                createdAt: lastMessage.createdAt,
+                sentByMe: D.same(lastMessage.senderId, req.user.id),
+                threadId: lastMessage.threadId || "",
+              }
+            : null,
+        },
         activity,
         pendingDeactivation,
       });
