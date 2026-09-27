@@ -57,6 +57,7 @@
       ...(profile()?.role === "admin" || profile()?.role === "direction"
         ? [["automations", "Automatisations"], ["integrations", "Intégrations"]]
         : []),
+      ["p3", "P3 · Intelligence"],
       ["notifications", "Notifications"],
     ];
     if (!items.some(([id]) => id === activeTab)) activeTab = "overview";
@@ -571,6 +572,10 @@
       else if (activeTab === "lifecycle") await renderLifecycle();
       else if (activeTab === "automations") await renderAutomations();
       else if (activeTab === "integrations") await renderIntegrations();
+      else if (activeTab === "p3") {
+        if (!window.SGOP3Center) throw new Error("Module P3 indisponible.");
+        await window.SGOP3Center.render(root().querySelector("#opsBody"));
+      }
       else if (activeTab === "notifications") await renderNotifications();
     } catch (e) {
       root().querySelector("#opsBody").innerHTML = `<article class="card empty"><b>Impossible de charger ce module.</b><p>${esc(e.message)}</p></article>`;
