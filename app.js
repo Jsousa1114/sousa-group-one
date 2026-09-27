@@ -294,15 +294,15 @@ async function refresh(renderNow = true) {
 }
 async function mutate(
   action,
-  payload = {
-  if (!navigator.onLine) {
-    notice("Connexion requise pour enregistrer des modifications.");
-    return;
-  }},
+  payload = {},
   collection,
   endpoint = "state/command",
   form,
 ) {
+  if (!navigator.onLine) {
+    notice("Connexion requise pour enregistrer des modifications.");
+    return;
+  }
   if (pending) return;
   pending = true;
   const buttons = [...document.querySelectorAll("button[type=submit]")];
