@@ -245,7 +245,10 @@
     return all.some((x) => String(x.id) !== String(row.id) && String(x.employeeId) === String(row.employeeId) && x.date === row.date && x.start < row.end && x.end > row.start);
   }
   function shiftHtml(row, all) {
-    return `<article class="pro-shift ${conflict(row, all) ? "conflict" : ""}" draggable="true" data-pro-shift="${esc(row.id)}"><b>${esc(row.start)}–${esc(row.end)}</b><span>${esc(person(row.employeeId))}</span><small>${esc(projectName(row.project))}</small></article>`;
+    const vehicle = (state().vehicles || []).find((x) => String(x.id) === String(row.vehicleId || "")),
+      equipment = (row.toolIds || []).length,
+      companyClass = "company-" + String(row.company || "group").replace(/[^a-z0-9_-]/gi, "").toLowerCase();
+    return `<article class="pro-shift ${companyClass} ${conflict(row, all) ? "conflict" : ""}" draggable="true" data-pro-shift="${esc(row.id)}"><b>${esc(row.start)}–${esc(row.end)}</b><span>${esc(person(row.employeeId))}</span><small>${esc(projectName(row.project))}</small>${vehicle || equipment ? `<small>🚐 ${esc(vehicle?.plate || "—")} · 🧰 ${equipment}</small>` : ""}</article>`;
   }
   async function renderPlanning() {
     const all = planningRows();
@@ -253,7 +256,28 @@
     const body = planMode === "day"
       ? `<div class="pro-day-plan pro-drop-zone" data-pro-drop-date="${esc(planDate)}">${all.filter((x) => x.date === planDate).map((x) => shiftHtml(x, all)).join("") || empty("Aucune affectation ce jour.")}</div>`
       : `<div class="${planMode === "month" ? "pro-month-plan" : "pro-week-plan"}">${dates.map((date) => `<section class="pro-plan-day pro-drop-zone ${date === planDate ? "selected" : ""}" data-pro-drop-date="${esc(date)}"><header><b>${fmtDate(date)}</b></header>${all.filter((x) => x.date === date).map((x) => shiftHtml(x, all)).join("")}</section>`).join("")}</div>`;
-    host.innerHTML = `<div class="pro-toolbar"><div><h3>Planning visuel</h3><p class="muted">Glissez une affectation sur une autre date. Les conflits sont signalés avant enregistrement.</p></div><div class="pro-planning-controls">${button("‹", "plan-prev")}<input id="proPlanDate" type="date" value="${esc(planDate)}">${button("Aujourd'hui", "plan-today")}${button("›", "plan-next")}<select id="proPlanMode"><option value="day" ${planMode === "day" ? "selected" : ""}>Jour</option><option value="week" ${planMode === "week" ? "selected" : ""}>Semaine</option><option value="month" ${planMode === "month" ? "selected" : ""}>Mois</option></select></div></div>${body}`;
+    host.innerHTML = `<div class="pro-toolbar"><div><h3>Planning visuel</h3><p class="muted">Glissez une affectation sur une autre date. Les conflits salariés, véhicules et équipements sont contrôlés.</p></div><div class="pro-planning-controls">${button("Nouvelle affectation", "plan-new", "", "primary")}${button("‹", "plan-prev")}<input id="proPlanDate" type="date" value="${esc(planDate)}">${button("Aujourd'hui", "plan-today")}${button("›", "plan-next")}<select id="proPlanMode"><option value="day" ${planMode === "day" ? "selected" : ""}>Jour</option><option value="week" ${planMode === "week" ? "selected" : ""}>Semaine</option><option value="month" ${planMode === "month" ? "selected" : ""}>Mois</option></select></div></div>${body}`;
+  }
+
+  function planningBulkForm() {
+    const projects = visible("projects"),
+      employees = visible("employees"),
+      vehicles = visible("vehicles"),
+      tools = visible("tools");
+    core().modal("Nouvelle affectation planning", `<form id="proForm" data-kind="planning-bulk">
+      <label>Chantier<select name="projectId" required>${projects.map((x) => `<option value="${esc(x.id)}">${esc(x.id)} · ${esc(x.title)}</option>`).join("")}</select></label>
+      <label>Salariés <small class="muted">Ctrl/Cmd ou appui multiple</small><select name="employeeIds" multiple size="7" required>${employees.map((x) => `<option value="${esc(x.id)}">${esc(x.name)} · ${esc(x.job || "")}</option>`).join("")}</select></label>
+      <div class="pro-grid-3">
+        <label>Date<input type="date" name="date" required value="${esc(planDate)}"></label>
+        <label>Début<input type="time" name="start" required value="07:30"></label>
+        <label>Fin<input type="time" name="end" required value="16:30"></label>
+      </div>
+      <label>Lieu<input name="location" maxlength="300" placeholder="Adresse chantier ou autre lieu"></label>
+      <label>Véhicule<select name="vehicleId"><option value="">Aucun véhicule</option>${vehicles.map((x) => `<option value="${esc(x.id)}">${esc(x.plate || x.id)} · ${esc([x.brand,x.model].filter(Boolean).join(" "))}</option>`).join("")}</select></label>
+      <label>Équipements / outillage<select name="toolIds" multiple size="6">${tools.map((x) => `<option value="${esc(x.id)}">${esc(x.name || x.id)}</option>`).join("")}</select></label>
+      <p class="muted">Les absences et les collisions de salarié, véhicule ou équipement sont bloquées avant enregistrement.</p>
+      <p id="formError" class="error"></p><button class="btn primary" type="submit">Planifier</button>
+    </form>`);
   }
 
   async function renderActivity() {
@@ -412,6 +436,7 @@
         await core().refresh(false); await renderTrash(); core().toast("Élément supprimé définitivement.");
       }
       else if (action === "permission-user") openPermission(b.dataset.id);
+      else if (action === "plan-new") planningBulkForm();
       else if (action === "plan-prev") { planDate = shiftDate(planDate, planMode === "month" ? -28 : planMode === "week" ? -7 : -1); await renderPlanning(); }
       else if (action === "plan-next") { planDate = shiftDate(planDate, planMode === "month" ? 28 : planMode === "week" ? 7 : 1); await renderPlanning(); }
       else if (action === "plan-today") { planDate = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Zurich", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date()); await renderPlanning(); }
@@ -480,7 +505,22 @@
     event.preventDefault();
     const fd = new FormData(form);
     try {
-      if (form.dataset.kind === "permissions") {
+      if (form.dataset.kind === "planning-bulk") {
+        await api("planning/bulk", {
+          projectId: fd.get("projectId"),
+          employeeIds: fd.getAll("employeeIds"),
+          date: fd.get("date"),
+          start: fd.get("start"),
+          end: fd.get("end"),
+          location: fd.get("location"),
+          vehicleId: fd.get("vehicleId"),
+          toolIds: fd.getAll("toolIds"),
+        });
+        await core().refresh(false);
+        core().closeModal(true);
+        await renderPlanning();
+        core().toast("Affectation ajoutée au planning.");
+      } else if (form.dataset.kind === "permissions") {
         await api("permissions/" + encodeURIComponent(form.dataset.userId), { grants: fd.getAll("grants"), denials: fd.getAll("denials") });
         core().closeModal(true);
         await renderPermissions();
