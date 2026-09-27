@@ -458,6 +458,118 @@ function routes(db) {
     res.json({ results: results.slice(0, 80) });
   }));
 
+  router.post("/crm/:id/convert", wrap(async (req, res) => {
+    const result = await withStateWrite(db, req.user.id, "crm.convert", async (client, data, user) => {
+      const opportunity = (
+        await client.query("SELECT * FROM crm_opportunities WHERE id=$1 FOR UPDATE", [String(req.params.id)])
+      ).rows[0];
+      if (!opportunity || !companyAllowed(user, opportunity.company))
+        D.fail("Opportunité inaccessible.", 404);
+      let working = data,
+        clientRecord = opportunity.client_id
+          ? (working.clients || []).find((x) => same(x.id, opportunity.client_id) && !x.deletedAt)
+          : null;
+      if (!clientRecord) {
+        if (!opportunity.email || !opportunity.city)
+          D.fail("Complétez au minimum l’e-mail et la ville du prospect avant conversion.");
+        const created = D.applyCommand(
+          working,
+          user,
+          {
+            action: "create",
+            collection: "clients",
+            payload: {
+              company: opportunity.company,
+              name: opportunity.name,
+              email: opportunity.email,
+              phone: opportunity.phone || "",
+              street: opportunity.street || "",
+              buildingNumber: "",
+              zip: opportunity.zip || "",
+              city: opportunity.city,
+              country: opportunity.country || "CH",
+              type: "Prospect CRM",
+            },
+          },
+          new Date().toISOString(),
+        );
+        working = created.data;
+        clientRecord = created.result;
+      }
+      const now = new Date(),
+        date = new Intl.DateTimeFormat("en-CA", {
+          timeZone: "Europe/Zurich",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+        }).format(now),
+        validDate = new Date(date + "T12:00:00Z");
+      validDate.setUTCDate(validDate.getUTCDate() + 30);
+      const quoteCreated = D.applyCommand(
+        working,
+        user,
+        {
+          action: "create",
+          collection: "quotes",
+          payload: {
+            company: opportunity.company,
+            clientId: clientRecord.id,
+            title: "Offre – " + opportunity.name,
+            lines: [{
+              description: "Prestations à compléter",
+              details: opportunity.notes || "",
+              quantity: "1",
+              unitPrice: "0",
+              unit: "forfait",
+              vatRate: "0",
+              discount: "0",
+            }],
+            language: "fr",
+            message: "",
+            terms: "",
+            scope: opportunity.notes || "",
+            exclusions: "",
+            paymentNote: "",
+            depositPercent: 0,
+            signature: true,
+            date,
+            valid: validDate.toISOString().slice(0, 10),
+          },
+        },
+        now.toISOString(),
+        true,
+      );
+      working = quoteCreated.data;
+      quoteCreated.result.pricingRequired = true;
+      await client.query(
+        `UPDATE crm_opportunities SET client_id=$1,stage='proposal',
+         next_action=$2,updated_at=NOW() WHERE id=$3`,
+        [
+          clientRecord.id,
+          "Compléter et envoyer le devis " + quoteCreated.result.id,
+          opportunity.id,
+        ],
+      );
+      await client.query(
+        `INSERT INTO app_events(event_type,actor_user_id,company,entity_type,entity_id,payload)
+         VALUES('crm.converted',$1,$2,'crm',$3,$4)`,
+        [
+          user.id,
+          opportunity.company,
+          opportunity.id,
+          JSON.stringify({ clientId: clientRecord.id, quoteId: quoteCreated.result.id }),
+        ],
+      );
+      return {
+        data: working,
+        changed: ["clients", "quotes"],
+        result: { clientId: clientRecord.id, quoteId: quoteCreated.result.id },
+        audit: { opportunityId: opportunity.id, clientId: clientRecord.id, quoteId: quoteCreated.result.id },
+      };
+    });
+    res.json({ ok: true, ...result.result });
+  }));
+
   router.get("/activity", wrap(async (req, res) => {
     const after = Math.max(0, Number(req.query.after) || 0);
     const allowed = companiesFor(req.user);
