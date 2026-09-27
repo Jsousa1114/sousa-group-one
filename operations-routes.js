@@ -1424,7 +1424,7 @@ function routes(db) {
       await db.query(
         `UPDATE employee_lifecycle_items
          SET label=$1,required=$2,completed=$3,due_date=$4,
-             completed_by=CASE WHEN $3 THEN $5 ELSE NULL END,
+             completed_by=CASE WHEN $3 THEN $5::int ELSE NULL END,
              completed_at=CASE WHEN $3 THEN COALESCE(completed_at,NOW()) ELSE NULL END,
              updated_at=NOW()
          WHERE id=$6`,
