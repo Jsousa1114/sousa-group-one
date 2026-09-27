@@ -395,25 +395,48 @@
         </div>
       </article>`;
   }
-  async function renderPayroll() {
-    const currentMonth = new Intl.DateTimeFormat("en-CA", {
-      timeZone: "Europe/Zurich",
-      year: "numeric",
-      month: "2-digit",
-    }).format(new Date());
+  async function renderPayroll(monthValue = "") {
+    const currentMonth =
+        monthValue ||
+        new Intl.DateTimeFormat("en-CA", {
+          timeZone: "Europe/Zurich",
+          year: "numeric",
+          month: "2-digit",
+        }).format(new Date()),
+      summary = await get(
+        "hr/time-summary?month=" + encodeURIComponent(currentMonth),
+      ),
+      rows = summary.rows || [];
     root().querySelector("#opsBody").innerHTML = `
       <article class="card">
         <div class="ops-card-head">
           <div>
-            <h3>Export mensuel des heures</h3>
-            <p>Prépare un fichier CSV pour la fiduciaire ou le logiciel de paie, séparé par salarié et entreprise.</p>
+            <h3>Heures & préparation paie</h3>
+            <p>Contrôle mensuel des heures validées, heures supplémentaires et horaires spéciaux.</p>
           </div>
         </div>
         <div class="ops-toolbar">
           <label>Mois <input id="opsPayrollMonth" type="month" value="${esc(currentMonth)}"></label>
           ${button("Télécharger le CSV", "payroll-download", "", "primary")}
         </div>
-        <p class="muted">Le fichier distingue les heures validées des heures encore à valider. Il n’exporte aucun salaire ni donnée bancaire.</p>
+        <div class="table"><table>
+          <thead><tr><th>Salarié</th><th>Contrat</th><th>Objectif mois</th><th>Validées</th><th>À valider</th><th>Supplémentaires</th><th>Nuit</th><th>Dimanche</th></tr></thead>
+          <tbody>${rows
+            .map(
+              (x) => `<tr>
+                <td>${esc(x.name)}</td>
+                <td>${x.weeklyHours ? esc(x.weeklyHours) + " h/sem." : "Non renseigné"}</td>
+                <td>${x.targetHours == null ? "—" : esc(Number(x.targetHours).toFixed(2)) + " h"}</td>
+                <td>${esc(Number(x.validatedHours || 0).toFixed(2))} h</td>
+                <td>${esc(Number(x.pendingHours || 0).toFixed(2))} h</td>
+                <td>${x.overtimeHours == null ? "—" : esc(Number(x.overtimeHours).toFixed(2)) + " h"}</td>
+                <td>${esc(Number(x.nightHours || 0).toFixed(2))} h</td>
+                <td>${esc(Number(x.sundayHours || 0).toFixed(2))} h</td>
+              </tr>`,
+            )
+            .join("") || '<tr><td colspan="8">Aucune donnée.</td></tr>'}</tbody>
+        </table></div>
+        <p class="muted">Nuit : 23:00–06:00. L’objectif mensuel est calculé depuis les heures hebdomadaires contractuelles × 52 / 12. Les majorations salariales restent à appliquer selon le contrat, la CCT et les règles applicables.</p>
       </article>`;
   }
 
@@ -752,6 +775,9 @@
     if (event.target.id === "opsTaskProjectFilter") {
       projectFilter = event.target.value;
       await renderTasks();
+    }
+    if (event.target.id === "opsPayrollMonth") {
+      await renderPayroll(event.target.value);
     }
   });
   document.addEventListener("input", (event) => {
