@@ -29,6 +29,8 @@
     ["admin", "direction", "manager", "accounting"].includes(profile()?.role);
   const operational = () =>
     ["admin", "direction", "manager", "employee"].includes(profile()?.role);
+  const hrAllowed = () =>
+    ["admin", "direction", "hr"].includes(profile()?.role);
 
   function root() {
     return document.getElementById("operationsCenter");
@@ -43,6 +45,7 @@
       ...(commercial() ? [["crm", "CRM"]] : []),
       ...(operational() ? [["stock", "Stock"], ["workorders", "Bons de travail"]] : []),
       ...(allowedStaff() ? [["analytics", "Analytics"]] : []),
+      ...(hrAllowed() ? [["payroll", "Paie RH"]] : []),
       ...(profile()?.role === "admin" || profile()?.role === "direction"
         ? [["automations", "Automatisations"], ["integrations", "Intégrations"]]
         : []),
@@ -376,6 +379,28 @@
         </div>
       </article>`;
   }
+  async function renderPayroll() {
+    const currentMonth = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Europe/Zurich",
+      year: "numeric",
+      month: "2-digit",
+    }).format(new Date());
+    root().querySelector("#opsBody").innerHTML = `
+      <article class="card">
+        <div class="ops-card-head">
+          <div>
+            <h3>Export mensuel des heures</h3>
+            <p>Prépare un fichier CSV pour la fiduciaire ou le logiciel de paie, séparé par salarié et entreprise.</p>
+          </div>
+        </div>
+        <div class="ops-toolbar">
+          <label>Mois <input id="opsPayrollMonth" type="month" value="${esc(currentMonth)}"></label>
+          ${button("Télécharger le CSV", "payroll-download", "", "primary")}
+        </div>
+        <p class="muted">Le fichier distingue les heures validées des heures encore à valider. Il n’exporte aucun salaire ni donnée bancaire.</p>
+      </article>`;
+  }
+
   async function renderNotifications() {
     const out = await get("notifications"),
       rows = out.notifications || [];
@@ -401,6 +426,7 @@
       else if (activeTab === "stock") await renderStock();
       else if (activeTab === "workorders") await renderWorkOrders();
       else if (activeTab === "analytics") await renderAnalytics();
+      else if (activeTab === "payroll") await renderPayroll();
       else if (activeTab === "automations") await renderAutomations();
       else if (activeTab === "integrations") await renderIntegrations();
       else if (activeTab === "notifications") await renderNotifications();
@@ -625,6 +651,24 @@
       else if (a === "test-webhook") {
         await post("webhooks/test", { id: b.dataset.id });
         core().toast("Webhook testé.");
+      } else if (a === "payroll-download") {
+        const month = document.getElementById("opsPayrollMonth")?.value || "";
+        if (!month) throw new Error("Choisissez un mois.");
+        const response = await core().authFetch(
+          "/api/operations/payroll-export?month=" + encodeURIComponent(month),
+        );
+        if (!response.ok) {
+          const payload = await response.json().catch(() => ({}));
+          throw new Error(payload.error || "Export impossible.");
+        }
+        const blob = await response.blob(),
+          url = URL.createObjectURL(blob),
+          link = document.createElement("a");
+        link.href = url;
+        link.download = "sousa-payroll-" + month + ".csv";
+        link.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        core().toast("Export paie téléchargé.");
       } else if (a === "read-all") {
         await post("notifications/read", { all: true });
         await renderNotifications();
