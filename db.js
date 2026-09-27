@@ -453,6 +453,92 @@ async function migrate(db = pool) {
     )`,
   );
   await db.query(
+    `CREATE TABLE IF NOT EXISTS user_permission_overrides(
+      user_id INTEGER NOT NULL,
+      permission TEXT NOT NULL,
+      allowed BOOLEAN NOT NULL,
+      updated_by INTEGER,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY(user_id,permission)
+    )`,
+  );
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS approval_requests(
+      id TEXT PRIMARY KEY,
+      company TEXT NOT NULL,
+      request_type TEXT NOT NULL,
+      title TEXT NOT NULL,
+      amount NUMERIC(14,2),
+      entity_type TEXT,
+      entity_id TEXT,
+      payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+      status TEXT NOT NULL DEFAULT 'pending',
+      requested_by INTEGER NOT NULL,
+      decided_by INTEGER,
+      decision_note TEXT,
+      decided_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`,
+  );
+  await db.query(
+    `CREATE INDEX IF NOT EXISTS approval_requests_company_status_idx
+     ON approval_requests(company,status,created_at DESC)`,
+  );
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS calendar_feeds(
+      user_id INTEGER NOT NULL,
+      token TEXT PRIMARY KEY,
+      revoked_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`,
+  );
+  await db.query(
+    `CREATE INDEX IF NOT EXISTS calendar_feeds_user_idx
+     ON calendar_feeds(user_id,revoked_at,created_at DESC)`,
+  );
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS appointment_requests(
+      id TEXT PRIMARY KEY,
+      company TEXT NOT NULL,
+      client_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      start_at TIMESTAMPTZ NOT NULL,
+      end_at TIMESTAMPTZ NOT NULL,
+      notes TEXT,
+      status TEXT NOT NULL DEFAULT 'pending',
+      requested_by INTEGER NOT NULL,
+      updated_by INTEGER,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`,
+  );
+  await db.query(
+    `CREATE INDEX IF NOT EXISTS appointment_requests_client_idx
+     ON appointment_requests(client_id,start_at DESC)`,
+  );
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS outbound_messages(
+      id TEXT PRIMARY KEY,
+      channel TEXT NOT NULL,
+      recipient TEXT NOT NULL,
+      subject TEXT,
+      message TEXT NOT NULL,
+      metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+      status TEXT NOT NULL DEFAULT 'queued',
+      provider_status INTEGER,
+      provider_response TEXT,
+      created_by INTEGER NOT NULL,
+      sent_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`,
+  );
+  await db.query(
+    `CREATE INDEX IF NOT EXISTS outbound_messages_status_idx
+     ON outbound_messages(channel,status,created_at DESC)`,
+  );
+  await db.query(
     `INSERT INTO schema_migrations(version) VALUES
       ('2026-09-27-platform-p0-p3-baseline')
       ON CONFLICT(version) DO NOTHING`,
@@ -460,6 +546,11 @@ async function migrate(db = pool) {
   await db.query(
     `INSERT INTO schema_migrations(version) VALUES
       ('2026-09-27-employee-lifecycle')
+      ON CONFLICT(version) DO NOTHING`,
+  );
+  await db.query(
+    `INSERT INTO schema_migrations(version) VALUES
+      ('2026-09-27-p2-completion')
       ON CONFLICT(version) DO NOTHING`,
   );
   await db.query(
