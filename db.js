@@ -4,6 +4,28 @@ const bcrypt = require("bcryptjs");
 const { createHash } = require("node:crypto");
 const { emptyState, normalize, AppError } = require("./domain");
 const { runMigrations } = require("./migration-runner");
+const COLLECTION_TABLES = Object.freeze({
+  companies: "sg_companies",
+  employees: "sg_employees",
+  clients: "sg_clients",
+  projects: "sg_projects",
+  time: "sg_time_entries",
+  planning: "sg_planning",
+  absences: "sg_absences",
+  quotes: "sg_quotes",
+  invoices: "sg_invoices",
+  payments: "sg_payments",
+  expenses: "sg_expenses",
+  inventory: "sg_inventory",
+  suppliers: "sg_suppliers",
+  vehicles: "sg_vehicles",
+  tools: "sg_tools",
+  maintenance: "sg_maintenance",
+  documents: "sg_documents",
+  messages: "sg_messages",
+  messageThreads: "sg_message_threads",
+  clocks: "sg_clocks",
+});
 const MIRRORED_COLLECTIONS = [
   "companies",
   "employees",
@@ -27,22 +49,32 @@ const MIRRORED_COLLECTIONS = [
   "clocks",
 ];
 async function syncEntityCollection(c, collection, rows) {
+  const table = COLLECTION_TABLES[collection];
+  if (!table) throw new AppError("Collection non normalisée : " + collection, 500);
   const list = Array.isArray(rows) ? rows.filter((x) => x && x.id != null) : [];
   await c.query("DELETE FROM entity_records WHERE collection=$1", [collection]);
+  await c.query(`DELETE FROM ${table}`);
   for (let position = 0; position < list.length; position++) {
     const row = list[position];
+    const values = [
+      String(row.id),
+      row.company ? String(row.company) : null,
+      JSON.stringify(row),
+      position,
+    ];
     await c.query(
       `INSERT INTO entity_records(collection,entity_id,company,data,position,updated_at)
        VALUES($1,$2,$3,$4,$5,NOW())
        ON CONFLICT(collection,entity_id) DO UPDATE SET
        company=EXCLUDED.company,data=EXCLUDED.data,position=EXCLUDED.position,updated_at=NOW()`,
-      [
-        collection,
-        String(row.id),
-        row.company ? String(row.company) : null,
-        JSON.stringify(row),
-        position,
-      ],
+      [collection, ...values],
+    );
+    await c.query(
+      `INSERT INTO ${table}(entity_id,company,data,position,updated_at)
+       VALUES($1,$2,$3,$4,NOW())
+       ON CONFLICT(entity_id) DO UPDATE SET
+       company=EXCLUDED.company,data=EXCLUDED.data,position=EXCLUDED.position,updated_at=NOW()`,
+      values,
     );
   }
 }
@@ -677,13 +709,14 @@ async function migrate(db = pool) {
       ON CONFLICT(scope) DO NOTHING`,
   );
 
+  await runMigrations(db);
   await db.query(
     "INSERT INTO app_state(id,data) VALUES(1,$1) ON CONFLICT(id) DO NOTHING",
     [JSON.stringify(emptyState())],
   );
   const canonicalReady = (
     await db.query(
-      "SELECT 1 FROM schema_migrations WHERE version='2026-09-27-entity-records-canonical-v1'",
+      "SELECT 1 FROM schema_migrations WHERE version='2026-09-27-collection-tables-canonical-v1'",
     )
   ).rows.length > 0;
   if (!canonicalReady) {
@@ -696,11 +729,11 @@ async function migrate(db = pool) {
     `INSERT INTO schema_migrations(version) VALUES
       ('2026-09-27-entity-records-mirror'),
       ('2026-09-27-entity-records-canonical-v1'),
+      ('2026-09-27-collection-tables-canonical-v1'),
       ('2026-09-27-object-storage-metadata'),
       ('2026-09-27-webauthn-passkeys')
       ON CONFLICT(version) DO NOTHING`,
   );
-  await runMigrations(db);
   // Disable the previously published demo credentials, even on an existing installation.
   const users = await db.query(
     "SELECT id,password_hash FROM users WHERE disabled=false",
@@ -746,12 +779,29 @@ async function loadState(db = pool, { forUpdate = false } = {}) {
   ).rows[0];
   if (!row) throw new AppError("État applicatif introuvable.", 500);
   const data = normalize(row.data);
-  const canonical = (
+  const physicalCanonical = (
+    await db.query(
+      "SELECT 1 FROM schema_migrations WHERE version='2026-09-27-collection-tables-canonical-v1'",
+    )
+  ).rows.length > 0;
+  if (physicalCanonical) {
+    for (const collection of MIRRORED_COLLECTIONS) {
+      const table = COLLECTION_TABLES[collection];
+      const rows = (
+        await db.query(
+          `SELECT data FROM ${table} ORDER BY position,entity_id`,
+        )
+      ).rows;
+      data[collection] = rows.map((record) => record.data);
+    }
+    return { data, revision: row.revision };
+  }
+  const genericCanonical = (
     await db.query(
       "SELECT 1 FROM schema_migrations WHERE version='2026-09-27-entity-records-canonical-v1'",
     )
   ).rows.length > 0;
-  if (!canonical) return { data, revision: row.revision };
+  if (!genericCanonical) return { data, revision: row.revision };
   for (const collection of MIRRORED_COLLECTIONS) data[collection] = [];
   const records = (
     await db.query(
@@ -882,4 +932,5 @@ module.exports = {
   loadState,
   replaceStateSnapshot,
   MIRRORED_COLLECTIONS,
+  COLLECTION_TABLES,
 };
