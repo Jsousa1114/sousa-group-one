@@ -143,6 +143,6 @@ Le module **Pilotage > P3 · Intelligence** regroupe les fonctions avancées pr�
 - prévision de charge d'équipe sur 1 à 8 semaines ;
 - propositions d'affectation basées sur disponibilités, absences, conflits, capacité et équipe chantier.
 
-Sans fournisseur IA externe, l'assistant conserve un mode local déterministe et les fonctions de charge, anomalies, planification assistée et dictée navigateur restent disponibles. Les fonctions OCR et génération enrichie de devis nécessitent `AI_API_URL` et `AI_API_KEY`. La transcription serveur nécessite en plus `AI_TRANSCRIBE_API_URL`.
+Sans fournisseur IA externe, l'assistant conserve un mode local déterministe et les fonctions de charge, anomalies, planification assistée et dictée navigateur restent disponibles. Les fonctions OCR et génération enrichie de devis nécessitent `AI_API_URL`, `AI_API_KEY` et `AI_MODEL`. La transcription serveur nécessite en plus `AI_TRANSCRIBE_API_URL`.
 
 Les sorties IA sont toujours des brouillons ou des extractions à contrôler : aucun prix, devis, dépense ou planning n'est enregistré automatiquement sans action explicite d'un utilisateur autorisé.
