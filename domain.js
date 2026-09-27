@@ -84,9 +84,9 @@ const privileged = (u, roles) => {
   const base = roles.includes(u.role);
   if (u.role === "admin") return base;
   const denials = Array.isArray(u.permission_denials) ? u.permission_denials : [];
-  if (denials.some((role) => roles.includes(role))) return false;
+  if (base && denials.includes(u.role)) return false;
   const grants = Array.isArray(u.permission_grants) ? u.permission_grants : [];
-  return base || grants.some((role) => roles.includes(role));
+  return base || grants.some((role) => roles.includes(role) && !denials.includes(role));
 };
 function employeeProfile(p) {
   const out = {};
