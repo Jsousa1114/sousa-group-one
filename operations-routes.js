@@ -624,6 +624,170 @@ function routes(db) {
   );
 
   r.get(
+    "/project/:id/summary",
+    wrap(async (req, res) => {
+      const ctx = await stateContext(db, req.user),
+        project = canOperateProject(ctx, req.user, req.params.id),
+        pid = String(project.id),
+        reportDate = req.query.date
+          ? isoDate(req.query.date, false)
+          : new Date().toISOString().slice(0, 10);
+
+      const [tasks, checklist, reports, punch, movements, workOrders] =
+        await Promise.all([
+          db.query(
+            "SELECT * FROM project_tasks WHERE project_id=$1 ORDER BY created_at",
+            [pid],
+          ),
+          db.query(
+            "SELECT * FROM project_checklist_items WHERE project_id=$1 ORDER BY created_at",
+            [pid],
+          ),
+          db.query(
+            "SELECT * FROM project_daily_reports WHERE project_id=$1 AND report_date=$2 ORDER BY created_at",
+            [pid, reportDate],
+          ),
+          db.query(
+            "SELECT * FROM project_punch_items WHERE project_id=$1 AND status<>'resolved' ORDER BY created_at",
+            [pid],
+          ),
+          db.query(
+            `SELECT * FROM inventory_movements
+             WHERE project_id=$1
+               AND created_at >= $2::date
+               AND created_at < ($2::date + INTERVAL '1 day')
+             ORDER BY created_at`,
+            [pid, reportDate],
+          ),
+          db.query(
+            `SELECT * FROM work_orders
+             WHERE project_id=$1
+               AND scheduled_at >= $2::date
+               AND scheduled_at < ($2::date + INTERVAL '1 day')
+             ORDER BY scheduled_at`,
+            [pid, reportDate],
+          ),
+        ]);
+
+      const times = ctx.view.time.filter(
+          (x) => D.same(x.project, pid) && x.date === reportDate,
+        ),
+        hours = times.reduce((sum, row) => sum + (Number(row.hours) || 0), 0),
+        employeeIds = [...new Set(times.map((x) => String(x.employeeId || "")).filter(Boolean))],
+        employeeNames = employeeIds.map(
+          (id) =>
+            ctx.view.employees.find((e) => D.same(e.id, id))?.name || id,
+        ),
+        taskDone = tasks.rows.filter((x) => x.status === "done").length,
+        taskOpen = tasks.rows.length - taskDone,
+        checklistDone = checklist.rows.filter((x) => x.completed).length,
+        checklistOpen = checklist.rows.length - checklistDone,
+        highIssues = punch.rows.filter((x) =>
+          ["high", "critical"].includes(x.severity),
+        ),
+        highlights = [],
+        risks = [];
+
+      if (hours > 0)
+        highlights.push(
+          hours.toFixed(2) +
+            " h enregistrées" +
+            (employeeNames.length
+              ? " · " + employeeNames.join(", ")
+              : ""),
+        );
+      if (taskDone)
+        highlights.push(taskDone + " tâche(s) terminée(s)");
+      if (checklistDone)
+        highlights.push(
+          checklistDone +
+            "/" +
+            checklist.rows.length +
+            " contrôle(s) checklist validé(s)",
+        );
+      if (reports.rows.length)
+        highlights.push(
+          reports.rows.length + " rapport(s) journalier(s) saisi(s)",
+        );
+      if (movements.rows.length)
+        highlights.push(
+          movements.rows.length + " mouvement(s) de matériel enregistré(s)",
+        );
+      if (workOrders.rows.length)
+        highlights.push(
+          workOrders.rows.length + " intervention(s) planifiée(s) ce jour",
+        );
+
+      if (taskOpen)
+        risks.push(taskOpen + " tâche(s) encore ouverte(s)");
+      if (checklistOpen)
+        risks.push(checklistOpen + " contrôle(s) checklist restant(s)");
+      if (punch.rows.length)
+        risks.push(
+          punch.rows.length +
+            " réserve(s) ouverte(s)" +
+            (highIssues.length
+              ? " dont " + highIssues.length + " prioritaire(s)"
+              : ""),
+        );
+      for (const report of reports.rows)
+        if (report.issues)
+          risks.push(
+            String(report.issues).slice(0, 400),
+          );
+
+      const progress = Number(project.progress) || 0,
+        lines = [
+          `Chantier ${project.title || project.id} — ${reportDate}`,
+          `Statut : ${project.status || "—"} · Avancement : ${progress} %`,
+          `Heures : ${hours.toFixed(2)} h · Équipe active : ${employeeNames.length}`,
+          `Tâches : ${taskDone} terminée(s), ${taskOpen} ouverte(s)`,
+          `Checklist : ${checklistDone} validée(s), ${checklistOpen} restante(s)`,
+          `Réserves ouvertes : ${punch.rows.length}`,
+          `Mouvements matériel : ${movements.rows.length}`,
+        ];
+      if (reports.rows.length)
+        lines.push(
+          "Rapports : " +
+            reports.rows
+              .map((x) => String(x.summary || "").trim())
+              .filter(Boolean)
+              .join(" | ")
+              .slice(0, 1200),
+        );
+      if (risks.length)
+        lines.push("Points à surveiller : " + risks.join(" | ").slice(0, 1200));
+
+      res.json({
+        project: {
+          id: String(project.id),
+          title: project.title || String(project.id),
+          status: project.status || "",
+          progress,
+        },
+        date: reportDate,
+        metrics: {
+          hours: Math.round(hours * 100) / 100,
+          activeTeam: employeeNames.length,
+          taskDone,
+          taskOpen,
+          checklistDone,
+          checklistOpen,
+          openPunch: punch.rows.length,
+          highPriorityPunch: highIssues.length,
+          materialMovements: movements.rows.length,
+          workOrders: workOrders.rows.length,
+          reports: reports.rows.length,
+        },
+        team: employeeNames,
+        highlights,
+        risks,
+        summary: lines.join("\n"),
+      });
+    }),
+  );
+
+  r.get(
     "/project/:id/ops",
     wrap(async (req, res) => {
       const ctx = await stateContext(db, req.user);

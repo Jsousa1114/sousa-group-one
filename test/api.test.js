@@ -1973,6 +1973,56 @@ test("operations platform covers tasks CRM stock work orders analytics insights 
   assert.equal(work.status, 200, JSON.stringify(work.data));
   const workOrders = await call("operations/work-orders", admin);
   assert.ok(workOrders.data.workOrders.some((x) => x.id === work.data.id));
+  const summaryDate = "2026-08-27";
+  const summaryStateRow = (
+    await db.query("SELECT data FROM app_state WHERE id=1")
+  ).rows[0];
+  const summaryState = summaryStateRow.data;
+  summaryState.time.push({
+    id: "project-summary-time",
+    employeeId: "e1",
+    company: "home",
+    project: "p1",
+    date: summaryDate,
+    hours: 6.25,
+    status: "Validé",
+  });
+  await db.query("UPDATE app_state SET data=$1 WHERE id=1", [
+    JSON.stringify(summaryState),
+  ]);
+  const dailyReport = await call("operations/project/p1/report", admin, {
+    reportDate: summaryDate,
+    weather: "Sec",
+    summary: "Pose terminée dans la zone principale.",
+    issues: "Attente d'une pièce fournisseur.",
+    materials: "Câble et appareillage",
+    team: "Employee",
+  });
+  assert.equal(dailyReport.status, 200, JSON.stringify(dailyReport.data));
+  const projectSummary = await call(
+    "operations/project/p1/summary?date=" + summaryDate,
+    admin,
+  );
+  assert.equal(projectSummary.status, 200, JSON.stringify(projectSummary.data));
+  assert.equal(projectSummary.data.project.id, "p1");
+  assert.equal(projectSummary.data.metrics.hours, 6.25);
+  assert.ok(projectSummary.data.metrics.taskOpen >= 1);
+  assert.equal(projectSummary.data.metrics.reports, 1);
+  assert.match(projectSummary.data.summary, /Pose terminée/);
+  assert.ok(
+    projectSummary.data.risks.some((x) =>
+      /pièce fournisseur/i.test(x),
+    ),
+  );
+  assert.equal(
+    (
+      await call(
+        "operations/project/p1/summary?date=" + summaryDate,
+        viewer,
+      )
+    ).status,
+    403,
+  );
 
   const analytics = await call("operations/analytics", admin);
   assert.equal(analytics.status, 200, JSON.stringify(analytics.data));
