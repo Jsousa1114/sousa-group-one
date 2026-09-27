@@ -52,11 +52,31 @@ async function openAccount(page, mobile=false) {
   await page.locator(".account-profile-card").waitFor({ timeout:10000 });
 }
 async function noOverflow(page,label) {
-  const d = await page.evaluate(() => ({
-    width: innerWidth,
-    doc: document.documentElement.scrollWidth,
-    body: document.body.scrollWidth,
-  }));
+  const d = await page.evaluate(() => {
+    const width = innerWidth,
+      offenders = [...document.querySelectorAll("body *")]
+        .map((el) => {
+          const r = el.getBoundingClientRect();
+          return {
+            tag: el.tagName,
+            id: el.id,
+            cls: String(el.className || "").slice(0, 100),
+            left: Math.round(r.left),
+            right: Math.round(r.right),
+            width: Math.round(r.width),
+            scrollWidth: el.scrollWidth,
+          };
+        })
+        .filter((x) => x.right > width + 2 || x.left < -2 || x.scrollWidth > Math.max(x.width + 2, width + 2))
+        .sort((a, b) => Math.max(b.right - width, b.scrollWidth - b.width) - Math.max(a.right - width, a.scrollWidth - a.width))
+        .slice(0, 12);
+    return {
+      width,
+      doc: document.documentElement.scrollWidth,
+      body: document.body.scrollWidth,
+      offenders,
+    };
+  });
   assert.ok(d.doc <= d.width + 2, label + " document overflow " + JSON.stringify(d));
   assert.ok(d.body <= d.width + 2, label + " body overflow " + JSON.stringify(d));
 }
