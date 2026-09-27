@@ -805,7 +805,7 @@ test("employee equipment assignments validate scope, exclusivity, history and re
   assert.equal(d.tools[0].assignmentHistory.length, 2);
 });
 
-test("identity documents are restricted to HR in employee companies", () => {
+test("identity documents are visible to their employee owner and authorized HR", () => {
   const d = fixture();
   d.employees[0].nationality = "Portugaise";
   d.documents = [
@@ -818,7 +818,7 @@ test("identity documents are restricted to HR in employee companies", () => {
     },
   ];
   assert.equal(D.viewState(d, admin).documents.length, 1);
-  assert.equal(D.viewState(d, employee).documents.length, 0);
+  assert.equal(D.viewState(d, employee).documents.length, 1);
   assert.equal(
     D.viewState(d, { ...admin, role: "manager" }).documents.length,
     0,
