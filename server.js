@@ -122,7 +122,7 @@ function createApp(db = pool) {
          (request_id,user_id,method,path,status,message,stack,metadata)
          VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,
         [
-          req.id || req.headers["x-request-id"] || null,
+          req.requestId || req.headers["x-request-id"] || null,
           req.user?.id || null,
           req.method,
           req.originalUrl || req.path,
