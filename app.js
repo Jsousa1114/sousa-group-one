@@ -1858,6 +1858,7 @@ const schemas = {
     ["salaryPeriod", "Type de salaire", "salary-period"],
     ["salary", "Salaire mensuel (CHF/mois)", "number"],
     ["activity", "Taux d’activité %", "number", "100"],
+    ["weeklyHours", "Heures hebdomadaires contractuelles", "number", "42"],
     ["vacation", "Solde de vacances (jours)", "number", "20"],
     ["entry", "Date d’entrée", "date"],
     ...employeeContactFields,
@@ -2394,7 +2395,7 @@ async function employeeDetail(id) {
     ${
       privateInfo
         ? `<details open><summary>Coordonnées et informations personnelles</summary><dl class="employee-info"><dt>E-mail de contact</dt><dd>${esc(e.email || "—")}</dd><dt>Téléphone</dt><dd>${esc(e.phone || "—")}</dd><dt>Adresse</dt><dd>${esc([e.street, e.zip, e.city, e.country].filter(Boolean).join(", ") || "Non renseignée")}</dd><dt>Date de naissance</dt><dd>${e.birthDate ? date(e.birthDate) : "—"}</dd><dt>Nationalité(s)</dt><dd>${esc(e.nationality || "Non renseignée")}</dd><dt>Permis de séjour</dt><dd>${esc(e.residencePermit || "Non renseigné")}</dd><dt>Expiration du permis</dt><dd>${e.residencePermitExpiry ? date(e.residencePermitExpiry) : "—"}</dd><dt>Contact d’urgence</dt><dd>${esc([e.emergencyName, e.emergencyPhone].filter(Boolean).join(" · ") || "—")}</dd></dl></details>
-    <details><summary>Contrat et rémunération</summary><p>${e.salaryPeriod === "hourly" ? "Salaire horaire" : "Salaire mensuel"} : ${money(e.salary)}${e.salaryPeriod === "hourly" ? " / heure" : " / mois"}</p><p>Activité : ${esc(e.activity ?? "—")} % · Vacances : ${esc(e.vacation ?? "—")} jours</p><p>Contrat : ${esc(e.contractType || "Non renseigné")} · Entrée : ${e.entry ? date(e.entry) : "—"} · Fin : ${e.endDate ? date(e.endDate) : "—"}</p>${can(hr) && e.notes ? `<p class="employee-notes">${esc(e.notes)}</p>` : ""}</details>`
+    <details><summary>Contrat et rémunération</summary><p>${e.salaryPeriod === "hourly" ? "Salaire horaire" : "Salaire mensuel"} : ${money(e.salary)}${e.salaryPeriod === "hourly" ? " / heure" : " / mois"}</p><p>Activité : ${esc(e.activity ?? "—")} % · Heures contractuelles : ${esc(e.weeklyHours || "—")} h/semaine · Vacances : ${esc(e.vacation ?? "—")} jours</p><p>Contrat : ${esc(e.contractType || "Non renseigné")} · Entrée : ${e.entry ? date(e.entry) : "—"} · Fin : ${e.endDate ? date(e.endDate) : "—"}</p>${can(hr) && e.notes ? `<p class="employee-notes">${esc(e.notes)}</p>` : ""}</details>`
         : ""
     }
     ${
@@ -2601,6 +2602,7 @@ function userForm(link) {
       ["employeeSalaryPeriod", "Type de salaire", "salary-period"],
       ["employeeSalary", "Salaire mensuel (CHF/mois)", "number"],
       ["employeeActivity", "Taux d’activité %", "number", "100"],
+      ["employeeWeeklyHours", "Heures hebdomadaires contractuelles", "number", "42"],
       ["employeeVacation", "Solde de vacances (jours)", "number", "20"],
       ["employeeEntry", "Date d’entrée", "date"],
     ]
@@ -3477,6 +3479,7 @@ document.addEventListener("submit", async (e) => {
         salary: p.employeeSalary,
         salaryPeriod: p.employeeSalaryPeriod,
         activity: p.employeeActivity,
+        weeklyHours: p.employeeWeeklyHours,
         vacation: p.employeeVacation,
         entry: p.employeeEntry,
       };
