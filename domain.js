@@ -356,7 +356,8 @@ function viewState(data, u) {
   v.projects = d.projects
     .filter(
       (p) =>
-        canProject(d, u, p) || (u.role === "hr" && inCompany(u, p.company)),
+        canProject(d, u, p) ||
+        (u.role === "hr" && !p.deletedAt && inCompany(u, p.company)),
     )
     .map((p) =>
       u.role === "client" || u.role === "employee" || u.role === "hr"
