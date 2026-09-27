@@ -108,7 +108,7 @@ async function visitAll(page, expectedPages, mobile=false){
     await admin.page.locator("#modalWrap:not(.hidden)").waitFor();
     await admin.page.locator("#f_city").fill("Genève");
     await admin.page.locator('#entityForm button[type="submit"]').click();
-    await admin.page.locator("#modalWrap.hidden").waitFor();
+    await admin.page.locator("#modalWrap").waitFor({state:"hidden"});
     await admin.page.getByText("Genève",{exact:true}).waitFor({timeout:5000});
 
     // Regression: unlinked client deletion must work end-to-end.
