@@ -4,6 +4,7 @@ const { randomUUID } = require("node:crypto");
 const { auth, profile } = require("./auth-middleware");
 const { wrap } = require("./auth-routes");
 const D = require("./domain");
+const storage = require("./storage");
 
 let webPush = null;
 try {
@@ -312,9 +313,7 @@ function routes(db) {
         [String(message.id)],
       );
       if (message.attachment?.fileId)
-        await db.query("DELETE FROM file_contents WHERE id=$1", [
-          String(message.attachment.fileId),
-        ]);
+        await storage.removeFile(db, String(message.attachment.fileId));
       res.json({ ok: true });
     }),
   );
@@ -899,8 +898,8 @@ async function cleanupRetention(db) {
       "UPDATE app_state SET data=$1,revision=revision+1,updated_at=NOW(),updated_by='retention-policy' WHERE id=1",
       [JSON.stringify(data)],
     );
-    if (fileIds.length)
-      await db.query("DELETE FROM file_contents WHERE id=ANY($1::text[])", [fileIds]);
+    for (const fileId of fileIds)
+      await storage.removeFile(db, String(fileId));
     const ids = expired.map((m) => String(m.id));
     await db.query("DELETE FROM message_reads WHERE message_id=ANY($1::text[])", [ids]);
     await db.query("DELETE FROM message_reactions WHERE message_id=ANY($1::text[])", [ids]);
