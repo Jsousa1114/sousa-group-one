@@ -753,19 +753,8 @@ function routes(db) {
 }
 
 async function notifyUsers(db, userIds, payload) {
-  if (
-    !webPush ||
-    !process.env.VAPID_PUBLIC_KEY ||
-    !process.env.VAPID_PRIVATE_KEY ||
-    !userIds?.length
-  )
-    return { sent: 0 };
-  webPush.setVapidDetails(
-    process.env.VAPID_SUBJECT || "mailto:notifications@sousa-group.local",
-    process.env.VAPID_PUBLIC_KEY,
-    process.env.VAPID_PRIVATE_KEY,
-  );
-  let allowedUserIds = userIds.map(Number);
+  if (!userIds?.length) return { sent: 0, stored: 0 };
+  let allowedUserIds = [...new Set(userIds.map(Number).filter(Number.isFinite))];
   if (payload?.conversationKey) {
     const muted = (
       await db.query(
@@ -780,10 +769,14 @@ async function notifyUsers(db, userIds, payload) {
     const mutedSet = new Set(muted);
     allowedUserIds = allowedUserIds.filter((id) => !mutedSet.has(id));
   }
-  if (!allowedUserIds.length) return { sent: 0 };
+  if (!allowedUserIds.length) return { sent: 0, stored: 0 };
   const category =
       payload?.category ||
-      (/call/i.test(String(payload?.tag || "")) ? "calls" : payload?.conversationKey?.startsWith("thread:") ? "groups" : "messages"),
+      (/call/i.test(String(payload?.tag || ""))
+        ? "calls"
+        : payload?.conversationKey?.startsWith("thread:")
+          ? "groups"
+          : "messages"),
     prefRows = (
       await db.query(
         "SELECT user_id,data FROM account_preferences WHERE user_id=ANY($1::int[])",
@@ -793,13 +786,51 @@ async function notifyUsers(db, userIds, payload) {
     prefMap = new Map(prefRows.map((x) => [Number(x.user_id), x.data || {}]));
   allowedUserIds = allowedUserIds.filter((id) => {
     const n = prefMap.get(Number(id))?.notifications || {};
-    return n.push !== false && n[category] !== false;
+    return n[category] !== false;
   });
-  if (!allowedUserIds.length) return { sent: 0 };
+  if (!allowedUserIds.length) return { sent: 0, stored: 0 };
+
+  let stored = 0;
+  for (const userId of allowedUserIds) {
+    await db.query(
+      `INSERT INTO user_notifications
+       (id,user_id,category,title,body,url,entity_type,entity_id)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [
+        randomUUID(),
+        userId,
+        String(category).slice(0, 60),
+        String(payload?.title || "Sousa Group One").slice(0, 200),
+        String(payload?.body || "Nouvelle activité").slice(0, 1000),
+        String(payload?.url || "/").slice(0, 1000),
+        payload?.entityType ? String(payload.entityType).slice(0, 80) : null,
+        payload?.entityId ? String(payload.entityId).slice(0, 200) : null,
+      ],
+    );
+    stored++;
+  }
+
+  if (
+    !webPush ||
+    !process.env.VAPID_PUBLIC_KEY ||
+    !process.env.VAPID_PRIVATE_KEY
+  )
+    return { sent: 0, stored };
+
+  webPush.setVapidDetails(
+    process.env.VAPID_SUBJECT || "mailto:notifications@sousa-group.local",
+    process.env.VAPID_PUBLIC_KEY,
+    process.env.VAPID_PRIVATE_KEY,
+  );
+  const pushUserIds = allowedUserIds.filter((id) => {
+    const n = prefMap.get(Number(id))?.notifications || {};
+    return n.push !== false;
+  });
+  if (!pushUserIds.length) return { sent: 0, stored };
   const rows = (
     await db.query(
       "SELECT id,user_id,endpoint,p256dh,auth FROM push_subscriptions WHERE user_id=ANY($1::int[])",
-      [allowedUserIds],
+      [pushUserIds],
     )
   ).rows;
   let sent = 0;
@@ -825,7 +856,7 @@ async function notifyUsers(db, userIds, payload) {
         await db.query("DELETE FROM push_subscriptions WHERE id=$1", [row.id]);
     }
   }
-  return { sent };
+  return { sent, stored };
 }
 
 async function cleanupRetention(db) {
