@@ -1951,9 +1951,59 @@ test("operations platform covers tasks CRM stock work orders analytics insights 
   assert.ok(Array.isArray(analytics.data.byProject));
   assert.equal((await call("operations/analytics", viewer)).status, 403);
 
+  const complianceStateRow = (
+    await db.query("SELECT data FROM app_state WHERE id=1")
+  ).rows[0];
+  const complianceState = complianceStateRow.data;
+  const permitExpiry = new Date(Date.now() + 10 * 86400000)
+    .toISOString()
+    .slice(0, 10);
+  const employeeRow = complianceState.employees.find((e) => e.id === "e1");
+  employeeRow.residencePermit = "C";
+  employeeRow.residencePermitExpiry = permitExpiry;
+  const payrollMonth = new Date().toISOString().slice(0, 7);
+  complianceState.time.push({
+    id: "payroll-export-test",
+    employeeId: "e1",
+    company: "home",
+    project: "p1",
+    date: payrollMonth + "-01",
+    hours: 7.5,
+    status: "Validé",
+  });
+  await db.query("UPDATE app_state SET data=$1 WHERE id=1", [
+    JSON.stringify(complianceState),
+  ]);
+
   const insights = await call("operations/insights", admin);
   assert.equal(insights.status, 200, JSON.stringify(insights.data));
   assert.ok(Array.isArray(insights.data.insights));
+  assert.ok(
+    insights.data.insights.some(
+      (x) =>
+        x.type === "employee.residence_permit_expiry" &&
+        x.entityId === "e1",
+    ),
+  );
+
+  const payroll = await fetch(
+    url + "/api/operations/payroll-export?month=" + payrollMonth,
+    { headers: { Authorization: "Bearer " + admin } },
+  );
+  assert.equal(payroll.status, 200);
+  assert.match(payroll.headers.get("content-type") || "", /text\/csv/);
+  const payrollCsv = await payroll.text();
+  assert.match(payrollCsv, /Employee/);
+  assert.match(payrollCsv, /7\.50/);
+  assert.equal(
+    (
+      await fetch(
+        url + "/api/operations/payroll-export?month=" + payrollMonth,
+        { headers: { Authorization: "Bearer " + viewer } },
+      )
+    ).status,
+    403,
+  );
 
   const integrations = await call("operations/integrations", admin);
   assert.equal(integrations.status, 200, JSON.stringify(integrations.data));
