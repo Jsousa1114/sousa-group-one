@@ -60,6 +60,7 @@ function createApp(db = pool) {
   app.use("/api/state", require("./state-routes").routes(db));
   app.use("/api/messaging", require("./messaging-routes").routes(db));
   app.use("/api/operations", require("./operations-routes").routes(db));
+  app.use("/api/ai", require("./ai-routes").routes(db));
   app.get(["/favicon.ico", "/icon.svg"], (req, res) => {
     res.set("Cache-Control", "no-cache");
     res.redirect(302, "/assets/logos/group.png?v=group-20260926");
