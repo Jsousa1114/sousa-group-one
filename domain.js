@@ -249,6 +249,8 @@ function company(d, u, id) {
 }
 function canProject(d, u, p) {
   return (
+    !!p &&
+    !p.deletedAt &&
     inCompany(u, p.company) &&
     (privileged(u, [...OPS, "accounting"]) ||
       (u.role === "employee" &&
@@ -258,6 +260,8 @@ function canProject(d, u, p) {
 }
 function canEmployee(u, e) {
   return (
+    !!e &&
+    !e.deletedAt &&
     employeeCompanies(e).some((c) => inCompany(u, c)) &&
     (privileged(u, [...HR, "manager"]) || same(e.id, u.employee_id))
   );
@@ -280,6 +284,7 @@ function canFinance(d, u, r) {
 }
 function canDocument(d, u, r) {
   u = effectiveUser(d, u);
+  if (!r || r.deletedAt) return false;
   if (r.category === "identity") {
     const e = d.employees.find((e) => same(e.id, r.employeeId));
     return (
@@ -363,11 +368,12 @@ function viewState(data, u) {
   const ps = new Set(v.projects.map((p) => String(p.id)));
   v.clients = d.clients
     .filter((c) =>
-      u.role === "client"
+      !c.deletedAt &&
+      (u.role === "client"
         ? same(c.id, u.client_id)
         : (privileged(u, [...OPS, "accounting"]) &&
             (c.company ? inCompany(u, c.company) : u.company === "group")) ||
-          v.projects.some((p) => same(p.clientId, c.id)),
+          v.projects.some((p) => same(p.clientId, c.id))),
     )
     .map((c) => (u.role === "employee" ? { id: c.id, name: c.name } : c));
   for (const k of ["time", "planning", "absences"])
@@ -420,6 +426,7 @@ function viewState(data, u) {
   ])
     v[k] = d[k].filter(
       (r) =>
+        !r.deletedAt &&
         (privileged(u, [...OPS, "accounting"]) ||
           (u.role === "hr" && ["tools", "vehicles"].includes(k)) ||
           (u.role === "employee" &&
