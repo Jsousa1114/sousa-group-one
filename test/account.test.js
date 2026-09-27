@@ -4,7 +4,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const bcrypt = require("bcryptjs");
 const { database } = require("./database");
-const { migrate } = require("../db");
+const { migrate, replaceStateSnapshot } = require("../db");
 const { createApp } = require("../server");
 const { emptyState } = require("../domain");
 const {
@@ -96,7 +96,7 @@ test.before(async () => {
       hours: 7.5,
     },
   ];
-  await db.query("UPDATE app_state SET data=$1 WHERE id=1", [JSON.stringify(d)]);
+  await replaceStateSnapshot(db, d, "test-account-fixture");
   server = createApp(db).listen(0, "127.0.0.1");
   await new Promise((resolve) => server.once("listening", resolve));
   url = "http://127.0.0.1:" + server.address().port;

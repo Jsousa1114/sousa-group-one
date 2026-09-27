@@ -28,6 +28,12 @@ En hébergement, configurer les variables dans le service et utiliser `npm start
   la connexion reste chiffrée. Cette installation Render accepte le certificat
   interne auto-signé de PostgreSQL sans vérifier son autorité, conformément à
   l'autorisation donnée pour ce déploiement.
+- `RTC_TURN_URLS`, `RTC_TURN_USERNAME`, `RTC_TURN_CREDENTIAL` :
+  relais TURN/TURNS de production pour fiabiliser les appels WebRTC derrière
+  les réseaux mobiles, NAT stricts et Wi-Fi d'entreprise.
+- `OBJECT_STORAGE_*` : stockage S3-compatible (Cloudflare R2, AWS S3, etc.).
+  Sans ces variables, les fichiers restent en PostgreSQL pour compatibilité ;
+  en production, le stockage objet est recommandé et visible dans `/healthz`.
 - `PORT` : 3000 par défaut.
 
 ## Mise à jour depuis le prototype
@@ -70,10 +76,11 @@ utilisateurs doivent se reconnecter. Aucun mode hors ligne n'est annoncé.
   n'est revendiquée. TVA et remises sont calculées ligne par ligne au centime,
   avec taux choisi explicitement (0 % par défaut). Voir `FINANCE.md` pour le
   nouveau parcours devis → facture, les PDF et le QR bancaire.
-- Documents : dépôt réel dans PostgreSQL, PDF/JPEG/PNG/WebP/TXT, 5 Mo par fichier,
-  accès contrôlé au téléchargement. Documents de chantier privés par défaut ;
-  partage client explicite par un responsable. Les fichiers sont téléchargés en
-  pièces jointes, jamais exécutés comme HTML.
+- Documents : stockage S3-compatible en production avec métadonnées en PostgreSQL,
+  et repli PostgreSQL si aucun stockage objet n'est configuré. PDF/JPEG/PNG/WebP/TXT,
+  5 Mo par fichier, accès contrôlé au téléchargement. Documents de chantier privés
+  par défaut ; partage client explicite par un responsable. Les fichiers sont
+  téléchargés en pièces jointes, jamais exécutés comme HTML.
 - Messagerie : destinataires existants autorisés, conversations séparées,
   aucun envoi d'e-mail externe. Actualisation toutes les 30 secondes au repos.
 - Indicateurs : calculés sur les données accessibles ; les valeurs fictives ont
@@ -91,26 +98,35 @@ absences et chantiers affectés. Les messages sont réservés aux participants.
 
 `GET /api/state` renvoie une projection filtrée. L'ancien `POST /api/state` est
 refusé. Les modifications passent par `/api/state/command` ou une route dédiée,
-avec une révision et un identifiant de requête. Le serveur verrouille la ligne
-PostgreSQL dans une transaction : une vue périmée reçoit HTTP 409 et le formulaire
-reste ouvert. Une répétition identique après perte de réponse n'est pas réappliquée.
-Les erreurs ne sont jamais affichées comme des sauvegardes réussies.
+avec une révision et un identifiant de requête. Les collections métier normalisées
+dans `entity_records` sont la source de lecture canonique ; `app_state` est
+conservé comme snapshot de compatibilité et compteur de révision pendant la
+transition. Le serveur verrouille la révision dans une transaction : une vue
+périmée reçoit HTTP 409 et le formulaire reste ouvert. Une répétition identique
+après perte de réponse n'est pas réappliquée. Les nouvelles évolutions de schéma
+passent par les fichiers SQL versionnés du dossier `migrations/`.
 
-Les comptes de démonstration ne sont plus créés. Les sessions de 8 heures sont
-révocables, les jetons sont conservés dans `sessionStorage` et aucune donnée métier
-n'est mise en cache local. La déconnexion révoque toutes les sessions du compte.
-La limitation des tentatives de connexion est par instance : pour plusieurs
-instances, ajouter une limitation partagée au proxy ou via Redis.
+Les comptes de démonstration ne sont plus créés. Les sessions navigateur utilisent
+des cookies Secure/HttpOnly ; les sessions sont révocables et les intégrations
+peuvent conserver la compatibilité Bearer. L'API applique aussi une limitation
+générale des requêtes. Pour plusieurs instances, une limitation partagée au proxy
+ou via Redis reste préférable.
 
 Les saisies HTML sont échappées et une CSP interdit les scripts intégrés. Les
 fichiers serveur ne sont pas servis publiquement. Le journal serveur trace les
 opérations confirmées ; les journaux historiques du prototype ne sont pas
 considérés comme une piste d'audit fiable.
 
-La double authentification n'est pas implémentée : l'interface le dit clairement.
-Les sauvegardes doivent être configurées chez l'hébergeur : sauvegarder la base
-**entière** (y compris `file_contents`), conserver une copie séparée et tester les
-restaurations. Une exportation CSV n'est pas une sauvegarde complète.
+La double authentification TOTP est disponible avec secrets chiffrés au repos,
+codes de secours à usage unique et Passkeys/WebAuthn. Les sauvegardes doivent être
+configurées chez l'hébergeur : sauvegarder la base **entière**, conserver une copie
+séparée et tester régulièrement une restauration. Lorsque le stockage objet est
+activé, sa politique de versionnement/rétention doit être sauvegardée séparément.
+Une exportation CSV n'est pas une sauvegarde complète.
+
+`GET /healthz` vérifie PostgreSQL et expose aussi, sans révéler de secret,
+`turnConfigured`, `objectStorageConfigured` et `p0ExternalReady`. Le workflow
+GitHub `uptime.yml` contrôle déjà le site et la base toutes les heures.
 
 ## Tests
 
@@ -127,5 +143,7 @@ npm test
   sauvegardes, conflits, affichage des centimes et échappement HTML.
 
 PGlite sérialise les connexions de test ; il ne remplace pas une campagne de
-charge sur le PostgreSQL de production. La vérification visuelle dans un vrai
-navigateur et sur téléphone reste à effectuer sur l'environnement déployé.
+charge sur le PostgreSQL de production. Le workflow `live-browser.yml` vérifie
+automatiquement la production sur Chromium desktop/mobile. Si les secrets GitHub
+`E2E_EMAIL` et `E2E_PASSWORD` sont définis pour un compte dédié à faibles droits,
+il réalise aussi une vraie connexion et vérifie l'accès authentifié à l'état privé.

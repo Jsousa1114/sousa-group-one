@@ -4,7 +4,7 @@ const assert=require("node:assert/strict");
 const bcrypt=require("bcryptjs");
 const {chromium}=require("playwright");
 const {database}=require("./database");
-const {migrate}=require("../db");
+const {migrate,replaceStateSnapshot}=require("../db");
 const {createApp}=require("../server");
 const {emptyState}=require("../domain");
 
@@ -40,7 +40,7 @@ async function seed(){
   d.tools=[{id:"tool1",name:"Perceuse",serial:"AUDIT-001",employeeId:"e1",status:"En service",company:"home"}];
   d.maintenance=[{id:"m1",title:"Maintenance audit",clientId:"c1",frequency:"Mensuelle",next:"2026-10-15",amount:1200,company:"home"}];
   d.documents=[];
-  await db.query("UPDATE app_state SET data=$1 WHERE id=1",[JSON.stringify(d)]);
+  await replaceStateSnapshot(db,d,"test-full-app-fixture");
   server=createApp(db).listen(0,"127.0.0.1");
   await new Promise(r=>server.once("listening",r));
   base="http://127.0.0.1:"+server.address().port;

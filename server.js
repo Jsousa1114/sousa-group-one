@@ -3,6 +3,10 @@ const path = require("node:path"),
   { randomUUID } = require("node:crypto"),
   express = require("express");
 const { pool, migrate } = require("./db");
+const {
+  cleanupObjectDeletions,
+  storageAvailable,
+} = require("./file-storage");
 function createApp(db = pool) {
   const app = express();
   app.disable("x-powered-by");
@@ -55,9 +59,21 @@ function createApp(db = pool) {
   app.get("/healthz", async (req, res) => {
     try {
       await db.query("SELECT 1");
-      res.json({ ok: true });
+      const turnConfigured =
+        !!process.env.RTC_TURN_URLS &&
+        !!process.env.RTC_TURN_USERNAME &&
+        !!process.env.RTC_TURN_CREDENTIAL;
+      res.json({
+        ok: true,
+        checks: {
+          database: true,
+          turnConfigured,
+          objectStorageConfigured: storageAvailable(),
+        },
+        p0ExternalReady: turnConfigured && storageAvailable(),
+      });
     } catch {
-      res.status(503).json({ ok: false });
+      res.status(503).json({ ok: false, checks: { database: false } });
     }
   });
   app.use("/api/auth", require("./auth-routes").routes(db));
@@ -148,6 +164,13 @@ if (require.main === module) {
       cleanup();
       const timer = setInterval(cleanup, 6 * 60 * 60 * 1000);
       timer.unref?.();
+      const cleanupObjects = async () =>
+        cleanupObjectDeletions(pool).catch((e) =>
+          console.error("Object storage cleanup failed", e),
+        );
+      cleanupObjects();
+      const objectTimer = setInterval(cleanupObjects, 60 * 60 * 1000);
+      objectTimer.unref?.();
       const runRecurring = async () =>
         require("./operations-routes")
           .runDueRecurringJobs(pool)

@@ -3,6 +3,7 @@ const { Pool } = require("pg");
 const bcrypt = require("bcryptjs");
 const { createHash } = require("node:crypto");
 const { emptyState, normalize, AppError } = require("./domain");
+const { runMigrations } = require("./migration-runner");
 const MIRRORED_COLLECTIONS = [
   "companies",
   "employees",
@@ -21,24 +22,29 @@ const MIRRORED_COLLECTIONS = [
   "tools",
   "maintenance",
   "documents",
+  "messages",
   "messageThreads",
+  "clocks",
 ];
 async function syncEntityCollection(c, collection, rows) {
   const list = Array.isArray(rows) ? rows.filter((x) => x && x.id != null) : [];
   await c.query("DELETE FROM entity_records WHERE collection=$1", [collection]);
-  for (const row of list)
+  for (let position = 0; position < list.length; position++) {
+    const row = list[position];
     await c.query(
-      `INSERT INTO entity_records(collection,entity_id,company,data,updated_at)
-       VALUES($1,$2,$3,$4,NOW())
+      `INSERT INTO entity_records(collection,entity_id,company,data,position,updated_at)
+       VALUES($1,$2,$3,$4,$5,NOW())
        ON CONFLICT(collection,entity_id) DO UPDATE SET
-       company=EXCLUDED.company,data=EXCLUDED.data,updated_at=NOW()`,
+       company=EXCLUDED.company,data=EXCLUDED.data,position=EXCLUDED.position,updated_at=NOW()`,
       [
         collection,
         String(row.id),
         row.company ? String(row.company) : null,
         JSON.stringify(row),
+        position,
       ],
     );
+  }
 }
 async function syncEntityMirror(c, data, changedOnly = null) {
   const collections = changedOnly || MIRRORED_COLLECTIONS;
@@ -162,7 +168,13 @@ async function migrate(db = pool) {
     )`,
   );
   await db.query(
+    "ALTER TABLE entity_records ADD COLUMN IF NOT EXISTS position INTEGER NOT NULL DEFAULT 0",
+  );
+  await db.query(
     `CREATE INDEX IF NOT EXISTS entity_records_company_idx ON entity_records(collection,company)`,
+  );
+  await db.query(
+    `CREATE INDEX IF NOT EXISTS entity_records_order_idx ON entity_records(collection,position,entity_id)`,
   );
   await db.query(
     `CREATE TABLE IF NOT EXISTS application_errors(
@@ -478,7 +490,29 @@ async function migrate(db = pool) {
     "ALTER TABLE command_receipts ADD COLUMN IF NOT EXISTS request_hash TEXT",
   );
   await db.query(
-    `CREATE TABLE IF NOT EXISTS file_contents(id TEXT PRIMARY KEY,content BYTEA NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS file_contents(
+      id TEXT PRIMARY KEY,
+      content BYTEA,
+      storage_backend TEXT NOT NULL DEFAULT 'database',
+      storage_key TEXT,
+      size BIGINT
+    )`,
+  );
+  await db.query("ALTER TABLE file_contents ALTER COLUMN content DROP NOT NULL");
+  await db.query(
+    "ALTER TABLE file_contents ADD COLUMN IF NOT EXISTS storage_backend TEXT NOT NULL DEFAULT 'database'",
+  );
+  await db.query(
+    "ALTER TABLE file_contents ADD COLUMN IF NOT EXISTS storage_key TEXT",
+  );
+  await db.query(
+    "ALTER TABLE file_contents ADD COLUMN IF NOT EXISTS size BIGINT",
+  );
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS object_deletion_queue(
+      storage_key TEXT PRIMARY KEY,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`,
   );
   await db.query(
     `CREATE TABLE IF NOT EXISTS message_reads(
@@ -647,16 +681,26 @@ async function migrate(db = pool) {
     "INSERT INTO app_state(id,data) VALUES(1,$1) ON CONFLICT(id) DO NOTHING",
     [JSON.stringify(emptyState())],
   );
-  const mirrorState = (
-    await db.query("SELECT data FROM app_state WHERE id=1")
-  ).rows[0]?.data;
-  await syncEntityMirror(db, normalize(mirrorState));
+  const canonicalReady = (
+    await db.query(
+      "SELECT 1 FROM schema_migrations WHERE version='2026-09-27-entity-records-canonical-v1'",
+    )
+  ).rows.length > 0;
+  if (!canonicalReady) {
+    const mirrorState = (
+      await db.query("SELECT data FROM app_state WHERE id=1")
+    ).rows[0]?.data;
+    await syncEntityMirror(db, normalize(mirrorState));
+  }
   await db.query(
     `INSERT INTO schema_migrations(version) VALUES
       ('2026-09-27-entity-records-mirror'),
+      ('2026-09-27-entity-records-canonical-v1'),
+      ('2026-09-27-object-storage-metadata'),
       ('2026-09-27-webauthn-passkeys')
       ON CONFLICT(version) DO NOTHING`,
   );
+  await runMigrations(db);
   // Disable the previously published demo credentials, even on an existing installation.
   const users = await db.query(
     "SELECT id,password_hash FROM users WHERE disabled=false",
@@ -693,6 +737,51 @@ async function migrate(db = pool) {
       );
   }
 }
+async function loadState(db = pool, { forUpdate = false } = {}) {
+  const row = (
+    await db.query(
+      "SELECT data,revision FROM app_state WHERE id=1" +
+        (forUpdate ? " FOR UPDATE" : ""),
+    )
+  ).rows[0];
+  if (!row) throw new AppError("État applicatif introuvable.", 500);
+  const data = normalize(row.data);
+  const canonical = (
+    await db.query(
+      "SELECT 1 FROM schema_migrations WHERE version='2026-09-27-entity-records-canonical-v1'",
+    )
+  ).rows.length > 0;
+  if (!canonical) return { data, revision: row.revision };
+  for (const collection of MIRRORED_COLLECTIONS) data[collection] = [];
+  const records = (
+    await db.query(
+      `SELECT collection,data
+       FROM entity_records
+       WHERE collection=ANY($1::text[])
+       ORDER BY collection,position,entity_id`,
+      [MIRRORED_COLLECTIONS],
+    )
+  ).rows;
+  for (const record of records)
+    if (MIRRORED_COLLECTIONS.includes(record.collection))
+      data[record.collection].push(record.data);
+  return { data, revision: row.revision };
+}
+async function replaceStateSnapshot(db, value, updatedBy = "migration") {
+  const data = normalize(value);
+  return transaction(db, async (c) => {
+    const row = (
+      await c.query("SELECT revision FROM app_state WHERE id=1 FOR UPDATE")
+    ).rows[0];
+    if (!row) throw new AppError("État applicatif introuvable.", 500);
+    await c.query(
+      "UPDATE app_state SET data=$1,revision=revision+1,updated_at=NOW(),updated_by=$2 WHERE id=1",
+      [JSON.stringify(data), String(updatedBy).slice(0, 255)],
+    );
+    await syncEntityMirror(c, data);
+    return { revision: row.revision + 1 };
+  });
+}
 async function transaction(db, fn) {
   const c = await db.connect();
   try {
@@ -717,9 +806,7 @@ async function mutate(db, user, body, fn) {
   if (!Number.isSafeInteger(body.revision) || body.revision < 0)
     throw new AppError("Version de données requise.");
   return transaction(db, async (c) => {
-    const row = (
-      await c.query("SELECT data,revision FROM app_state WHERE id=1 FOR UPDATE")
-    ).rows[0];
+    const row = await loadState(c, { forUpdate: true });
     const previous = (
       await c.query(
         "SELECT result,request_hash FROM command_receipts WHERE user_id=$1 AND request_id=$2",
@@ -792,5 +879,7 @@ module.exports = {
   transaction,
   mutate,
   syncEntityMirror,
+  loadState,
+  replaceStateSnapshot,
   MIRRORED_COLLECTIONS,
 };

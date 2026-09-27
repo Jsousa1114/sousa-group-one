@@ -5,6 +5,7 @@ const dns = require("node:dns").promises;
 const net = require("node:net");
 const D = require("./domain");
 const { auth } = require("./auth-middleware");
+const { loadState } = require("./db");
 
 const wrap = (fn) => (req, res, next) =>
   Promise.resolve(fn(req, res, next)).catch(next);
@@ -90,8 +91,7 @@ const decodeCursor = (value) => {
 
 
 async function stateContext(db, user) {
-  const row = (await db.query("SELECT data,revision FROM app_state WHERE id=1"))
-    .rows[0];
+  const row = await loadState(db);
   const data = D.normalize(row?.data);
   return { data, view: D.viewState(data, user), revision: row?.revision || 0 };
 }
@@ -334,7 +334,7 @@ async function emitEvent(db, input) {
       event.createdAt,
     ],
   );
-  const stateRow = (await db.query("SELECT data FROM app_state WHERE id=1")).rows[0];
+  const stateRow = await loadState(db);
   const fakeUser = input.user || {
     id: event.actorUserId,
     role: "admin",

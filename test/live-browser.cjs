@@ -3,8 +3,50 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const { chromium } = require("playwright");
 
-const url = "https://sousa-group-one.onrender.com";
+const url = process.env.E2E_BASE_URL || "https://sousa-group-one.onrender.com";
 const wait = (n) => new Promise((resolve) => setTimeout(resolve, n));
+
+async function checkAuthenticated(browser) {
+  const email = String(process.env.E2E_EMAIL || "").trim();
+  const password = String(process.env.E2E_PASSWORD || "");
+  if (!email || !password) {
+    console.log("Authenticated production E2E: SKIP (E2E_EMAIL/E2E_PASSWORD not configured).");
+    return;
+  }
+  const context = await browser.newContext({
+    viewport: { width: 1440, height: 900 },
+  });
+  const page = await context.newPage();
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  const response = await page.goto(url, {
+    waitUntil: "networkidle",
+    timeout: 120000,
+  });
+  assert.equal(response.status(), 200, "authenticated E2E: public page HTTP status");
+  await page.locator("#email").fill(email);
+  await page.locator("#password").fill(password);
+  await page.locator('#loginForm button[type="submit"]').click();
+  try {
+    await page.locator("#app").waitFor({ state: "visible", timeout: 30000 });
+  } catch (error) {
+    const loginError = await page.locator("#loginError").textContent().catch(() => "");
+    throw new Error(
+      "Authenticated production E2E login failed" +
+        (loginError ? ": " + loginError.trim() : ""),
+      { cause: error },
+    );
+  }
+  const stateResponse = await page.request.get(url + "/api/state");
+  assert.equal(stateResponse.status(), 200, "authenticated E2E: private state available");
+  const state = await stateResponse.json();
+  assert.ok(state && typeof state === "object", "authenticated E2E: state JSON returned");
+  assert.equal(await page.locator("#app").isVisible(), true, "authenticated E2E: application visible");
+  assert.deepEqual(errors, [], "authenticated E2E: no uncaught JavaScript errors");
+  console.log("Authenticated production E2E: PASS; login, session and private state verified.");
+  await page.request.post(url + "/api/auth/logout").catch(() => {});
+  await context.close();
+}
 
 async function check(browser, device, viewport, isMobile) {
   const context = await browser.newContext({ viewport, isMobile, hasTouch: isMobile, deviceScaleFactor: isMobile ? 2 : 1 });
@@ -61,6 +103,7 @@ async function check(browser, device, viewport, isMobile) {
   try {
     await check(browser, "desktop", { width: 1440, height: 900 }, false);
     await check(browser, "mobile", { width: 390, height: 844 }, true);
+    await checkAuthenticated(browser);
   } finally {
     await browser.close();
   }
