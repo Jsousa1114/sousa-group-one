@@ -33,7 +33,7 @@ const today = () =>
     day: "2-digit",
   }).format(new Date());
 const same = (a, b) => a != null && b != null && String(a) === String(b);
-let token = sessionStorage.getItem("sgo_session"),
+let token = sessionStorage.getItem("sgo_session") ? "cookie" : null,
   state = null,
   profile = null,
   contacts = [],
@@ -176,9 +176,9 @@ function notice(t) {
 async function api(path, body) {
   const r = await fetch("/api/" + path, {
     method: body ? "POST" : "GET",
+    credentials: "same-origin",
     headers: {
       ...(body ? { "Content-Type": "application/json" } : {}),
-      ...(token ? { Authorization: "Bearer " + token } : {}),
     },
     ...(body ? { body: JSON.stringify(body) } : {}),
   });
@@ -360,8 +360,8 @@ $("loginForm").onsubmit = async (e) => {
       password: $("password").value,
       totpCode: $("totpCode")?.value || "",
     });
-    token = out.token;
-    sessionStorage.setItem("sgo_session", token);
+    token = "cookie";
+    sessionStorage.setItem("sgo_session", "1");
     await refresh(false);
     $("password").value = "";
     if ($("totpCode")) $("totpCode").value = "";
@@ -893,7 +893,7 @@ async function hydrateChatAttachments() {
     node.dataset.loaded = "1";
     try {
       const r = await fetch("/api/state/messages/" + encodeURIComponent(id) + "/attachment", {
-        headers: { Authorization: "Bearer " + token },
+        credentials: "same-origin",
       });
       if (!r.ok) throw new Error("Pièce jointe inaccessible.");
       const blob = await r.blob(),
@@ -2862,7 +2862,7 @@ document.addEventListener("click", async (e) => {
     } else if (a === "chat-file") $("chatFile")?.click();
     else if (a === "chat-open-attachment") {
       const r = await fetch("/api/state/messages/" + encodeURIComponent(id) + "/attachment", {
-        headers: { Authorization: "Bearer " + token },
+        credentials: "same-origin",
       });
       if (!r.ok) throw new Error("Pièce jointe inaccessible.");
       const blob = await r.blob(),
@@ -3172,7 +3172,7 @@ document.addEventListener("click", async (e) => {
           ));
       const response = await fetch(
         `/api/state/finance/${k}/${encodeURIComponent(rid)}.${extension}${includeQR ? "?qr=1" : ""}`,
-        { headers: { Authorization: "Bearer " + token } },
+        { credentials: "same-origin" },
       );
       if (!response.ok)
         throw new Error(
@@ -3346,7 +3346,7 @@ document.addEventListener("click", async (e) => {
     else if (a === "download") {
       const doc = find("documents", id),
         r = await fetch("/api/state/documents/" + encodeURIComponent(id), {
-          headers: { Authorization: "Bearer " + token },
+          credentials: "same-origin",
         });
       if (!r.ok) throw new Error("Téléchargement impossible ou accès expiré.");
       downloadBlob(await r.blob(), doc.name);
@@ -3659,9 +3659,9 @@ window.SGOChatCore = {
   authFetch: (path, options = {}) =>
     fetch(path, {
       ...options,
+      credentials: "same-origin",
       headers: {
         ...(options.headers || {}),
-        ...(token ? { Authorization: "Bearer " + token } : {}),
       },
     }),
   getState: () => state,
