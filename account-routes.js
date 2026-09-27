@@ -9,6 +9,8 @@ const {
   generateTotpSecret,
   verifyTotp,
   otpauthUri,
+  generateRecoveryCodes,
+  hashRecoveryCode,
 } = require("./account-security");
 
 const DEFAULT_PREFS = Object.freeze({
@@ -183,6 +185,14 @@ function routes(db) {
             [req.user.id],
           )
         ).rows[0],
+        recoveryRemaining = Number(
+          (
+            await db.query(
+              "SELECT COUNT(*)::int AS n FROM user_recovery_codes WHERE user_id=$1 AND used_at IS NULL",
+              [req.user.id],
+            )
+          ).rows[0]?.n || 0,
+        ),
         pendingDeactivation = (
           await db.query(
             `SELECT id,reason,status,created_at
@@ -298,6 +308,7 @@ function routes(db) {
           lastLoginIp: userRow?.last_login_ip || "",
           lastLoginAgent: userRow?.last_login_agent || "",
           sessions,
+          recoveryCodesRemaining: recoveryRemaining,
         },
         preferences: prefs,
         documents: ownDocs.map((d) => ({
@@ -405,6 +416,9 @@ function routes(db) {
         "UPDATE users SET totp_secret=$1,totp_enabled=false WHERE id=$2",
         [secret, req.user.id],
       );
+      await db.query("DELETE FROM user_recovery_codes WHERE user_id=$1", [
+        req.user.id,
+      ]);
       res.json({
         secret,
         uri: otpauthUri(secret, req.user.email),
@@ -422,15 +436,25 @@ function routes(db) {
       if (!user?.totp_secret) D.fail("Commencez la configuration 2FA.");
       if (!verifyTotp(user.totp_secret, req.body?.code))
         D.fail("Code de vérification invalide.", 403);
-      await db.query(
-        "UPDATE users SET totp_enabled=true WHERE id=$1",
-        [req.user.id],
-      );
-      await db.query(
-        "INSERT INTO audit_logs(user_email,action,metadata) VALUES($1,$2,$3)",
-        [req.user.email, "Double authentification activée", "{}"],
-      );
-      res.json({ ok: true });
+      const recoveryCodes = generateRecoveryCodes();
+      await transaction(db, async (c) => {
+        await c.query("UPDATE users SET totp_enabled=true WHERE id=$1", [
+          req.user.id,
+        ]);
+        await c.query("DELETE FROM user_recovery_codes WHERE user_id=$1", [
+          req.user.id,
+        ]);
+        for (const code of recoveryCodes)
+          await c.query(
+            "INSERT INTO user_recovery_codes(user_id,code_hash) VALUES($1,$2)",
+            [req.user.id, hashRecoveryCode(code)],
+          );
+        await c.query(
+          "INSERT INTO audit_logs(user_email,action,metadata) VALUES($1,$2,$3)",
+          [req.user.email, "Double authentification activée", "{}"],
+        );
+      });
+      res.json({ ok: true, recoveryCodes });
     }),
   );
 
@@ -453,11 +477,49 @@ function routes(db) {
         "UPDATE users SET totp_enabled=false,totp_secret=NULL WHERE id=$1",
         [req.user.id],
       );
+      await db.query("DELETE FROM user_recovery_codes WHERE user_id=$1", [
+        req.user.id,
+      ]);
       await db.query(
         "INSERT INTO audit_logs(user_email,action,metadata) VALUES($1,$2,$3)",
         [req.user.email, "Double authentification désactivée", "{}"],
       );
       res.json({ ok: true });
+    }),
+  );
+
+  r.post(
+    "/2fa/recovery-codes",
+    wrap(async (req, res) => {
+      const user = (
+        await db.query("SELECT * FROM users WHERE id=$1", [req.user.id])
+      ).rows[0];
+      if (!user?.totp_enabled) D.fail("Activez d’abord la 2FA.", 409);
+      if (
+        !(await bcrypt.compare(
+          String(req.body?.currentPassword || ""),
+          user.password_hash,
+        ))
+      )
+        D.fail("Mot de passe actuel incorrect.", 403);
+      if (!verifyTotp(user.totp_secret, req.body?.code))
+        D.fail("Code de sécurité invalide.", 403);
+      const recoveryCodes = generateRecoveryCodes();
+      await transaction(db, async (c) => {
+        await c.query("DELETE FROM user_recovery_codes WHERE user_id=$1", [
+          req.user.id,
+        ]);
+        for (const recoveryCode of recoveryCodes)
+          await c.query(
+            "INSERT INTO user_recovery_codes(user_id,code_hash) VALUES($1,$2)",
+            [req.user.id, hashRecoveryCode(recoveryCode)],
+          );
+        await c.query(
+          "INSERT INTO audit_logs(user_email,action,metadata) VALUES($1,$2,$3)",
+          [req.user.email, "Codes de secours 2FA régénérés", "{}"],
+        );
+      });
+      res.json({ ok: true, recoveryCodes });
     }),
   );
 
