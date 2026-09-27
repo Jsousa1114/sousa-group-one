@@ -22,7 +22,6 @@ const pool = new Pool({
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    await client.query("SET session_replication_role = replica");
     const existing = new Set(
       (
         await client.query(
@@ -46,7 +45,6 @@ const pool = new Pool({
         [JSON.stringify(rows)],
       );
     }
-    await client.query("SET session_replication_role = origin");
     await client.query("COMMIT");
     console.log(JSON.stringify({ ok: true, tables: Object.keys(backup.tables).length }));
   } catch (error) {
