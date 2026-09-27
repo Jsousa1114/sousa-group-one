@@ -2,6 +2,8 @@
 const express = require("express"),
   bcrypt = require("bcryptjs"),
   jwt = require("jsonwebtoken");
+const { randomUUID } = require("node:crypto");
+const { verifyTotp } = require("./account-security");
 const { auth, profile } = require("./auth-middleware");
 const { AppError, text } = require("./domain");
 const wrap = (fn) => (req, res, next) =>
@@ -37,21 +39,41 @@ function routes(db) {
         !(await bcrypt.compare(password, u.password_hash))
       )
         throw new AppError("E-mail ou mot de passe incorrect.", 401);
+      if (u.totp_enabled) {
+        if (!req.body?.totpCode)
+          return res.status(401).json({
+            error: "Code de double authentification requis.",
+            code: "TOTP_REQUIRED",
+          });
+        if (!verifyTotp(u.totp_secret, req.body.totpCode))
+          throw new AppError("Code de double authentification invalide.", 401);
+      }
       attempts.delete(key);
-      const token = jwt.sign(
-        { sv: u.session_version },
-        process.env.JWT_SECRET,
-        {
-          subject: String(u.id),
-          expiresIn: "8h",
-          issuer: "sousa-group-one",
-          audience: "sgo-web",
-          algorithm: "HS256",
-        },
+      const sid = randomUUID(),
+        token = jwt.sign(
+          { sv: u.session_version, sid },
+          process.env.JWT_SECRET,
+          {
+            subject: String(u.id),
+            expiresIn: "8h",
+            issuer: "sousa-group-one",
+            audience: "sgo-web",
+            algorithm: "HS256",
+          },
+        ),
+        agent = String(req.headers["user-agent"] || "").slice(0, 500),
+        ip = String(req.ip || "").slice(0, 120);
+      await db.query(
+        "INSERT INTO user_sessions(id,user_id,user_agent,ip) VALUES($1,$2,$3,$4)",
+        [sid, u.id, agent, ip],
+      );
+      await db.query(
+        "UPDATE users SET last_login_at=NOW(),last_login_ip=$1,last_login_agent=$2 WHERE id=$3",
+        [ip, agent, u.id],
       );
       await db.query(
         "INSERT INTO audit_logs(user_email,action,metadata) VALUES($1,$2,$3)",
-        [u.email, "Connexion", "{}"],
+        [u.email, "Connexion", JSON.stringify({ sessionId: sid })],
       );
       res.json({ token, profile: profile(u) });
     }),
@@ -61,10 +83,16 @@ function routes(db) {
   router.post(
     "/logout",
     wrap(async (req, res) => {
-      await db.query(
-        "UPDATE users SET session_version=session_version+1 WHERE id=$1",
-        [req.user.id],
-      );
+      if (req.authClaims?.sid)
+        await db.query(
+          "UPDATE user_sessions SET revoked_at=NOW() WHERE id=$1 AND user_id=$2",
+          [req.authClaims.sid, req.user.id],
+        );
+      else
+        await db.query(
+          "UPDATE users SET session_version=session_version+1 WHERE id=$1",
+          [req.user.id],
+        );
       res.json({ ok: true });
     }),
   );
