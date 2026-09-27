@@ -1,0 +1,37 @@
+name: Test application complète
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - app.js
+      - styles.css
+      - account-center.js
+      - account-routes.js
+      - messaging-suite.js
+      - messaging-routes.js
+      - state-routes.js
+      - domain.js
+      - finance.js
+      - test/full-app-browser.cjs
+      - .github/workflows/full-app-browser.yml
+
+permissions:
+  contents: read
+
+jobs:
+  full-app-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install app and Chromium
+        run: |
+          npm ci
+          npm install --no-save playwright
+          npx playwright install --with-deps chromium
+      - name: Test full application on desktop and mobile
+        run: node test/full-app-browser.cjs
