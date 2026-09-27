@@ -53,6 +53,20 @@ function auth(db) {
       const data = (await db.query("SELECT data FROM app_state WHERE id=1"))
         .rows[0]?.data;
       req.user = require("./domain").effectiveUser(data || {}, u);
+      try {
+        const row = (
+          await db.query(
+            "SELECT grant_roles,deny_roles FROM p2_permission_overrides WHERE user_id=$1",
+            [u.id],
+          )
+        ).rows[0];
+        req.user.permission_grants = row?.grant_roles || [];
+        req.user.permission_denials = row?.deny_roles || [];
+      } catch (error) {
+        if (error?.code !== "42P01") throw error;
+        req.user.permission_grants = [];
+        req.user.permission_denials = [];
+      }
       req.authClaims = claims;
       next();
     } catch (e) {
@@ -75,5 +89,7 @@ const profile = (u) => ({
   companies: u.companies || [u.company],
   employee_id: u.employee_id,
   client_id: u.client_id,
+  permission_grants: u.permission_grants || [],
+  permission_denials: u.permission_denials || [],
 });
 module.exports = { auth, profile };
