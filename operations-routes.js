@@ -1019,7 +1019,7 @@ function routes(db) {
         await db.query(
           `INSERT INTO work_orders
            (id,company,client_id,project_id,maintenance_id,title,description,status,priority,scheduled_at,assigned_employee_id,customer_signature,signed_at,created_by)
-           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,CASE WHEN $12 IS NULL THEN NULL ELSE NOW() END,$13)`,
+           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::text,CASE WHEN $12::text IS NULL THEN NULL ELSE NOW() END,$13)`,
           [
             id,
             company,
