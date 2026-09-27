@@ -1392,7 +1392,7 @@ function routes(db) {
             process.env.RTC_TURN_USERNAME &&
             process.env.RTC_TURN_CREDENTIAL
           ),
-          aiConfigured: !!(process.env.AI_API_URL && process.env.AI_API_KEY),
+          aiConfigured: !!process.env.OPENAI_API_KEY,
           objectStorageConfigured: !!(
             process.env.OBJECT_STORAGE_ENDPOINT &&
             process.env.OBJECT_STORAGE_BUCKET
