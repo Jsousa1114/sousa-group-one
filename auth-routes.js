@@ -75,6 +75,25 @@ function routes(db) {
         "INSERT INTO audit_logs(user_email,action,metadata) VALUES($1,$2,$3)",
         [u.email, "Connexion", JSON.stringify({ sessionId: sid })],
       );
+      // Best-effort security alert to previously registered devices.
+      require("./messaging-routes")
+        .notifyUsers(db, [Number(u.id)], {
+          title: "Nouvelle connexion à Sousa Group One",
+          body: "Une nouvelle session vient d’être ouverte sur " +
+            (/iPhone/.test(agent)
+              ? "iPhone"
+              : /Android/.test(agent)
+                ? "Android"
+                : /Macintosh/.test(agent)
+                  ? "Mac"
+                  : /Windows/.test(agent)
+                    ? "Windows"
+                    : "un appareil"),
+          url: "/?open=settings",
+          tag: "security-login-" + sid,
+          category: "security",
+        })
+        .catch(() => {});
       res.json({ token, profile: profile(u) });
     }),
   );
