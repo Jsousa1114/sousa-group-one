@@ -649,6 +649,122 @@ function routes(db) {
     }),
   );
 
+  r.get(
+    "/project/:id/daily-summary",
+    wrap(async (req, res) => {
+      const ctx = await stateContext(db, req.user),
+        project = canOperateProject(ctx, req.user, req.params.id),
+        reportDate = req.query.date
+          ? isoDate(req.query.date, false)
+          : new Intl.DateTimeFormat("sv-SE", {
+              timeZone: "Europe/Zurich",
+              year: "numeric",
+              month: "2-digit",
+              day: "2-digit",
+            }).format(new Date()),
+        projectId = String(project.id),
+        times = ctx.view.time.filter(
+          (t) => D.same(t.project, projectId) && t.date === reportDate,
+        ),
+        totalHours =
+          Math.round(
+            times.reduce((sum, row) => sum + (Number(row.hours) || 0), 0) *
+              100,
+          ) / 100,
+        byEmployee = new Map();
+      for (const row of times) {
+        const id = String(row.employeeId || "");
+        byEmployee.set(id, (byEmployee.get(id) || 0) + (Number(row.hours) || 0));
+      }
+      const [tasks, reports, punch, changes] = await Promise.all([
+        db.query(
+          "SELECT status,COUNT(*)::int AS n FROM project_tasks WHERE project_id=$1 GROUP BY status",
+          [projectId],
+        ),
+        db.query(
+          "SELECT summary,issues,materials,team,weather FROM project_daily_reports WHERE project_id=$1 AND report_date=$2 ORDER BY created_at",
+          [projectId, reportDate],
+        ),
+        db.query(
+          "SELECT severity,COUNT(*)::int AS n FROM project_punch_items WHERE project_id=$1 AND status<>'resolved' GROUP BY severity",
+          [projectId],
+        ),
+        db.query(
+          "SELECT status,COUNT(*)::int AS n,COALESCE(SUM(amount),0)::float8 AS amount FROM project_change_orders WHERE project_id=$1 GROUP BY status",
+          [projectId],
+        ),
+      ]);
+      const taskCounts = Object.fromEntries(
+          tasks.rows.map((row) => [row.status, Number(row.n) || 0]),
+        ),
+        punchCounts = Object.fromEntries(
+          punch.rows.map((row) => [row.severity, Number(row.n) || 0]),
+        ),
+        changeCounts = Object.fromEntries(
+          changes.rows.map((row) => [
+            row.status,
+            { count: Number(row.n) || 0, amount: Number(row.amount) || 0 },
+          ]),
+        ),
+        team = [...byEmployee.entries()].map(([employeeId, hours]) => ({
+          employeeId,
+          name:
+            ctx.view.employees.find((e) => D.same(e.id, employeeId))?.name ||
+            employeeId ||
+            "Salarié",
+          hours: Math.round(hours * 100) / 100,
+        })),
+        reportSummaries = reports.rows
+          .map((row) => row.summary)
+          .filter(Boolean),
+        issues = reports.rows.map((row) => row.issues).filter(Boolean),
+        materials = reports.rows.map((row) => row.materials).filter(Boolean),
+        openPunch = Object.values(punchCounts).reduce(
+          (sum, value) => sum + Number(value || 0),
+          0,
+        ),
+        pendingChanges = ["draft", "sent"].reduce(
+          (sum, status) => sum + Number(changeCounts[status]?.count || 0),
+          0,
+        ),
+        lines = [
+          `Résumé automatique — ${project.title || project.id} — ${reportDate}`,
+          totalHours
+            ? `Heures enregistrées : ${totalHours.toFixed(2)} h pour ${team.length} salarié(s).`
+            : "Aucune heure enregistrée pour cette date.",
+          team.length
+            ? "Équipe : " +
+              team.map((row) => `${row.name} (${row.hours.toFixed(2)} h)`).join(", ") +
+              "."
+            : "",
+          `Kanban actuel : ${taskCounts.todo || 0} à faire, ${taskCounts.in_progress || 0} en cours, ${taskCounts.blocked || 0} bloquée(s), ${taskCounts.done || 0} terminée(s).`,
+          `Réserves ouvertes : ${openPunch}.`,
+          `Plus-values en préparation ou attente : ${pendingChanges}.`,
+          reportSummaries.length
+            ? "Rapport terrain : " + reportSummaries.join(" | ")
+            : "",
+          issues.length ? "Points signalés : " + issues.join(" | ") : "",
+          materials.length ? "Matériel : " + materials.join(" | ") : "",
+        ].filter(Boolean);
+      res.json({
+        project: {
+          id: project.id,
+          title: project.title,
+          company: project.company,
+          status: project.status,
+        },
+        date: reportDate,
+        totalHours,
+        team,
+        taskCounts,
+        punchCounts,
+        changeCounts,
+        reports: reports.rows,
+        summary: lines.join("\n"),
+      });
+    }),
+  );
+
   r.post(
     "/project/:id/checklist",
     wrap(async (req, res) => {
