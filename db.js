@@ -489,7 +489,29 @@ async function migrate(db = pool) {
     "ALTER TABLE command_receipts ADD COLUMN IF NOT EXISTS request_hash TEXT",
   );
   await db.query(
-    `CREATE TABLE IF NOT EXISTS file_contents(id TEXT PRIMARY KEY,content BYTEA NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS file_contents(
+      id TEXT PRIMARY KEY,
+      content BYTEA,
+      storage_backend TEXT NOT NULL DEFAULT 'database',
+      storage_key TEXT,
+      size BIGINT
+    )`,
+  );
+  await db.query("ALTER TABLE file_contents ALTER COLUMN content DROP NOT NULL");
+  await db.query(
+    "ALTER TABLE file_contents ADD COLUMN IF NOT EXISTS storage_backend TEXT NOT NULL DEFAULT 'database'",
+  );
+  await db.query(
+    "ALTER TABLE file_contents ADD COLUMN IF NOT EXISTS storage_key TEXT",
+  );
+  await db.query(
+    "ALTER TABLE file_contents ADD COLUMN IF NOT EXISTS size BIGINT",
+  );
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS object_deletion_queue(
+      storage_key TEXT PRIMARY KEY,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`,
   );
   await db.query(
     `CREATE TABLE IF NOT EXISTS message_reads(
@@ -666,6 +688,7 @@ async function migrate(db = pool) {
     `INSERT INTO schema_migrations(version) VALUES
       ('2026-09-27-entity-records-mirror'),
       ('2026-09-27-entity-records-canonical-v1'),
+      ('2026-09-27-object-storage-metadata'),
       ('2026-09-27-webauthn-passkeys')
       ON CONFLICT(version) DO NOTHING`,
   );
