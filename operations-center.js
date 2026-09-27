@@ -7,7 +7,9 @@
     notificationCursor = null,
     notificationRows = [],
     stockCursor = null,
-    stockRows = [];
+    stockRows = [],
+    lifecycleEmployeeId = "",
+    lifecyclePhase = "onboarding";
 
   const core = () => window.SGOChatCore;
   const esc = (v) => core()?.esc?.(v) ?? String(v ?? "");
@@ -49,7 +51,9 @@
       ...(commercial() ? [["crm", "CRM"]] : []),
       ...(operational() ? [["stock", "Stock"], ["workorders", "Bons de travail"]] : []),
       ...(allowedStaff() ? [["analytics", "Analytics"]] : []),
-      ...(hrAllowed() ? [["payroll", "Paie RH"]] : []),
+      ...(hrAllowed()
+        ? [["payroll", "Paie RH"], ["lifecycle", "Cycle salarié"]]
+        : []),
       ...(profile()?.role === "admin" || profile()?.role === "direction"
         ? [["automations", "Automatisations"], ["integrations", "Intégrations"]]
         : []),
@@ -440,6 +444,91 @@
       </article>`;
   }
 
+  async function renderLifecycle() {
+    const employees = state().employees || [];
+    if (!employees.length) {
+      root().querySelector("#opsBody").innerHTML =
+        '<article class="card empty">Aucun salarié accessible.</article>';
+      return;
+    }
+    if (
+      !lifecycleEmployeeId ||
+      !employees.some((e) => String(e.id) === String(lifecycleEmployeeId))
+    )
+      lifecycleEmployeeId = String(employees[0].id);
+    const out = await get(
+        "hr/lifecycle?employeeId=" +
+          encodeURIComponent(lifecycleEmployeeId) +
+          "&phase=" +
+          encodeURIComponent(lifecyclePhase),
+      ),
+      items = out.items || [],
+      progress = out.progress || {},
+      phaseLabel =
+        lifecyclePhase === "onboarding" ? "Onboarding" : "Offboarding";
+    root().querySelector("#opsBody").innerHTML = `
+      <div class="ops-toolbar">
+        <label>Salarié
+          <select id="opsLifecycleEmployee">
+            ${employees
+              .map(
+                (e) =>
+                  `<option value="${esc(e.id)}" ${String(e.id) === String(lifecycleEmployeeId) ? "selected" : ""}>${esc(e.name)}</option>`,
+              )
+              .join("")}
+          </select>
+        </label>
+        <label>Phase
+          <select id="opsLifecyclePhase">
+            <option value="onboarding" ${lifecyclePhase === "onboarding" ? "selected" : ""}>Onboarding</option>
+            <option value="offboarding" ${lifecyclePhase === "offboarding" ? "selected" : ""}>Offboarding</option>
+          </select>
+        </label>
+        <div class="form-actions">
+          ${items.length ? button("Ajouter une étape", "lifecycle-add") : button("Initialiser " + phaseLabel, "lifecycle-init", "", "primary")}
+        </div>
+      </div>
+      <article class="card">
+        <div class="ops-card-head">
+          <div>
+            <h3>${esc(phaseLabel)} · ${esc(out.employee?.name || "")}</h3>
+            <p>${esc(progress.completed || 0)} / ${esc(progress.total || 0)} étape(s) terminée(s)</p>
+          </div>
+          <span class="status ${progress.ready ? "ok" : "warning"}">${progress.ready ? "Prêt" : esc(progress.percent || 0) + " %"}</span>
+        </div>
+        <div class="ops-simple-list">
+          ${items.length
+            ? items
+                .map(
+                  (item) => `<div class="ops-lifecycle-row">
+                    <label>
+                      <input type="checkbox" data-lifecycle-toggle="${esc(item.id)}" ${item.completed ? "checked" : ""}>
+                      <span><b>${esc(item.label)}</b><small>${item.required ? "Obligatoire" : "Facultatif"}${item.due_date ? " · échéance " + esc(date(item.due_date)) : ""}</small></span>
+                    </label>
+                    ${button("Supprimer", "lifecycle-delete", `data-id="${esc(item.id)}"`, "danger")}
+                  </div>`,
+                )
+                .join("")
+            : '<p class="muted">Aucune checklist initialisée pour cette phase.</p>'}
+        </div>
+      </article>`;
+  }
+
+  function lifecycleForm() {
+    modal(
+      lifecyclePhase === "onboarding"
+        ? "Ajouter une étape d’onboarding"
+        : "Ajouter une étape d’offboarding",
+      `<form id="opsEntityForm" data-kind="lifecycle">
+        <label>Étape<input name="label" required maxlength="300"></label>
+        <label>Échéance<input type="date" name="dueDate"></label>
+        <label><input type="checkbox" name="required" checked> Étape obligatoire</label>
+        <p id="formError" class="error"></p>
+        <div class="form-actions"><button class="btn primary" type="submit">Ajouter</button></div>
+      </form>`,
+    );
+  }
+
   async function renderNotifications(reset = true) {
     if (reset) {
       notificationCursor = null;
@@ -479,6 +568,7 @@
       else if (activeTab === "workorders") await renderWorkOrders();
       else if (activeTab === "analytics") await renderAnalytics();
       else if (activeTab === "payroll") await renderPayroll();
+      else if (activeTab === "lifecycle") await renderLifecycle();
       else if (activeTab === "automations") await renderAutomations();
       else if (activeTab === "integrations") await renderIntegrations();
       else if (activeTab === "notifications") await renderNotifications();
@@ -602,6 +692,14 @@
       } else if (kind === "workorder") {
         if (id) p.id = id;
         await post("work-orders", p);
+      } else if (kind === "lifecycle") {
+        await post("hr/lifecycle/add", {
+          employeeId: lifecycleEmployeeId,
+          phase: lifecyclePhase,
+          label: p.label,
+          dueDate: p.dueDate || "",
+          required: data.get("required") === "on",
+        });
       } else if (kind === "automation") {
         const action =
           p.actionType === "create_task"
@@ -736,6 +834,20 @@
       else if (a === "test-webhook") {
         await post("webhooks/test", { id: b.dataset.id });
         core().toast("Webhook testé.");
+      } else if (a === "lifecycle-init") {
+        await post("hr/lifecycle/init", {
+          employeeId: lifecycleEmployeeId,
+          phase: lifecyclePhase,
+        });
+        core().toast("Checklist RH initialisée.");
+        await renderLifecycle();
+      } else if (a === "lifecycle-add") {
+        lifecycleForm();
+      } else if (a === "lifecycle-delete") {
+        if (!confirm("Supprimer cette étape RH ?")) return;
+        await post("hr/lifecycle/delete", { id: b.dataset.id });
+        core().toast("Étape supprimée.");
+        await renderLifecycle();
       } else if (a === "payroll-download") {
         const month = document.getElementById("opsPayrollMonth")?.value || "";
         if (!month) throw new Error("Choisissez un mois.");
@@ -778,6 +890,21 @@
     }
     if (event.target.id === "opsPayrollMonth") {
       await renderPayroll(event.target.value);
+    }
+    if (event.target.id === "opsLifecycleEmployee") {
+      lifecycleEmployeeId = event.target.value;
+      await renderLifecycle();
+    }
+    if (event.target.id === "opsLifecyclePhase") {
+      lifecyclePhase = event.target.value;
+      await renderLifecycle();
+    }
+    if (event.target.matches("[data-lifecycle-toggle]")) {
+      await post("hr/lifecycle/item", {
+        id: event.target.dataset.lifecycleToggle,
+        completed: event.target.checked,
+      });
+      await renderLifecycle();
     }
   });
   document.addEventListener("input", (event) => {
