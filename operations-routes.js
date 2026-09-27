@@ -1366,6 +1366,134 @@ function routes(db) {
   );
 
   r.get(
+    "/hr/time-summary",
+    wrap(async (req, res) => {
+      if (!D.privileged(req.user, [...D.HR, "manager", "accounting"]))
+        D.fail("Accès heures RH requis.", 403);
+      const month = String(req.query.month || "").trim();
+      if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month))
+        D.fail("Mois invalide. Utilisez AAAA-MM.");
+      const ctx = await stateContext(db, req.user),
+        employees = new Map(ctx.view.employees.map((e) => [String(e.id), e])),
+        rows = new Map(),
+        parts = new Intl.DateTimeFormat("en-US", {
+          timeZone: "Europe/Zurich",
+          weekday: "short",
+          hour: "2-digit",
+          hourCycle: "h23",
+        });
+
+      const ensure = (employee) => {
+        const key = String(employee.id);
+        if (!rows.has(key))
+          rows.set(key, {
+            employeeId: key,
+            name: String(employee.name || employee.id),
+            company: String(employee.company || ""),
+            weeklyHours: Number(employee.weeklyHours) || 0,
+            totalHours: 0,
+            validatedHours: 0,
+            pendingHours: 0,
+            nightHours: 0,
+            sundayHours: 0,
+          });
+        return rows.get(key);
+      };
+
+      const classify = (time) => {
+        const start = Date.parse(time.startedAt || ""),
+          end = Date.parse(time.endedAt || "");
+        if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start)
+          return { night: 0, sunday: 0 };
+        const grossHours = (end - start) / 3600000,
+          netHours = Number(time.hours) || 0,
+          scale = grossHours > 0 ? Math.max(0, Math.min(1, netHours / grossHours)) : 0,
+          step = 15 * 60 * 1000;
+        let nightMs = 0,
+          sundayMs = 0;
+        for (let at = start; at < end; at += step) {
+          const segmentEnd = Math.min(end, at + step),
+            midpoint = new Date(at + (segmentEnd - at) / 2),
+            values = Object.fromEntries(
+              parts
+                .formatToParts(midpoint)
+                .filter((x) => x.type !== "literal")
+                .map((x) => [x.type, x.value]),
+            ),
+            hour = Number(values.hour),
+            duration = segmentEnd - at;
+          if (hour >= 23 || hour < 6) nightMs += duration;
+          if (values.weekday === "Sun") sundayMs += duration;
+        }
+        return {
+          night: (nightMs / 3600000) * scale,
+          sunday: (sundayMs / 3600000) * scale,
+        };
+      };
+
+      for (const employee of employees.values()) ensure(employee);
+      for (const time of ctx.view.time) {
+        if (!String(time.date || time.startedAt || "").startsWith(month + "-"))
+          continue;
+        const employee = employees.get(String(time.employeeId));
+        if (!employee) continue;
+        const row = ensure(employee),
+          hours = Number(time.hours) || 0,
+          special = classify(time);
+        row.totalHours += hours;
+        if (time.status === "Validé") {
+          row.validatedHours += hours;
+          row.nightHours += special.night;
+          row.sundayHours += special.sunday;
+        } else row.pendingHours += hours;
+      }
+
+      const result = [...rows.values()]
+        .map((row) => {
+          const targetHours =
+              row.weeklyHours > 0 ? (row.weeklyHours * 52) / 12 : null,
+            overtimeHours =
+              targetHours == null
+                ? null
+                : Math.max(0, row.validatedHours - targetHours),
+            missingHours =
+              targetHours == null
+                ? null
+                : Math.max(0, targetHours - row.validatedHours);
+          return {
+            ...row,
+            totalHours: Math.round(row.totalHours * 100) / 100,
+            validatedHours: Math.round(row.validatedHours * 100) / 100,
+            pendingHours: Math.round(row.pendingHours * 100) / 100,
+            nightHours: Math.round(row.nightHours * 100) / 100,
+            sundayHours: Math.round(row.sundayHours * 100) / 100,
+            targetHours:
+              targetHours == null ? null : Math.round(targetHours * 100) / 100,
+            overtimeHours:
+              overtimeHours == null
+                ? null
+                : Math.round(overtimeHours * 100) / 100,
+            missingHours:
+              missingHours == null ? null : Math.round(missingHours * 100) / 100,
+          };
+        })
+        .sort((a, b) => a.name.localeCompare(b.name));
+
+      res.json({
+        month,
+        rows: result,
+        rules: {
+          nightWindow: "23:00–06:00",
+          overtimeBasis:
+            "Heures validées comparées aux heures hebdomadaires contractuelles × 52 / 12.",
+          note:
+            "Synthèse opérationnelle interne. Les majorations légales ou conventionnelles doivent rester configurées selon le contrat applicable.",
+        },
+      });
+    }),
+  );
+
+  r.get(
     "/analytics",
     wrap(async (req, res) => {
       if (!D.privileged(req.user, [...D.STAFF, "hr", "accounting", "manager"]))

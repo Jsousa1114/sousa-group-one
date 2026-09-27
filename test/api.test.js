@@ -2030,6 +2030,58 @@ test("operations platform covers tasks CRM stock work orders analytics insights 
   assert.ok(Array.isArray(analytics.data.byProject));
   assert.equal((await call("operations/analytics", viewer)).status, 403);
 
+  const hrStateRow = (await db.query("SELECT data FROM app_state WHERE id=1")).rows[0];
+  const hrState = hrStateRow.data;
+  hrState.employees.push({
+    id: "hr-summary-e1",
+    name: "HR Summary Employee",
+    job: "Technicien",
+    company: "home",
+    email: "hr-summary@test.invalid",
+    phone: "",
+    salary: 5000,
+    salaryPeriod: "monthly",
+    activity: 100,
+    weeklyHours: 40,
+    vacation: 20,
+    entry: "2026-01-01",
+    status: "Actif",
+  });
+  hrState.time.push({
+    id: "hr-night-sunday-test",
+    employeeId: "hr-summary-e1",
+    company: "home",
+    project: "p1",
+    date: "2026-08-30",
+    startedAt: "2026-08-30T21:00:00.000Z",
+    endedAt: "2026-08-30T23:00:00.000Z",
+    break: 0,
+    seconds: 7200,
+    hours: 2,
+    status: "Validé",
+  });
+  await db.query("UPDATE app_state SET data=$1 WHERE id=1", [
+    JSON.stringify(hrState),
+  ]);
+  const hrSummary = await call(
+    "operations/hr/time-summary?month=2026-08",
+    admin,
+  );
+  assert.equal(hrSummary.status, 200, JSON.stringify(hrSummary.data));
+  const hrRow = hrSummary.data.rows.find(
+    (x) => x.employeeId === "hr-summary-e1",
+  );
+  assert.ok(hrRow);
+  assert.equal(hrRow.weeklyHours, 40);
+  assert.equal(hrRow.validatedHours, 2);
+  assert.equal(hrRow.nightHours, 2);
+  assert.equal(hrRow.sundayHours, 1);
+  assert.equal(hrRow.overtimeHours, 0);
+  assert.equal(
+    (await call("operations/hr/time-summary?month=2026-08", viewer)).status,
+    403,
+  );
+
   const complianceStateRow = (
     await db.query("SELECT data FROM app_state WHERE id=1")
   ).rows[0];
