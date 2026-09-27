@@ -355,6 +355,7 @@ function render() {
     ? [oldComposer.selectionStart, oldComposer.selectionEnd]
     : null;
   const oldThread = $("messageThread");
+  const threadFocused = document.activeElement === oldThread;
   const scrollTop = oldThread?.scrollTop || 0;
   const atBottom =
     !oldThread ||
@@ -410,6 +411,7 @@ function render() {
       sameConversation && !atBottom
         ? scrollTop
         : $("messageThread").scrollHeight;
+    if (sameConversation && threadFocused) $("messageThread").focus({ preventScroll: true });
     const search = $("conversationSearch");
     search.value = searchValue;
     filterChatConversations(searchValue);
