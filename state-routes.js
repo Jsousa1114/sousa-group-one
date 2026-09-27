@@ -839,7 +839,19 @@ function routes(db) {
     "/messages/read",
     wrap(async (req, res) => {
       const p = req.body?.payload || {},
-        row = (
+        prefRow = (
+          await db.query("SELECT data FROM account_preferences WHERE user_id=$1", [
+            req.user.id,
+          ])
+        ).rows[0];
+      if (prefRow?.data?.privacy?.readReceipts === false)
+        return res.json({
+          result: { changed: 0, disabled: true },
+          revision: (
+            await db.query("SELECT revision FROM app_state WHERE id=1")
+          ).rows[0].revision,
+        });
+      const row = (
           await db.query("SELECT data,revision FROM app_state WHERE id=1")
         ).rows[0],
         visible = D.viewState(row.data, req.user);
