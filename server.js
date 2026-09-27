@@ -5,6 +5,7 @@ const path = require("node:path"),
 const { pool, migrate } = require("./db");
 const {
   cleanupObjectDeletions,
+  migrateDatabaseFilesToObjectStorage,
   storageAvailable,
 } = require("./file-storage");
 function createApp(db = pool) {
@@ -63,14 +64,31 @@ function createApp(db = pool) {
         !!process.env.RTC_TURN_URLS &&
         !!process.env.RTC_TURN_USERNAME &&
         !!process.env.RTC_TURN_CREDENTIAL;
+      const objectStorageConfigured = storageAvailable();
+      const databaseFilesPending = objectStorageConfigured
+        ? Number(
+            (
+              await db.query(
+                `SELECT COUNT(*)::int AS count
+                 FROM file_contents
+                 WHERE content IS NOT NULL
+                   AND COALESCE(storage_backend,'database')='database'`,
+              )
+            ).rows[0]?.count || 0,
+          )
+        : null;
       res.json({
         ok: true,
         checks: {
           database: true,
           turnConfigured,
-          objectStorageConfigured: storageAvailable(),
+          objectStorageConfigured,
+          databaseFilesPending,
         },
-        p0ExternalReady: turnConfigured && storageAvailable(),
+        p0ExternalReady:
+          turnConfigured &&
+          objectStorageConfigured &&
+          databaseFilesPending === 0,
       });
     } catch {
       res.status(503).json({ ok: false, checks: { database: false } });
@@ -171,6 +189,13 @@ if (require.main === module) {
       cleanupObjects();
       const objectTimer = setInterval(cleanupObjects, 60 * 60 * 1000);
       objectTimer.unref?.();
+      const migrateObjects = async () =>
+        migrateDatabaseFilesToObjectStorage(pool).catch((e) =>
+          console.error("Object storage migration failed", e),
+        );
+      migrateObjects();
+      const migrateObjectTimer = setInterval(migrateObjects, 5 * 60 * 1000);
+      migrateObjectTimer.unref?.();
       const runRecurring = async () =>
         require("./operations-routes")
           .runDueRecurringJobs(pool)
