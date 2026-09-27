@@ -26,24 +26,73 @@ const MIRRORED_COLLECTIONS = [
 async function syncEntityCollection(c, collection, rows) {
   const list = Array.isArray(rows) ? rows.filter((x) => x && x.id != null) : [];
   await c.query("DELETE FROM entity_records WHERE collection=$1", [collection]);
-  for (const row of list)
+  for (let position = 0; position < list.length; position++) {
+    const row = list[position];
     await c.query(
-      `INSERT INTO entity_records(collection,entity_id,company,data,updated_at)
-       VALUES($1,$2,$3,$4,NOW())
+      `INSERT INTO entity_records(collection,entity_id,company,data,position,updated_at)
+       VALUES($1,$2,$3,$4,$5,NOW())
        ON CONFLICT(collection,entity_id) DO UPDATE SET
-       company=EXCLUDED.company,data=EXCLUDED.data,updated_at=NOW()`,
+       company=EXCLUDED.company,data=EXCLUDED.data,position=EXCLUDED.position,updated_at=NOW()`,
       [
         collection,
         String(row.id),
         row.company ? String(row.company) : null,
         JSON.stringify(row),
+        position,
       ],
     );
+  }
 }
 async function syncEntityMirror(c, data, changedOnly = null) {
   const collections = changedOnly || MIRRORED_COLLECTIONS;
   for (const collection of collections)
     await syncEntityCollection(c, collection, data?.[collection]);
+}
+function canonicalEntityStateEnabled() {
+  return process.env.STATE_ENTITY_CANONICAL === "true";
+}
+async function hydrateEntityMirror(db, rawData) {
+  const data = normalize(rawData || {});
+  const rows = (
+    await db.query(
+      `SELECT collection,data
+       FROM entity_records
+       WHERE collection=ANY($1::text[])
+       ORDER BY collection,position,entity_id`,
+      [MIRRORED_COLLECTIONS],
+    )
+  ).rows;
+  const grouped = new Map(MIRRORED_COLLECTIONS.map((name) => [name, []]));
+  const present = new Set();
+  for (const row of rows) {
+    present.add(row.collection);
+    grouped.get(row.collection)?.push(row.data);
+  }
+  for (const collection of MIRRORED_COLLECTIONS)
+    if (canonicalEntityStateEnabled() || present.has(collection))
+      data[collection] = grouped.get(collection) || [];
+  return data;
+}
+function persistedState(data) {
+  const normalized = normalize(data || {});
+  if (!canonicalEntityStateEnabled()) return normalized;
+  const compact = { ...normalized };
+  for (const collection of MIRRORED_COLLECTIONS) compact[collection] = [];
+  return compact;
+}
+async function loadState(db, { forUpdate = false } = {}) {
+  const row = (
+    await db.query(
+      "SELECT data,revision FROM app_state WHERE id=1" +
+        (forUpdate ? " FOR UPDATE" : ""),
+    )
+  ).rows[0];
+  return {
+    data: canonicalEntityStateEnabled()
+      ? await hydrateEntityMirror(db, row?.data || {})
+      : normalize(row?.data || {}),
+    revision: Number(row?.revision || 0),
+  };
 }
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -162,7 +211,13 @@ async function migrate(db = pool) {
     )`,
   );
   await db.query(
+    "ALTER TABLE entity_records ADD COLUMN IF NOT EXISTS position INTEGER NOT NULL DEFAULT 0",
+  );
+  await db.query(
     `CREATE INDEX IF NOT EXISTS entity_records_company_idx ON entity_records(collection,company)`,
+  );
+  await db.query(
+    `CREATE INDEX IF NOT EXISTS entity_records_order_idx ON entity_records(collection,position,entity_id)`,
   );
   await db.query(
     `CREATE TABLE IF NOT EXISTS application_errors(
@@ -481,6 +536,21 @@ async function migrate(db = pool) {
     `CREATE TABLE IF NOT EXISTS file_contents(id TEXT PRIMARY KEY,content BYTEA NOT NULL)`,
   );
   await db.query(
+    `CREATE TABLE IF NOT EXISTS file_objects(
+      id TEXT PRIMARY KEY,
+      provider TEXT NOT NULL,
+      object_key TEXT NOT NULL,
+      mime TEXT,
+      size BIGINT NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`,
+  );
+  await db.query(
+    `CREATE INDEX IF NOT EXISTS file_objects_provider_idx
+     ON file_objects(provider,updated_at DESC)`,
+  );
+  await db.query(
     `CREATE TABLE IF NOT EXISTS message_reads(
       message_id TEXT NOT NULL,
       user_id INTEGER NOT NULL,
@@ -650,11 +720,40 @@ async function migrate(db = pool) {
   const mirrorState = (
     await db.query("SELECT data FROM app_state WHERE id=1")
   ).rows[0]?.data;
-  await syncEntityMirror(db, normalize(mirrorState));
+  const entityCount = Number(
+      (await db.query("SELECT COUNT(*)::int AS count FROM entity_records")).rows[0]?.count || 0,
+    ),
+    rawHasMirroredData = MIRRORED_COLLECTIONS.some(
+      (collection) =>
+        Array.isArray(mirrorState?.[collection]) &&
+        mirrorState[collection].length > 0,
+    );
+  if (canonicalEntityStateEnabled()) {
+    // First activation: seed the canonical tables from the complete legacy state.
+    if (entityCount === 0 || rawHasMirroredData)
+      await syncEntityMirror(db, normalize(mirrorState));
+    const hydrated = await hydrateEntityMirror(db, mirrorState);
+    await db.query(
+      "UPDATE app_state SET data=$1,updated_at=NOW(),updated_by='entity-canonical-migration' WHERE id=1",
+      [JSON.stringify(persistedState(hydrated))],
+    );
+  } else if (rawHasMirroredData) {
+    // Legacy/default mode stays fully backward-compatible: app_state is authoritative.
+    await syncEntityMirror(db, normalize(mirrorState));
+  } else if (entityCount > 0) {
+    // Safe rollback from canonical mode: rebuild the full legacy snapshot before
+    // returning app_state to authoritative mode.
+    const restored = await hydrateEntityMirror(db, mirrorState);
+    await db.query(
+      "UPDATE app_state SET data=$1,updated_at=NOW(),updated_by='entity-canonical-rollback' WHERE id=1",
+      [JSON.stringify(restored)],
+    );
+  }
   await db.query(
     `INSERT INTO schema_migrations(version) VALUES
       ('2026-09-27-entity-records-mirror'),
-      ('2026-09-27-webauthn-passkeys')
+      ('2026-09-27-webauthn-passkeys'),
+      ('2026-09-27-external-file-storage')
       ON CONFLICT(version) DO NOTHING`,
   );
   // Disable the previously published demo credentials, even on an existing installation.
@@ -717,9 +816,7 @@ async function mutate(db, user, body, fn) {
   if (!Number.isSafeInteger(body.revision) || body.revision < 0)
     throw new AppError("Version de données requise.");
   return transaction(db, async (c) => {
-    const row = (
-      await c.query("SELECT data,revision FROM app_state WHERE id=1 FOR UPDATE")
-    ).rows[0];
+    const row = await loadState(c, { forUpdate: true });
     const previous = (
       await c.query(
         "SELECT result,request_hash FROM command_receipts WHERE user_id=$1 AND request_id=$2",
@@ -748,7 +845,7 @@ async function mutate(db, user, body, fn) {
         "Les données ont changé. Actualisez puis vérifiez votre saisie avant de réessayer.",
         409,
       );
-    const data = normalize(row.data),
+    const data = row.data,
       beforeSignatures = Object.fromEntries(
         MIRRORED_COLLECTIONS.map((collection) => [
           collection,
@@ -762,7 +859,7 @@ async function mutate(db, user, body, fn) {
       );
     await c.query(
       "UPDATE app_state SET data=$1,revision=revision+1,updated_at=NOW(),updated_by=$2 WHERE id=1",
-      [JSON.stringify(data), user.email],
+      [JSON.stringify(persistedState(data)), user.email],
     );
     if (changedCollections.length)
       await syncEntityMirror(c, data, changedCollections);
@@ -792,5 +889,9 @@ module.exports = {
   transaction,
   mutate,
   syncEntityMirror,
+  hydrateEntityMirror,
+  loadState,
+  persistedState,
+  canonicalEntityStateEnabled,
   MIRRORED_COLLECTIONS,
 };

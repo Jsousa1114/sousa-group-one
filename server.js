@@ -3,6 +3,7 @@ const path = require("node:path"),
   { randomUUID } = require("node:crypto"),
   express = require("express");
 const { pool, migrate } = require("./db");
+const { readiness } = require("./production-readiness");
 function createApp(db = pool) {
   const app = express();
   app.disable("x-powered-by");
@@ -59,6 +60,10 @@ function createApp(db = pool) {
     } catch {
       res.status(503).json({ ok: false });
     }
+  });
+  app.get("/readyz", async (req, res) => {
+    const report = await readiness(db);
+    res.set("Cache-Control", "no-store").status(report.ok ? 200 : 503).json(report);
   });
   app.use("/api/auth", require("./auth-routes").routes(db));
   app.use("/api/account", require("./account-routes").routes(db));
@@ -117,7 +122,7 @@ function createApp(db = pool) {
          (request_id,user_id,method,path,status,message,stack,metadata)
          VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,
         [
-          req.id || req.headers["x-request-id"] || null,
+          req.requestId || req.headers["x-request-id"] || null,
           req.user?.id || null,
           req.method,
           req.originalUrl || req.path,
@@ -152,6 +157,16 @@ if (require.main === module) {
     .then(() => {
       const app = createApp();
       const server = app.listen(process.env.PORT || 3000);
+      require("./backup-service").startBackupScheduler(pool);
+      readiness(pool)
+        .then((report) => {
+          if (!report.productionReady)
+            console.warn(
+              "Production readiness incomplete:",
+              report.missingCritical.concat(report.missingRecommended).join(", "),
+            );
+        })
+        .catch((error) => console.error("Readiness check failed", error));
       const cleanup = async () =>
         require("./messaging-routes").cleanupRetention(pool).catch((e) =>
           console.error("Messaging retention cleanup failed", e),

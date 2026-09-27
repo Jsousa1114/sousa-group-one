@@ -6,10 +6,13 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "backup": "node scripts/backup.js",
+    "migrate:file-storage": "node scripts/migrate-file-storage.js",
+    "smoke:production": "node test/production-smoke.cjs"
   },
   "engines": {
-    "node": ">=22.13"
+    "node": "24.x"
   },
   "dependencies": {
     "@simplewebauthn/server": "14.0.3",

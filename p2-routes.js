@@ -3,6 +3,7 @@ const express = require("express");
 const { randomUUID, randomBytes, createHash } = require("node:crypto");
 const D = require("./domain");
 const { auth } = require("./auth-middleware");
+const { loadState } = require("./db");
 
 const schemaPromises = new WeakMap();
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
@@ -117,9 +118,9 @@ async function ensureSchema(db) {
 }
 
 async function stateContext(db, user) {
-  const row = (await db.query("SELECT data,revision FROM app_state WHERE id=1")).rows[0];
-  const data = D.normalize(row?.data);
-  return { data, view: D.viewState(data, user), revision: row?.revision || 0 };
+  const row = await loadState(db);
+  const data = row.data;
+  return { data, view: D.viewState(data, user), revision: row.revision || 0 };
 }
 function clientVisible(ctx, user, id) {
   const client = ctx.view.clients.find((x) => same(x.id, id));
@@ -614,7 +615,7 @@ function publicRoutes(db) {
     next();
   }));
   const scope=(req,name)=>{ if(!(req.apiKey.scopes||[]).includes(name)) D.fail("Permission API insuffisante.",403); };
-  const data=async()=>D.normalize((await db.query("SELECT data FROM app_state WHERE id=1")).rows[0]?.data);
+  const data=async()=>(await loadState(db)).data;
   const filterCompany=(rows,company)=>{
     if(!company) return rows;
     return rows.filter(x=>!x.company||String(x.company)===String(company));

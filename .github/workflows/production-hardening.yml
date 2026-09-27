@@ -1,0 +1,95 @@
+name: Production hardening quality
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "db.js"
+      - "server.js"
+      - "storage.js"
+      - "backup-service.js"
+      - "production-readiness.js"
+      - "auth-middleware.js"
+      - "account-routes.js"
+      - "state-routes.js"
+      - "messaging-routes.js"
+      - "operations-routes.js"
+      - "p1-routes.js"
+      - "p2-routes.js"
+      - "p3-intelligence-routes.js"
+      - "scripts/**"
+      - "test/production-hardening.test.js"
+      - "test/full-app-browser.cjs"
+      - ".github/workflows/production-hardening.yml"
+  push:
+    branches: [main]
+    paths:
+      - "db.js"
+      - "server.js"
+      - "storage.js"
+      - "backup-service.js"
+      - "production-readiness.js"
+      - "auth-middleware.js"
+      - "account-routes.js"
+      - "state-routes.js"
+      - "messaging-routes.js"
+      - "operations-routes.js"
+      - "p1-routes.js"
+      - "p2-routes.js"
+      - "p3-intelligence-routes.js"
+      - "scripts/**"
+      - "test/production-hardening.test.js"
+      - "test/full-app-browser.cjs"
+      - ".github/workflows/production-hardening.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  node-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      - name: Syntax check production files
+        run: |
+          node --check db.js
+          node --check server.js
+          node --check storage.js
+          node --check backup-service.js
+          node --check production-readiness.js
+          node --check auth-middleware.js
+          node --check account-routes.js
+          node --check state-routes.js
+          node --check messaging-routes.js
+          node --check operations-routes.js
+          node --check p1-routes.js
+          node --check p2-routes.js
+          node --check p3-intelligence-routes.js
+          node --check scripts/backup.js
+          node --check scripts/restore-backup.js
+          node --check scripts/migrate-file-storage.js
+      - name: Full Node test suite
+        run: npm test
+      - name: Dependency audit
+        run: npm audit --audit-level=high
+
+  browser-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      - run: npm install --no-save playwright
+      - run: npx playwright install --with-deps chromium
+      - name: Full browser regression
+        run: node test/full-app-browser.cjs

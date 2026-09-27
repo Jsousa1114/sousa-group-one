@@ -4,9 +4,10 @@ const express = require("express"),
 const { randomUUID } = require("node:crypto");
 const { auth, profile } = require("./auth-middleware"),
   { wrap } = require("./auth-routes"),
-  { mutate } = require("./db");
+  { mutate, loadState } = require("./db");
 const D = require("./domain");
 const { notifyUsers } = require("./messaging-routes");
+const storage = require("./storage");
 function routes(db) {
   const r = express.Router();
   r.use(auth(db));
@@ -16,9 +17,7 @@ function routes(db) {
       const { kind, id } = req.params;
       if (!["quotes", "invoices"].includes(kind))
         D.fail("Document introuvable.", 404);
-      const row = (
-        await db.query("SELECT data,revision FROM app_state WHERE id=1")
-      ).rows[0];
+      const row = await loadState(db);
       const state = D.viewState(row.data, req.user);
       const document = state[kind].find((r) => D.same(r.id, id));
       if (!document) D.fail("Document introuvable.", 404);
@@ -90,9 +89,7 @@ function routes(db) {
   r.get(
     "/",
     wrap(async (req, res) => {
-      const row = (
-        await db.query("SELECT data,revision FROM app_state WHERE id=1")
-      ).rows[0];
+      const row = await loadState(db);
       const users = (
         await db.query(
           "SELECT id,email,name,role,company,employee_id,client_id,disabled FROM users",
@@ -376,9 +373,7 @@ function routes(db) {
               D.fail("Cette entreprise possède encore des comptes liés.");
           }
           if (req.body.payload?.kind === "documents")
-            await c.query("DELETE FROM file_contents WHERE id=$1", [
-              String(result.id),
-            ]);
+            await storage.removeFile(c, String(result.id));
         }
         Object.assign(d, data);
         const event = commandProjectAndText(
@@ -735,9 +730,7 @@ function routes(db) {
   r.get(
     "/messages/:id/attachment",
     wrap(async (req, res) => {
-      const row = (
-        await db.query("SELECT data FROM app_state WHERE id=1")
-      ).rows[0];
+      const row = await loadState(db);
       const visible = D.viewState(row.data, req.user),
         msg = visible.messages.find((m) => D.same(m.id, req.params.id)),
         override = (
@@ -748,11 +741,7 @@ function routes(db) {
         ).rows[0];
       if (override?.deleted_for_all) D.fail("Pièce jointe supprimée.", 404);
       if (!msg?.attachment?.fileId) D.fail("Pièce jointe introuvable.", 404);
-      const file = (
-        await db.query("SELECT content FROM file_contents WHERE id=$1", [
-          msg.attachment.fileId,
-        ])
-      ).rows[0];
+      const file = await storage.loadFile(db, msg.attachment.fileId);
       if (!file) D.fail("Pièce jointe introuvable.", 404);
       res
         .set({
@@ -857,9 +846,7 @@ function routes(db) {
             await db.query("SELECT revision FROM app_state WHERE id=1")
           ).rows[0].revision,
         });
-      const row = (
-          await db.query("SELECT data,revision FROM app_state WHERE id=1")
-        ).rows[0],
+      const row = await loadState(db),
         visible = D.viewState(row.data, req.user);
       let messages = [];
       if (p.threadId) {
@@ -1242,10 +1229,7 @@ function routes(db) {
             }
             m.mime = mime;
             m.size = bytes.length;
-            await c.query(
-              "INSERT INTO file_contents(id,content) VALUES($1,$2)",
-              [m.id, bytes],
-            );
+            await storage.saveFile(c, m.id, bytes, mime);
             d.documents.push(m);
             return { id: m.id };
           },
@@ -1345,9 +1329,7 @@ function routes(db) {
             [p.recipientId],
           )
         ).rows[0];
-      const appData = (
-        await db.query("SELECT data FROM app_state WHERE id=1")
-      ).rows[0]?.data;
+      const appData = (await loadState(db)).data;
       if (!recipient || !D.canContact(req.user, recipient, appData))
         D.fail("Destinataire non autorisé.", 403);
       if (D.same(recipient.id, req.user.id))
@@ -1500,14 +1482,11 @@ function routes(db) {
   r.get(
     "/documents/:id",
     wrap(async (req, res) => {
-      const row = (await db.query("SELECT data FROM app_state WHERE id=1"))
-        .rows[0];
-      const d = D.normalize(row.data),
+      const row = await loadState(db);
+      const d = row.data,
         m = D.ref(d, "documents", req.params.id);
       if (!D.canDocument(d, req.user, m)) D.fail("Accès refusé.", 403);
-      const file = (
-        await db.query("SELECT content FROM file_contents WHERE id=$1", [m.id])
-      ).rows[0];
+      const file = await storage.loadFile(db, m.id);
       if (!file) D.fail("Fichier introuvable.", 404);
       res
         .set({
