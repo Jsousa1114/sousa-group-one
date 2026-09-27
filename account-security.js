@@ -1,5 +1,5 @@
 "use strict";
-const { randomBytes, createHmac } = require("node:crypto");
+const { randomBytes, createHmac, createHash } = require("node:crypto");
 const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 function base32Encode(buffer) {
   let bits = "", out = "";
