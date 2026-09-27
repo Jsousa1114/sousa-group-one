@@ -261,7 +261,6 @@ function canProject(d, u, p) {
 function canEmployee(u, e) {
   return (
     !!e &&
-    !e.deletedAt &&
     employeeCompanies(e).some((c) => inCompany(u, c)) &&
     (privileged(u, [...HR, "manager"]) || same(e.id, u.employee_id))
   );
