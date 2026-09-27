@@ -2,7 +2,7 @@ const test = require("node:test"),
   assert = require("node:assert/strict"),
   bcrypt = require("bcryptjs");
 const { database } = require("./database"),
-  { migrate } = require("../db"),
+  { migrate, replaceStateSnapshot } = require("../db"),
   { createApp } = require("../server");
 const { emptyState } = require("../domain");
 process.env.JWT_SECRET = "test-only-secret-with-at-least-32-characters";
@@ -78,9 +78,7 @@ test.before(async () => {
       title: "Project",
     },
   ];
-  await db.query("UPDATE app_state SET data=$1 WHERE id=1", [
-    JSON.stringify(d),
-  ]);
+  await replaceStateSnapshot(db, d, "test-fixture");
   server = createApp(db).listen(0, "127.0.0.1");
   await new Promise((r) => server.once("listening", r));
   url = "http://127.0.0.1:" + server.address().port;
@@ -1987,9 +1985,7 @@ test("operations platform covers tasks CRM stock work orders analytics insights 
     hours: 6.25,
     status: "Validé",
   });
-  await db.query("UPDATE app_state SET data=$1 WHERE id=1", [
-    JSON.stringify(summaryState),
-  ]);
+  await replaceStateSnapshot(db, summaryState, "test-project-summary");
   const dailyReport = await call("operations/project/p1/report", admin, {
     reportDate: summaryDate,
     weather: "Sec",
@@ -2060,9 +2056,7 @@ test("operations platform covers tasks CRM stock work orders analytics insights 
     hours: 2,
     status: "Validé",
   });
-  await db.query("UPDATE app_state SET data=$1 WHERE id=1", [
-    JSON.stringify(hrState),
-  ]);
+  await replaceStateSnapshot(db, hrState, "test-hr-summary");
   const hrSummary = await call(
     "operations/hr/time-summary?month=2026-08",
     admin,
@@ -2171,9 +2165,7 @@ test("operations platform covers tasks CRM stock work orders analytics insights 
     hours: 7.5,
     status: "Validé",
   });
-  await db.query("UPDATE app_state SET data=$1 WHERE id=1", [
-    JSON.stringify(complianceState),
-  ]);
+  await replaceStateSnapshot(db, complianceState, "test-compliance");
 
   const insights = await call("operations/insights", admin);
   assert.equal(insights.status, 200, JSON.stringify(insights.data));
