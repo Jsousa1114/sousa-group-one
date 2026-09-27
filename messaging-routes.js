@@ -5,6 +5,7 @@ const { auth, profile } = require("./auth-middleware");
 const { wrap } = require("./auth-routes");
 const D = require("./domain");
 const { loadState, syncEntityMirror } = require("./db");
+const { deleteFile } = require("./file-storage");
 
 let webPush = null;
 try {
@@ -313,9 +314,7 @@ function routes(db) {
         [String(message.id)],
       );
       if (message.attachment?.fileId)
-        await db.query("DELETE FROM file_contents WHERE id=$1", [
-          String(message.attachment.fileId),
-        ]);
+        await deleteFile(db, String(message.attachment.fileId));
       res.json({ ok: true });
     }),
   );
@@ -901,8 +900,7 @@ async function cleanupRetention(db) {
       [JSON.stringify(data)],
     );
     await syncEntityMirror(db, data, ["messages"]);
-    if (fileIds.length)
-      await db.query("DELETE FROM file_contents WHERE id=ANY($1::text[])", [fileIds]);
+    for (const fileId of fileIds) await deleteFile(db, fileId);
     const ids = expired.map((m) => String(m.id));
     await db.query("DELETE FROM message_reads WHERE message_id=ANY($1::text[])", [ids]);
     await db.query("DELETE FROM message_reactions WHERE message_id=ANY($1::text[])", [ids]);
