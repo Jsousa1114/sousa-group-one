@@ -83,6 +83,8 @@ function createApp(db = pool) {
     "p1-suite.js",
     "styles.css",
     "p1.css",
+    "pay.html",
+    "pay.js",
     "manifest.webmanifest",
     "service-worker.js",
     ...[
