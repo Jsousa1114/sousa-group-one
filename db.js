@@ -3,6 +3,48 @@ const { Pool } = require("pg");
 const bcrypt = require("bcryptjs");
 const { createHash } = require("node:crypto");
 const { emptyState, normalize, AppError } = require("./domain");
+const MIRRORED_COLLECTIONS = [
+  "companies",
+  "employees",
+  "clients",
+  "projects",
+  "time",
+  "planning",
+  "absences",
+  "quotes",
+  "invoices",
+  "payments",
+  "expenses",
+  "inventory",
+  "suppliers",
+  "vehicles",
+  "tools",
+  "maintenance",
+  "documents",
+  "messageThreads",
+];
+async function syncEntityCollection(c, collection, rows) {
+  const list = Array.isArray(rows) ? rows.filter((x) => x && x.id != null) : [];
+  await c.query("DELETE FROM entity_records WHERE collection=$1", [collection]);
+  for (const row of list)
+    await c.query(
+      `INSERT INTO entity_records(collection,entity_id,company,data,updated_at)
+       VALUES($1,$2,$3,$4,NOW())
+       ON CONFLICT(collection,entity_id) DO UPDATE SET
+       company=EXCLUDED.company,data=EXCLUDED.data,updated_at=NOW()`,
+      [
+        collection,
+        String(row.id),
+        row.company ? String(row.company) : null,
+        JSON.stringify(row),
+      ],
+    );
+}
+async function syncEntityMirror(c, data, changedOnly = null) {
+  const collections = changedOnly || MIRRORED_COLLECTIONS;
+  for (const collection of collections)
+    await syncEntityCollection(c, collection, data?.[collection]);
+}
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: process.env.PGSSL === "disable" ? false : { rejectUnauthorized: false },
@@ -512,6 +554,15 @@ async function migrate(db = pool) {
     "INSERT INTO app_state(id,data) VALUES(1,$1) ON CONFLICT(id) DO NOTHING",
     [JSON.stringify(emptyState())],
   );
+  const mirrorState = (
+    await db.query("SELECT data FROM app_state WHERE id=1")
+  ).rows[0]?.data;
+  await syncEntityMirror(db, normalize(mirrorState));
+  await db.query(
+    `INSERT INTO schema_migrations(version) VALUES
+      ('2026-09-27-entity-records-mirror')
+      ON CONFLICT(version) DO NOTHING`,
+  );
   // Disable the previously published demo credentials, even on an existing installation.
   const users = await db.query(
     "SELECT id,password_hash FROM users WHERE disabled=false",
@@ -604,11 +655,23 @@ async function mutate(db, user, body, fn) {
         409,
       );
     const data = normalize(row.data),
-      result = await fn(c, data);
+      beforeSignatures = Object.fromEntries(
+        MIRRORED_COLLECTIONS.map((collection) => [
+          collection,
+          JSON.stringify(data[collection] || []),
+        ]),
+      ),
+      result = await fn(c, data),
+      changedCollections = MIRRORED_COLLECTIONS.filter(
+        (collection) =>
+          JSON.stringify(data[collection] || []) !== beforeSignatures[collection],
+      );
     await c.query(
       "UPDATE app_state SET data=$1,revision=revision+1,updated_at=NOW(),updated_by=$2 WHERE id=1",
       [JSON.stringify(data), user.email],
     );
+    if (changedCollections.length)
+      await syncEntityMirror(c, data, changedCollections);
     await c.query(
       "INSERT INTO audit_logs(user_email,action,metadata) VALUES($1,$2,$3)",
       [
@@ -629,4 +692,11 @@ async function mutate(db, user, body, fn) {
     return receipt;
   });
 }
-module.exports = { pool, migrate, transaction, mutate };
+module.exports = {
+  pool,
+  migrate,
+  transaction,
+  mutate,
+  syncEntityMirror,
+  MIRRORED_COLLECTIONS,
+};
