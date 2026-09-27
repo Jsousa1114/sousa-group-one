@@ -1,0 +1,56 @@
+:root{
+  --sgo-radius:14px;
+  --sgo-gap:14px;
+  --sgo-focus:3px solid currentColor;
+}
+.p2-center{display:grid;gap:16px;min-width:0}
+.p2-hero{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:20px;border:1px solid var(--border);border-radius:var(--sgo-radius);background:var(--panel)}
+.p2-hero span{font-size:.72rem;font-weight:800;letter-spacing:.09em;opacity:.7}
+.p2-hero h2{margin:4px 0 0}
+.p2-tabs{display:flex;gap:8px;overflow:auto;padding-bottom:2px}
+.p2-tabs button{border:1px solid var(--border);background:var(--panel);color:inherit;border-radius:999px;padding:9px 13px;white-space:nowrap;cursor:pointer}
+.p2-tabs button.active{background:var(--text);color:var(--bg)}
+.p2-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:var(--sgo-gap)}
+.p2-kpis article{display:grid;gap:5px;padding:16px;border:1px solid var(--border);border-radius:var(--sgo-radius);background:var(--panel)}
+.p2-kpis b{font-size:1.3rem}.p2-kpis span{font-size:.75rem;opacity:.72}
+.p2-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--sgo-gap)}
+.p2-card{min-width:0}.p2-card-head,.p2-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.p2-card-head h3,.p2-toolbar h3{margin:0}
+.p2-actions{display:flex;flex-wrap:wrap;gap:8px}
+.p2-status-grid,.p2-feature-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.p2-status-grid>div,.p2-feature-grid>span{padding:10px;border:1px solid var(--border);border-radius:10px;display:grid;gap:2px}
+.p2-status-grid .ready,.p2-feature-grid .ready{border-color:color-mix(in srgb,#39b86a 55%,var(--border))}
+.p2-status-grid .pending{border-color:color-mix(in srgb,#d9a126 55%,var(--border))}
+.p2-status-grid span{font-size:.72rem;opacity:.72}
+.p2-list{display:grid;gap:9px}.p2-list>article,.p2-list>div{display:flex;align-items:center;justify-content:space-between;gap:12px;min-width:0}
+.p2-list>div{padding:9px 0;border-bottom:1px solid var(--border)}
+.p2-list span,.p2-list article>div:first-child{display:grid;gap:3px;min-width:0}.p2-list small{opacity:.7;overflow-wrap:anywhere}
+.p2-chart{display:grid;gap:8px}.p2-chart>div{display:grid;grid-template-columns:90px minmax(80px,1fr) 120px;align-items:center;gap:8px}
+.p2-chart i{display:block;height:12px;border-radius:999px;background:color-mix(in srgb,currentColor 20%,transparent);position:relative;overflow:hidden}
+.p2-chart i::after{content:"";position:absolute;inset:0 auto 0 0;width:var(--p);background:currentColor;opacity:.55;border-radius:inherit}
+.p2-chart b{text-align:right;font-size:.82rem}.p2-api-key{white-space:pre-wrap;overflow-wrap:anywhere;padding:12px;border:1px solid var(--border);border-radius:10px}
+.p2-check{display:flex!important;align-items:center;gap:8px!important}.p2-check input{width:auto!important}
+:where(button,a,input,select,textarea,[tabindex]):focus-visible{outline:var(--sgo-focus);outline-offset:3px}
+body.high-readability{font-size:18px;letter-spacing:.01em}
+body.high-readability .muted,body.high-readability small{opacity:.9!important}
+body.high-readability .card,body.high-readability input,body.high-readability select,body.high-readability textarea,body.high-readability button{border-width:2px}
+body.high-readability .btn,body.high-readability button{min-height:46px}
+body.tablet-mode .content{max-width:none}
+body.tablet-mode .card{padding:18px}
+body.tablet-mode .table{overflow-x:auto}
+body.tablet-mode .nav-item{min-height:48px}
+@media (min-width:700px) and (max-width:1180px){
+  .content{max-width:none!important;padding-inline:18px!important}
+  .p2-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .p2-grid{grid-template-columns:1fr}
+  .ops-grid-2{grid-template-columns:1fr!important}
+  .table{overflow-x:auto}
+}
+@media (max-width:699px){
+  .p2-kpis,.p2-grid,.p2-status-grid,.p2-feature-grid{grid-template-columns:1fr}
+  .p2-list>article,.p2-list>div,.p2-card-head,.p2-toolbar{align-items:stretch;flex-direction:column}
+  .p2-chart>div{grid-template-columns:72px 1fr}.p2-chart b{grid-column:2}
+}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{scroll-behavior:auto!important;animation-duration:.001ms!important;transition-duration:.001ms!important}
+}

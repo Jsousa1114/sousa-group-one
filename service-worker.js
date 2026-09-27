@@ -1,6 +1,6 @@
 "use strict";
 
-const STATIC_CACHE = "sgo-shell-2026-09-27-v3",
+const STATIC_CACHE = "sgo-shell-2026-09-27-v4",
   STATIC_ASSETS = [
     "/",
     "/index.html",
@@ -10,6 +10,9 @@ const STATIC_CACHE = "sgo-shell-2026-09-27-v3",
     "/messaging-crypto.js",
     "/messaging-suite.js",
     "/account-center.js",
+    "/p2-runtime.js",
+    "/p2-center.js",
+    "/p2.css",
     "/p3-center.js",
     "/operations-center.js",
     "/manifest.webmanifest",
@@ -155,6 +158,16 @@ self.addEventListener("notificationclick", (event) => {
         return existing.focus();
       }
       return self.clients.openWindow(target);
+    }),
+  );
+});
+
+
+self.addEventListener("sync", (event) => {
+  if (event.tag !== "sgo-offline-sync") return;
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
+      for (const client of clients) client.postMessage({ type: "SGO_FLUSH_OFFLINE" });
     }),
   );
 });

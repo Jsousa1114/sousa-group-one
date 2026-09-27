@@ -102,6 +102,7 @@ const menus = {
   messages: ["Messages", Object.keys(roles)],
   reports: ["Rapports", [...core, "hr", "accounting", "manager"]],
   pilotage: ["Pilotage", [...core, "hr", "manager", "accounting", "employee"]],
+  advanced: ["P2 · Avancé", Object.keys(roles)],
   users: ["Comptes", ["admin"]],
   audit: ["Journal", hr],
   settings: ["Mon compte", Object.keys(roles)],
@@ -122,7 +123,15 @@ const createRoles = {
   tools: ops,
   maintenance: ops,
 };
-const can = (rs) => rs.includes(profile?.role);
+const can = (rs) => {
+  if (!profile) return false;
+  const base = rs.includes(profile.role);
+  if (profile.role === "admin") return base;
+  const denials = Array.isArray(profile.permission_denials) ? profile.permission_denials : [];
+  if (base && denials.includes(profile.role)) return false;
+  const grants = Array.isArray(profile.permission_grants) ? profile.permission_grants : [];
+  return base || grants.some((role) => rs.includes(role) && !denials.includes(role));
+};
 const visible = (k) =>
   (state?.[k] || []).filter((x) => {
     if (k === "employees" && x.deletedAt) return false;
@@ -299,8 +308,23 @@ async function mutate(
   endpoint = "state/command",
   form,
 ) {
+  const requestId = form?.dataset.requestId || crypto.randomUUID();
   if (!navigator.onLine) {
-    notice("Connexion requise pour enregistrer des modifications.");
+    const queued = await window.SGOP2Runtime?.queueMutation?.({
+      action,
+      payload,
+      collection,
+      endpoint,
+      requestId,
+    });
+    if (queued) {
+      if (form) delete form.dataset.requestId;
+      closeModal(true);
+      notice("Mode hors ligne : modification enregistrée sur cet appareil et envoyée automatiquement au retour du réseau.");
+      toast("Modification mise en attente de synchronisation.");
+      return { queued: true, requestId };
+    }
+    notice("Connexion requise pour cette modification.");
     return;
   }
   if (pending) return;
@@ -309,7 +333,6 @@ async function mutate(
   buttons.forEach((b) => (b.disabled = true));
   let saved = false,
     savedResult;
-  const requestId = form?.dataset.requestId || crypto.randomUUID();
   if (form) form.dataset.requestId = requestId;
   try {
     const out = await api(endpoint, {
@@ -409,11 +432,11 @@ function render() {
     activeCompanyId,
     state.companies.find((c) => c.id === activeCompanyId),
   );
-  if (!menus[page]?.[1].includes(profile.role)) page = "dashboard";
+  if (!can(menus[page]?.[1] || [])) page = "dashboard";
   $("title").textContent = menus[page][0];
   $("userName").textContent = profile.name + " · " + roles[profile.role];
   $("nav").innerHTML = Object.entries(menus)
-    .filter(([k, [, rs]]) => rs.includes(profile.role) && k !== "users")
+    .filter(([k, [, rs]]) => can(rs) && k !== "users")
     .map(([k, [label]]) => {
       const unread =
         k === "messages"
@@ -435,6 +458,8 @@ function render() {
   $("activeCompanyLogo").alt =
     name("companies", company || profile.company) || "Sousa Group";
   $("content").innerHTML = views[page] ? views[page]() : genericPage(page);
+  if (page === "advanced" && window.SGOP2Center?.render)
+    window.SGOP2Center.render($("p2Standalone")).catch((e) => notice(e.message));
   if (
     (page === "users" || page === "employees") &&
     profile.role === "admin" &&
@@ -1615,6 +1640,9 @@ const views = {
   pilotage: () =>
     heading("Pilotage") +
     '<div id="operationsCenter"><article class="card"><p>Chargement du pilotage…</p></article></div>',
+  advanced: () =>
+    heading("P2 · Avancé") +
+    '<div id="p2Standalone"><article class="card"><p>Chargement P2…</p></article></div>',
   employees: () =>
     genericPage("employees") +
     (profile.role === "admin" && profile.company === "group"
@@ -3648,7 +3676,9 @@ window.addEventListener("offline", () => {
 window.addEventListener("online", () => {
   document.body.classList.remove("offline-mode");
   notice("");
-  refresh().catch(() => {});
+  Promise.resolve(window.SGOP2Runtime?.flushQueue?.())
+    .catch(() => null)
+    .finally(() => refresh().catch(() => {}));
 });
 window.SGOChatCore = {
   api,
@@ -3678,7 +3708,7 @@ window.SGOChatCore = {
   getContacts: () => contacts,
   getPage: () => page,
   setPage: (next) => {
-    if (menus[next]?.[1]?.includes(profile?.role)) {
+    if (can(menus[next]?.[1] || [])) {
       page = next;
       render();
     }
