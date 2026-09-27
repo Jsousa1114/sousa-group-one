@@ -93,7 +93,7 @@ async function visitAll(page, expectedPages, mobile=false){
     await seed();
     admin=await make({width:1440,height:900});
     await login(admin.page,"audit-admin@test.invalid");
-    const adminPages=["dashboard","companies","employees","time","planning","absences","projects","clients","quotes","invoices","payments","expenses","inventory","suppliers","vehicles","tools","maintenance","documents","messages","reports","audit","settings"];
+    const adminPages=["dashboard","companies","employees","time","planning","absences","projects","clients","quotes","invoices","payments","expenses","inventory","suppliers","vehicles","tools","maintenance","documents","messages","reports","pilotage","audit","settings"];
     await visitAll(admin.page,adminPages,false);
     await admin.page.locator('[data-page="projects"]').click();
     await admin.page.locator('[data-action="project"]').first().click();
@@ -101,10 +101,26 @@ async function visitAll(page, expectedPages, mobile=false){
     assert.match(await admin.page.locator("#modalWrap").innerText(),/Chantier audit/);
     await admin.page.locator('[data-action="close-modal"]').click();
 
+    await admin.page.locator('[data-page="pilotage"]').click();
+    await admin.page.locator(".ops-center").waitFor({timeout:10000});
+    for(const tab of ["overview","tasks","crm","stock","workorders","analytics","automations","integrations","notifications"]){
+      await admin.page.locator('[data-ops-tab="'+tab+'"]').click();
+      await admin.page.waitForTimeout(120);
+      await noOverflow(admin.page,"pilotage "+tab);
+    }
+
     employee=await make({width:390,height:844});
     await login(employee.page,"audit-employee@test.invalid");
-    const employeePages=["dashboard","time","planning","absences","projects","inventory","tools","documents","messages","settings"];
+    const employeePages=["dashboard","time","planning","absences","projects","inventory","tools","documents","messages","pilotage","settings"];
     await visitAll(employee.page,employeePages,true);
+    if(!(await employee.page.locator("#sidebar").evaluate(el=>el.classList.contains("open"))))
+      await employee.page.locator('[data-action="open-side"]').click();
+    await employee.page.locator('[data-page="pilotage"]').click();
+    await employee.page.locator(".ops-center").waitFor({timeout:10000});
+    assert.equal(await employee.page.locator('[data-ops-tab="crm"]').count(),0);
+    assert.equal(await employee.page.locator('[data-ops-tab="analytics"]').count(),0);
+    await employee.page.locator('[data-ops-tab="tasks"]').click();
+    await noOverflow(employee.page,"mobile pilotage tasks");
     assert.equal(await employee.page.locator('[data-page="clients"]').count(),0);
     assert.equal(await employee.page.locator('[data-page="invoices"]').count(),0);
 
