@@ -1,7 +1,8 @@
 "use strict";
 (() => {
   let cache = null,
-    loading = false;
+    loading = false,
+    defaultsAppliedFor = "";
   const core = () => window.SGOChatCore,
     esc = (v) => core()?.esc?.(v) ?? String(v ?? ""),
     roles = {
@@ -240,6 +241,7 @@
           <p class="muted">Ces actions concernent uniquement votre compte. L’historique métier de l’entreprise n’est jamais supprimé automatiquement.</p>
           <div class="account-shortcuts">
             <button class="btn" data-account-action="export-data">Télécharger mes données</button>
+            <button class="btn" data-account-action="disable-notifications">Désactiver toutes les notifications</button>
             <button class="btn" data-account-action="logout-others">Fermer les autres sessions</button>
             <button class="btn danger" data-account-action="deactivation">${summary.pendingDeactivation ? "Demande de désactivation en attente" : "Demander la désactivation du compte"}</button>
           </div>
@@ -375,6 +377,12 @@
           link = document.createElement("a");
         link.href = url; link.download = b.dataset.name || "document"; link.click();
         setTimeout(() => URL.revokeObjectURL(url), 30000);
+      } else if (a === "disable-notifications") {
+        const disabled = Object.fromEntries(
+          Object.keys(cache.preferences.notifications).map((key) => [key, false]),
+        );
+        await savePrefs("notifications", disabled);
+        core().toast("Toutes les notifications ont été désactivées.");
       } else if (a === "export-data") {
         const r = await core().authFetch("/api/account/export");
         if (!r.ok) throw new Error("Export impossible.");
@@ -429,7 +437,15 @@
         await core().api("account/2fa/disable", Object.fromEntries(data));
         core().closeModal(true); await load(true); core().toast("Double authentification désactivée.");
       } else if (f.id === "accountNotificationForm") {
-        await savePrefs("notifications", Object.fromEntries([...data.keys()].map((k) => [k, true]).concat([...Object.keys(cache.preferences.notifications).filter((k) => !data.has(k)).map((k) => [k, false])])));
+        await savePrefs(
+          "notifications",
+          Object.fromEntries(
+            Object.keys(cache.preferences.notifications).map((key) => [
+              key,
+              data.has(key),
+            ]),
+          ),
+        );
       } else if (f.id === "accountPrivacyForm") {
         await savePrefs("privacy", Object.fromEntries(Object.keys(cache.preferences.privacy).map((k) => [k, data.has(k)])));
       } else if (f.id === "accountPreferenceForm") {
@@ -474,9 +490,25 @@
   });
   async function bootstrapPrefs() {
     try {
-      if (!core()?.getProfile?.()) return;
-      const out = await core().api("account/preferences");
-      applyPrefs(out.preferences);
+      const me = core()?.getProfile?.();
+      if (!me) return;
+      const out = await core().api("account/preferences"),
+        prefs = out.preferences;
+      applyPrefs(prefs);
+      const userKey = String(me.id || me.email || "");
+      if (defaultsAppliedFor !== userKey) {
+        defaultsAppliedFor = userKey;
+        const params = new URLSearchParams(location.search);
+        if (!params.has("open")) {
+          if (prefs.defaultCompany) core().setCompany?.(prefs.defaultCompany);
+          if (
+            core().getPage?.() === "dashboard" &&
+            prefs.defaultPage &&
+            prefs.defaultPage !== "dashboard"
+          )
+            core().setPage?.(prefs.defaultPage);
+        }
+      }
     } catch {}
   }
   window.SGOAccountCenter = {
