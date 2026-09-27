@@ -73,8 +73,9 @@ async function visitAll(page, expectedPages, mobile=false){
   for(const key of expectedPages){
     if(mobile){
       const side=page.locator("#sidebar");
-      if(!(await side.evaluate(el=>!el.classList.contains("open")).catch(()=>false)))
-        await page.locator('[data-action="open-side"]').click().catch(()=>{});
+      const isOpen=await side.evaluate(el=>el.classList.contains("open")).catch(()=>false);
+      if(!isOpen)
+        await page.locator('[data-action="open-side"]').click();
     }
     const nav=page.locator('[data-page="'+key+'"]');
     await nav.waitFor({state:"visible",timeout:5000});
