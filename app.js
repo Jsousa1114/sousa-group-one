@@ -872,7 +872,13 @@ async function hydrateChatAttachments() {
   }
 }
 async function markChatRead() {
-  if (!token || pending || page !== "messages") return;
+  if (
+    !token ||
+    pending ||
+    page !== "messages" ||
+    window.SGOAccountPreferences?.privacy?.readReceipts === false
+  )
+    return;
   const payload = selectedThreadId
     ? { threadId: selectedThreadId }
     : { recipientId: selectedRecipient };
