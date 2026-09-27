@@ -129,3 +129,20 @@ npm test
 PGlite sérialise les connexions de test ; il ne remplace pas une campagne de
 charge sur le PostgreSQL de production. La vérification visuelle dans un vrai
 navigateur et sur téléphone reste à effectuer sur l'environnement déployé.
+
+## P3 — Intelligence et automatisation avancée
+
+Le module **Pilotage > P3 · Intelligence** regroupe les fonctions avancées prévues pour la phase P3 :
+
+- assistant interne limité aux données déjà accessibles par le compte connecté ;
+- préparation de devis à partir d'un brief, avec validation manuelle obligatoire des prix ;
+- OCR de factures fournisseurs et de références matériel ;
+- dictée navigateur et transcription audio optionnelle ;
+- résumé journalier automatique par chantier ;
+- détection d'anomalies opérationnelles (budget, échéances, factures, stock, tâches, volumes d'heures) ;
+- prévision de charge d'équipe sur 1 à 8 semaines ;
+- propositions d'affectation basées sur disponibilités, absences, conflits, capacité et équipe chantier.
+
+Sans fournisseur IA externe, l'assistant conserve un mode local déterministe et les fonctions de charge, anomalies, planification assistée et dictée navigateur restent disponibles. Les fonctions OCR et génération enrichie de devis nécessitent `AI_API_URL`, `AI_API_KEY` et `AI_MODEL`. La transcription serveur nécessite en plus `AI_TRANSCRIBE_API_URL`.
+
+Les sorties IA sont toujours des brouillons ou des extractions à contrôler : aucun prix, devis, dépense ou planning n'est enregistré automatiquement sans action explicite d'un utilisateur autorisé.

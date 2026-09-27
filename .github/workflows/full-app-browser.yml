@@ -10,6 +10,9 @@ on:
       - account-routes.js
       - operations-center.js
       - operations-routes.js
+      - p3-center.js
+      - p3-intelligence-routes.js
+      - test/p3.test.js
       - messaging-suite.js
       - messaging-routes.js
       - state-routes.js

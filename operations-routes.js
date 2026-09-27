@@ -2120,6 +2120,7 @@ function routes(db) {
     }),
   );
 
+  r.use("/p3", require("./p3-intelligence-routes").routes(db));
   return r;
 }
 
