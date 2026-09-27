@@ -277,13 +277,13 @@ test("P3 OCR and server transcription report missing provider configuration clea
     mode: "supplier_invoice",
     imageDataUrl: image,
   });
-  assert.equal(ocr.status, 503);
+  assert.equal(ocr.status, 424);
   assert.match(ocr.data.error, /IA/i);
 
   const transcribe = await call("operations/p3/transcribe", admin, {
     audioDataUrl: "data:audio/webm;base64,AAAA",
   });
-  assert.equal(transcribe.status, 503);
+  assert.equal(transcribe.status, 424);
   assert.match(transcribe.data.error, /transcription/i);
 });
 
