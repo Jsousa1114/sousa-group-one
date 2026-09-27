@@ -274,3 +274,40 @@ test("personal data export and deactivation request are available", async () => 
   const summary = await call("account/summary", token);
   assert.equal(summary.data.pendingDeactivation.status, "pending");
 });
+
+
+test("passkey registration options require password and persist a short-lived challenge", async () => {
+  const token = (await login()).data.token;
+  const unavailable = await call("passkeys/login/options", null, {
+    email: "employee-account@test.invalid",
+  });
+  assert.equal(unavailable.status, 404);
+
+  const denied = await call("passkeys/register/options", token, {
+    currentPassword: "wrong-password",
+  });
+  assert.equal(denied.status, 403);
+
+  const start = await call("passkeys/register/options", token, {
+    currentPassword: PASSWORD,
+  });
+  assert.equal(start.status, 200, JSON.stringify(start.data));
+  assert.ok(start.data.challengeId);
+  assert.ok(start.data.options?.challenge);
+  assert.equal(start.data.options?.rp?.name, "Sousa Group One");
+  assert.equal(start.data.options?.user?.name, "employee-account@test.invalid");
+  assert.equal(start.data.options?.authenticatorSelection?.userVerification, "required");
+
+  const challenge = (
+    await db.query(
+      "SELECT purpose,expires_at FROM webauthn_challenges WHERE id=$1 AND user_id=(SELECT id FROM users WHERE email=$2)",
+      [start.data.challengeId, "employee-account@test.invalid"],
+    )
+  ).rows[0];
+  assert.equal(challenge.purpose, "registration");
+  assert.ok(new Date(challenge.expires_at).getTime() > Date.now());
+
+  const list = await call("passkeys", token);
+  assert.equal(list.status, 200);
+  assert.deepEqual(list.data.passkeys, []);
+});
