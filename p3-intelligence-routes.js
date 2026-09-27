@@ -2,6 +2,7 @@
 
 const express = require("express");
 const D = require("./domain");
+const { loadState } = require("./db");
 
 const wrap = (fn) => (req, res, next) =>
   Promise.resolve(fn(req, res, next)).catch(next);
@@ -31,12 +32,12 @@ const roleAllowed = (user, roles) => {
 };
 
 async function stateContext(db, user) {
-  const row = (await db.query("SELECT data,revision FROM app_state WHERE id=1")).rows[0];
-  const data = D.normalize(row?.data);
+  const row = await loadState(db);
+  const data = row.data;
   return {
     data,
     view: D.viewState(data, user),
-    revision: Number(row?.revision || 0),
+    revision: Number(row.revision || 0),
   };
 }
 
