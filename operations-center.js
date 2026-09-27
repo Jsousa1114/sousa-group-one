@@ -208,7 +208,10 @@
     root().querySelector("#opsBody").innerHTML = `
       <div class="ops-toolbar">
         <label>Chantier<select id="opsTaskProjectFilter"><option value="">Tous les chantiers</option>${projectOptions(projectFilter)}</select></label>
-        ${operational() ? button("Nouvelle tâche", "new-task", "", "primary") : ""}
+        <div class="form-actions">
+          ${projectFilter && operational() ? button("Résumé du jour", "project-summary", "", "") : ""}
+          ${operational() ? button("Nouvelle tâche", "new-task", "", "primary") : ""}
+        </div>
       </div>
       <div class="ops-kanban">
         ${columns
@@ -657,6 +660,39 @@
         activeTab = b.dataset.tab;
         root().innerHTML = shell();
         await renderTab();
+      } else if (a === "project-summary") {
+        if (!projectFilter) throw new Error("Choisissez un chantier.");
+        const out = await get(
+          "project/" + encodeURIComponent(projectFilter) + "/summary",
+        );
+        const m = out.metrics || {};
+        modal(
+          "Résumé automatique · " + (out.project?.title || projectFilter),
+          `<section class="ops-summary">
+            <div class="ops-kpis">
+              <article class="card ops-kpi"><span>Heures</span><b>${esc(Number(m.hours || 0).toFixed(2))} h</b></article>
+              <article class="card ops-kpi"><span>Équipe active</span><b>${esc(m.activeTeam || 0)}</b></article>
+              <article class="card ops-kpi"><span>Tâches ouvertes</span><b>${esc(m.taskOpen || 0)}</b></article>
+              <article class="card ops-kpi"><span>Réserves</span><b>${esc(m.openPunch || 0)}</b></article>
+            </div>
+            <article class="card">
+              <h3>${esc(out.date || "")}</h3>
+              <p><b>${esc(out.project?.status || "—")}</b> · Avancement ${esc(out.project?.progress || 0)} %</p>
+              <h4>Résumé</h4>
+              <pre class="ops-summary-text">${esc(out.summary || "")}</pre>
+            </article>
+            <div class="ops-grid-2">
+              <article class="card">
+                <h4>Points positifs</h4>
+                <ul>${(out.highlights || []).map((x) => `<li>${esc(x)}</li>`).join("") || "<li>Aucune activité enregistrée pour cette journée.</li>"}</ul>
+              </article>
+              <article class="card">
+                <h4>Points à surveiller</h4>
+                <ul>${(out.risks || []).map((x) => `<li>${esc(x)}</li>`).join("") || "<li>Aucun point critique détecté.</li>"}</ul>
+              </article>
+            </div>
+          </section>`,
+        );
       } else if (a === "new-task") taskForm();
       else if (a === "task-status") {
         await post("tasks", {
