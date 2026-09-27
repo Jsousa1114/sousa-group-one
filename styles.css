@@ -3468,3 +3468,21 @@ html[data-text-size="large"] { font-size: 18px; }
 .account-recovery-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px; }
 .account-recovery-grid code { padding:8px 10px; border:1px solid var(--border); border-radius:9px; background:var(--panel2); text-align:center; letter-spacing:.08em; font-size:.65rem; }
 @media (max-width:600px){ .account-recovery-grid{grid-template-columns:1fr;} }
+
+body.offline-mode .topbar::after {
+  content: "HORS LIGNE";
+  display:inline-flex;
+  align-items:center;
+  margin-left:8px;
+  padding:4px 8px;
+  border-radius:999px;
+  background:color-mix(in srgb,#e6a100 18%,transparent);
+  color:#e6a100;
+  font-size:.5rem;
+  font-weight:800;
+  letter-spacing:.06em;
+}
+body.offline-mode button[type="submit"],
+body.offline-mode .btn.primary:not([data-account-nav]) {
+  opacity:.55;
+}
