@@ -207,7 +207,7 @@
           if (core().getPage() === "messages") {
             const composer = $("messageText"),
               modalOpen = !$("modalWrap")?.classList.contains("hidden");
-            if (!composer?.value && !modalOpen)
+            if (!composer?.value && !modalOpen && core().canRefreshMessages())
               await core().refresh();
             await Promise.all([
               refreshPresence(true).then(decoratePresence),
