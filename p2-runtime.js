@@ -102,10 +102,15 @@
 
   function scheduleRefresh() {
     clearTimeout(refreshTimer);
-    refreshTimer = setTimeout(() => {
-      if (!document.hidden && navigator.onLine && core()?.refresh)
-        core().refresh().catch(() => {});
-    }, 300);
+    const run = () => {
+      if (document.hidden || !navigator.onLine || !core()?.refresh) return;
+      if (core()?.canRefreshMessages && !core().canRefreshMessages()) {
+        refreshTimer = setTimeout(run, 1000);
+        return;
+      }
+      core().refresh().catch(() => {});
+    };
+    refreshTimer = setTimeout(run, 500);
   }
   function startRealtime() {
     if (source || !window.EventSource || !navigator.onLine) return;
