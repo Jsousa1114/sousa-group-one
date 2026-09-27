@@ -846,9 +846,7 @@ function routes(db) {
             await db.query("SELECT revision FROM app_state WHERE id=1")
           ).rows[0].revision,
         });
-      const row = (
-          await db.query("SELECT data,revision FROM app_state WHERE id=1")
-        ).rows[0],
+      const row = await loadState(db),
         visible = D.viewState(row.data, req.user);
       let messages = [];
       if (p.threadId) {
