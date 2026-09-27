@@ -757,6 +757,90 @@ function routes(db) {
     res.json({ ok: true });
   }));
 
+  router.post("/planning/bulk", wrap(async (req, res) => {
+    await requirePermission(db, req.user, "time.edit", "Modification du planning non autorisée.");
+    const body = req.body || {},
+      employeeIds = [...new Set((Array.isArray(body.employeeIds) ? body.employeeIds : []).map(String).filter(Boolean))],
+      toolIds = [...new Set((Array.isArray(body.toolIds) ? body.toolIds : []).map(String).filter(Boolean))];
+    if (!employeeIds.length || employeeIds.length > 30) D.fail("Sélectionnez entre 1 et 30 salariés.");
+    const result = await withStateWrite(db, req.user.id, "planning.bulk", async (client, data, user) => {
+      let working = data;
+      const project = (working.projects || []).find((x) => same(x.id, body.projectId) && !x.deletedAt);
+      if (!project || !D.canProject(working, user, project)) D.fail("Chantier inaccessible.", 403);
+      const date = D.iso(String(body.date || "")),
+        start = String(body.start || ""),
+        end = String(body.end || ""),
+        vehicleId = body.vehicleId ? String(body.vehicleId) : "";
+      if (!/^\d{2}:\d{2}$/.test(start) || !/^\d{2}:\d{2}$/.test(end) || end <= start)
+        D.fail("Horaires invalides.");
+      const employees = employeeIds.map((id) => (working.employees || []).find((x) => same(x.id, id) && !x.deletedAt));
+      if (employees.some((x) => !x || !D.employeeInCompany(x, project.company)))
+        D.fail("Un salarié sélectionné ne correspond pas à l’entreprise du chantier.");
+      const vehicle = vehicleId ? (working.vehicles || []).find((x) => same(x.id, vehicleId) && !x.deletedAt) : null;
+      if (vehicleId && (!vehicle || String(vehicle.company) !== String(project.company)))
+        D.fail("Véhicule incompatible avec ce chantier.");
+      const tools = toolIds.map((id) => (working.tools || []).find((x) => same(x.id, id) && !x.deletedAt));
+      if (tools.some((x) => !x || String(x.company) !== String(project.company)))
+        D.fail("Un équipement sélectionné ne correspond pas à l’entreprise du chantier.");
+      const overlaps = (row) => !row.deletedAt && row.date === date && row.start < end && row.end > start;
+      if (vehicleId && (working.planning || []).some((row) => overlaps(row) && same(row.vehicleId, vehicleId)))
+        D.fail("Ce véhicule est déjà affecté sur ce créneau.", 409);
+      for (const toolId of toolIds)
+        if ((working.planning || []).some((row) => overlaps(row) && (row.toolIds || []).some((id) => same(id, toolId))))
+          D.fail("Un équipement est déjà affecté sur ce créneau.", 409);
+      const created = [];
+      for (const employee of employees) {
+        const out = D.applyCommand(
+          working,
+          user,
+          {
+            action: "create",
+            collection: "planning",
+            payload: {
+              employeeId: employee.id,
+              project: project.id,
+              date,
+              start,
+              end,
+              location: body.location || project.address || "",
+            },
+          },
+          new Date().toISOString(),
+        );
+        working = out.data;
+        out.result.vehicleId = vehicleId;
+        out.result.toolIds = toolIds;
+        created.push(out.result);
+      }
+      const users = employeeIds.length
+        ? (await client.query(
+            "SELECT id,employee_id FROM users WHERE employee_id=ANY($1::text[]) AND disabled=false AND deleted_at IS NULL",
+            [employeeIds],
+          )).rows
+        : [];
+      for (const account of users) {
+        await client.query(
+          `INSERT INTO user_notifications(id,user_id,category,title,body,url,entity_type,entity_id)
+           VALUES($1,$2,'planning','Planning modifié',$3,$4,'project',$5)`,
+          [
+            randomUUID(),
+            account.id,
+            `${date} · ${start}–${end} · ${project.title}`,
+            "/?page=planning",
+            project.id,
+          ],
+        );
+      }
+      return {
+        data: working,
+        changed: ["planning", "projects"],
+        result: { created, projectId: project.id },
+        audit: { projectId: project.id, employeeIds, vehicleId, toolIds, date, start, end },
+      };
+    });
+    res.json({ ok: true, ...result.result });
+  }));
+
   router.post("/planning/:id/move", wrap(async (req, res) => {
     await requirePermission(db, req.user, "time.edit", "Modification du planning non autorisée.");
     const result = await withStateWrite(db, req.user.id, "planning.move", async (_client, data, user) => {
