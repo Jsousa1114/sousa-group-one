@@ -101,7 +101,7 @@ const menus = {
   documents: ["Documents", Object.keys(roles)],
   messages: ["Messages", Object.keys(roles)],
   reports: ["Rapports", [...core, "hr", "accounting", "manager"]],
-  pilotage: ["Pilotage", [...core, "hr", "manager", "accounting", "employee"]],
+  pilotage: ["Pilotage", [...core, "hr", "manager", "accounting", "employee", "client"]],
   users: ["Comptes", ["admin"]],
   audit: ["Journal", hr],
   settings: ["Mon compte", Object.keys(roles)],
@@ -299,8 +299,29 @@ async function mutate(
   endpoint = "state/command",
   form,
 ) {
+  const requestId = form?.dataset.requestId || crypto.randomUUID();
+  if (form) form.dataset.requestId = requestId;
   if (!navigator.onLine) {
-    notice("Connexion requise pour enregistrer des modifications.");
+    const queued = await window.SGOP2?.queueMutation?.({
+      action,
+      payload,
+      collection,
+      endpoint,
+      revision,
+      requestId,
+    });
+    if (queued) {
+      if (form) delete form.dataset.requestId;
+      closeModal(true);
+      notice(
+        "Mode hors ligne : modification enregistrée localement et synchronisée automatiquement au retour du réseau.",
+      );
+      toast("Modification mise en attente de synchronisation.");
+      return { queued: true, requestId };
+    }
+    notice(
+      "Connexion requise pour cette modification. Les heures et documents compatibles peuvent être enregistrés hors ligne.",
+    );
     return;
   }
   if (pending) return;
@@ -309,8 +330,6 @@ async function mutate(
   buttons.forEach((b) => (b.disabled = true));
   let saved = false,
     savedResult;
-  const requestId = form?.dataset.requestId || crypto.randomUUID();
-  if (form) form.dataset.requestId = requestId;
   try {
     const out = await api(endpoint, {
       action,
@@ -3642,7 +3661,9 @@ window.addEventListener("offline", () => {
 window.addEventListener("online", () => {
   document.body.classList.remove("offline-mode");
   notice("");
-  refresh().catch(() => {});
+  if (window.SGOP2?.flushQueue)
+    window.SGOP2.flushQueue().catch(() => refresh().catch(() => {}));
+  else refresh().catch(() => {});
 });
 window.SGOChatCore = {
   api,
