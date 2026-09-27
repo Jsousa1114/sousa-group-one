@@ -46,7 +46,11 @@ async function seed(){
 }
 async function contextFor(kind){
   const preset=kind==="client"
-    ? (engine==="webkit"?devices["iPhone 15"]:devices["Pixel 7"])
+    ? (engine==="webkit"
+        ? devices["iPhone 15"]
+        : engine==="chromium"
+          ? devices["Pixel 7"]
+          : {viewport:{width:390,height:844},userAgent:"Mozilla/5.0 Mobile Firefox P2"})
     : {viewport:{width:1440,height:900}};
   return browser.newContext({...preset});
 }
