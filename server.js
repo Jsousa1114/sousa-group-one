@@ -78,6 +78,7 @@ function createApp(db = pool) {
     "messaging-suite.js",
     "account-center.js",
     "passkeys.js",
+    "p3-center.js",
     "operations-center.js",
     "styles.css",
     "manifest.webmanifest",
