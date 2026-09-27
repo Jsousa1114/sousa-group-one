@@ -5,7 +5,6 @@
   "description": "Backend API + static hosting for Sousa Group One",
   "main": "server.js",
   "scripts": {
-    "prestart": "npm test",
     "start": "node server.js",
     "test": "node --test test/*.test.js"
   },
