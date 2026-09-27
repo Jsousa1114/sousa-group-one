@@ -9,6 +9,7 @@ const { database } = require("./database"),
 process.env.JWT_SECRET = "test-only-secret-with-at-least-32-characters";
 delete process.env.AI_API_URL;
 delete process.env.AI_API_KEY;
+delete process.env.OPENAI_API_KEY;
 delete process.env.AI_TRANSCRIBE_API_URL;
 
 let db, server, url, admin, client;
