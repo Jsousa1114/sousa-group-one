@@ -75,6 +75,7 @@ function createApp(db = pool) {
   });
   for (const file of [
     "index.html",
+    "core-ui.js",
     "app.js",
     "finance.js",
     "messaging-crypto.js",
