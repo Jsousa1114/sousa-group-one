@@ -1,5 +1,6 @@
 "use strict";
 const jwt = require("jsonwebtoken");
+const { loadState } = require("./db");
 function sessionCookieToken(req) {
   const raw = String(req.headers.cookie || "");
   for (const part of raw.split(";")) {
@@ -50,8 +51,7 @@ function auth(db) {
           [claims.sid],
         );
       }
-      const data = (await db.query("SELECT data FROM app_state WHERE id=1"))
-        .rows[0]?.data;
+      const { data } = await loadState(db);
       req.user = require("./domain").effectiveUser(data || {}, u);
       try {
         const row = (
