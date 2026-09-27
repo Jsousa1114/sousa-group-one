@@ -1975,7 +1975,19 @@ test("P3 AI routes are permissioned and make no external call when unconfigured"
     assert.equal(status.data.configured, false);
     assert.equal(typeof status.data.model, "string");
 
-    const denied = await call("ai/status", client);
+    const aiClientEmail = "ai-client-" + Date.now() + "@test.invalid",
+      aiClientHash = await bcrypt.hash("AI-Client-Password-2026", 4);
+    await db.query(
+      "INSERT INTO users(email,password_hash,role,name,avatar,company,client_id) VALUES($1,$2,'client','AI Client','','home','c1')",
+      [aiClientEmail, aiClientHash],
+    );
+    const aiClientLogin = await call("auth/login", null, {
+        email: aiClientEmail,
+        password: "AI-Client-Password-2026",
+      }),
+      aiClient = aiClientLogin.data.token;
+    assert.equal(aiClientLogin.status, 200);
+    const denied = await call("ai/status", aiClient);
     assert.equal(denied.status, 403);
 
     const assistant = await call("ai/assistant", admin, {
