@@ -2031,12 +2031,25 @@ test("operations platform covers tasks CRM stock work orders analytics insights 
   assert.equal((await call("operations/analytics", viewer)).status, 403);
 
   const hrStateRow = (await db.query("SELECT data FROM app_state WHERE id=1")).rows[0];
-  const hrState = hrStateRow.data,
-    hrEmployee = hrState.employees.find((e) => e.id === "e1");
-  hrEmployee.weeklyHours = 40;
+  const hrState = hrStateRow.data;
+  hrState.employees.push({
+    id: "hr-summary-e1",
+    name: "HR Summary Employee",
+    job: "Technicien",
+    company: "home",
+    email: "hr-summary@test.invalid",
+    phone: "",
+    salary: 5000,
+    salaryPeriod: "monthly",
+    activity: 100,
+    weeklyHours: 40,
+    vacation: 20,
+    entry: "2026-01-01",
+    status: "Actif",
+  });
   hrState.time.push({
     id: "hr-night-sunday-test",
-    employeeId: "e1",
+    employeeId: "hr-summary-e1",
     company: "home",
     project: "p1",
     date: "2026-08-30",
@@ -2055,7 +2068,9 @@ test("operations platform covers tasks CRM stock work orders analytics insights 
     admin,
   );
   assert.equal(hrSummary.status, 200, JSON.stringify(hrSummary.data));
-  const hrRow = hrSummary.data.rows.find((x) => x.employeeId === "e1");
+  const hrRow = hrSummary.data.rows.find(
+    (x) => x.employeeId === "hr-summary-e1",
+  );
   assert.ok(hrRow);
   assert.equal(hrRow.weeklyHours, 40);
   assert.equal(hrRow.validatedHours, 2);
