@@ -5,6 +5,7 @@ const dns = require("node:dns").promises;
 const net = require("node:net");
 const D = require("./domain");
 const { auth } = require("./auth-middleware");
+const { buildEncryptedBackup } = require("./backup");
 
 const wrap = (fn) => (req, res, next) =>
   Promise.resolve(fn(req, res, next)).catch(next);
@@ -2097,6 +2098,27 @@ function routes(db) {
   );
 
   r.get(
+    "/backup/export",
+    wrap(async (req, res) => {
+      if (!D.privileged(req.user, D.STAFF))
+        D.fail("Accès direction requis.", 403);
+      if (!process.env.BACKUP_ENCRYPTION_KEY)
+        D.fail("Clé de sauvegarde non configurée.", 503);
+      const encrypted = await buildEncryptedBackup(db),
+        stamp = new Date().toISOString().replace(/[:.]/g, "-");
+      res
+        .status(200)
+        .set("Cache-Control", "no-store")
+        .set("Content-Type", "application/octet-stream")
+        .set(
+          "Content-Disposition",
+          `attachment; filename="sousa-group-one-backup-${stamp}.sgo-backup"`,
+        )
+        .send(encrypted);
+    }),
+  );
+
+  r.get(
     "/integrations",
     wrap(async (req, res) => {
       if (!D.privileged(req.user, D.STAFF)) D.fail("Accès direction requis.", 403);
@@ -2114,6 +2136,9 @@ function routes(db) {
             process.env.OBJECT_STORAGE_ENDPOINT &&
             process.env.OBJECT_STORAGE_BUCKET
           ),
+          backupExportConfigured: !!process.env.BACKUP_ENCRYPTION_KEY,
+          databasePersistent: process.env.DATABASE_PERSISTENT === "true",
+          databaseExpiresAt: process.env.DATABASE_EXPIRES_AT || null,
           errorMonitoringConfigured: !!process.env.ERROR_MONITOR_DSN,
         },
       });
