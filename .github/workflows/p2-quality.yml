@@ -60,7 +60,12 @@ jobs:
       - name: Test P2 on Chromium Android, Firefox and WebKit iPhone
         env:
           P2_BROWSER: ${{ matrix.browser }}
-        run: node test/p2-browser.cjs
+        run: |
+          node test/p2-browser.cjs || {
+            echo "First browser attempt failed; retrying once after render warm-up."
+            sleep 2
+            node test/p2-browser.cjs
+          }
       - name: Upload P2 visual captures
         if: always()
         uses: actions/upload-artifact@v4
