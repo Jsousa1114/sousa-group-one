@@ -232,7 +232,9 @@
         <section class="card account-section">
           <div class="account-section-head"><div><span class="account-icon">🕘</span><h3>Activité de mon compte</h3></div></div>
           <div class="account-timeline">
-            ${summary.activity.length ? summary.activity.map((a) => `<div><i></i><span><b>${esc(a.action)}</b><small>${esc(fmt(a.created_at))}</small></span></div>`).join("") : '<p class="muted">Aucune activité récente.</p>'}
+            ${summary.recentUsage?.lastTime ? `<div><i></i><span><b>Dernier pointage · ${esc(summary.recentUsage.lastTime.hours)} h</b><small>${esc(dateOnly(summary.recentUsage.lastTime.date))}${summary.recentUsage.lastTime.project ? " · " + esc(core().getState().projects?.find((p) => String(p.id) === String(summary.recentUsage.lastTime.project))?.title || summary.recentUsage.lastTime.project) : ""}</small></span></div>` : ""}
+            ${summary.recentUsage?.lastMessage ? `<div><i></i><span><b>${summary.recentUsage.lastMessage.sentByMe ? "Dernier message envoyé" : "Dernier message reçu"}</b><small>${esc(fmt(summary.recentUsage.lastMessage.createdAt))}</small></span></div>` : ""}
+            ${summary.activity.length ? summary.activity.map((a) => `<div><i></i><span><b>${esc(a.action)}</b><small>${esc(fmt(a.created_at))}</small></span></div>`).join("") : (!summary.recentUsage?.lastTime && !summary.recentUsage?.lastMessage ? '<p class="muted">Aucune activité récente.</p>' : "")}
           </div>
         </section>
 
