@@ -1,0 +1,35 @@
+name: Production health
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-health
+  cancel-in-progress: true
+
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Check web service and PostgreSQL health
+        shell: bash
+        run: |
+          set -euo pipefail
+          body="$(mktemp)"
+          code="$(curl --silent --show-error --location             --connect-timeout 10 --max-time 25             --output "$body" --write-out "%{http_code}"             https://sousa-group-one.onrender.com/healthz || true)"
+          cat "$body" || true
+          if [ "$code" != "200" ]; then
+            echo "Production health check returned HTTP $code" >&2
+            exit 1
+          fi
+          node -e '
+            const fs=require("fs");
+            const body=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));
+            if(body.ok!==true) process.exit(1);
+          ' "$body"
