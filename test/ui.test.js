@@ -1301,3 +1301,21 @@ test("switching conversation while microphone permission is pending releases the
     h.close();
   }
 });
+
+
+test("conversation search and focus survive background refresh", async () => {
+  const h = await setup();
+  try {
+    click(h, '[data-page="messages"]');
+    const d = h.w.document, search = d.getElementById("conversationSearch");
+    search.value = "inexistant";
+    search.focus();
+    search.setSelectionRange(2, 4);
+    search.dispatchEvent(new h.w.Event("input", { bubbles: true }));
+    await h.w.SGOChatCore.refresh();
+    assert.equal(d.getElementById("conversationSearch").value, "inexistant");
+    assert.equal(d.activeElement, d.getElementById("conversationSearch"));
+    assert.equal(d.activeElement.selectionStart, 2);
+    assert.equal(d.querySelector(".chat-contact").hidden, true);
+  } finally { h.close(); }
+});

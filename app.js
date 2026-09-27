@@ -345,6 +345,10 @@ function render() {
   if (!state || !profile) return;
   rememberChatText();
   const previousKey = $("messageForm")?.dataset.conversation;
+  const oldSearch = $("conversationSearch");
+  const searchValue = oldSearch?.value || "";
+  const searchFocused = document.activeElement === oldSearch;
+  const searchSelection = oldSearch ? [oldSearch.selectionStart, oldSearch.selectionEnd] : null;
   const oldComposer = $("messageText");
   const focused = document.activeElement === oldComposer;
   const selection = oldComposer
@@ -406,6 +410,13 @@ function render() {
       sameConversation && !atBottom
         ? scrollTop
         : $("messageThread").scrollHeight;
+    const search = $("conversationSearch");
+    search.value = searchValue;
+    filterChatConversations(searchValue);
+    if (searchFocused) {
+      search.focus();
+      search.setSelectionRange(...searchSelection);
+    }
     hydrateChatAttachments();
     queueMicrotask(() => markChatRead());
   }
@@ -3466,15 +3477,16 @@ document.addEventListener("submit", async (e) => {
     else notice(err.message);
   }
 });
+function filterChatConversations(value) {
+  const q = value.trim().toLowerCase();
+  document.querySelectorAll(".chat-contact").forEach((row) => {
+    row.hidden = !!q && !row.dataset.search.includes(q);
+  });
+}
 document.addEventListener("input", (e) => {
   if (e.target.closest(".invoice-line") || e.target.name === "depositPercent")
     financeTotals();
-  if (e.target.id === "conversationSearch") {
-    const q = e.target.value.trim().toLowerCase();
-    document.querySelectorAll(".chat-contact").forEach((row) => {
-      row.hidden = !!q && !row.dataset.search.includes(q);
-    });
-  }
+  if (e.target.id === "conversationSearch") filterChatConversations(e.target.value);
 });
 document.addEventListener("change", async (e) => {
   if (e.target.id === "chatFile") {
