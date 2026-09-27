@@ -56,7 +56,13 @@ async function setup(
     ];
   }
   configure(d);
-  const h = { dom, w, requests: [], failure: null };
+  const h = {
+    dom,
+    w,
+    requests: [],
+    failure: null,
+    contacts: [{ id: 2, name: "Contact", role: "manager" }],
+  };
   w.sessionStorage.setItem("sgo_session", "unit-test-session");
   w.setInterval = () => 0;
   w.confirm = () => true;
@@ -70,6 +76,12 @@ async function setup(
           json: async () => ({ error: "Test save failure" }),
         };
       const body = JSON.parse(opts.body);
+      if (url.endsWith("/messages")) {
+        return {
+          ok: true,
+          json: async () => ({ ok: true, result: { id: "sent-test" } }),
+        };
+      }
       if (url.endsWith("/command")) {
         const out = D.applyCommand(d, profile, body);
         d = out.data;
@@ -91,7 +103,7 @@ async function setup(
         data: D.viewState(d, profile),
         revision,
         profile,
-        contacts: [{ id: 2, name: "Contact", role: "manager" }],
+        contacts: h.contacts,
       }),
     };
   };
@@ -1065,11 +1077,17 @@ test("WhatsApp-style messaging renders conversations, bubbles and search", async
     const d = h.w.document;
     assert.ok(d.querySelector(".whatsapp-chat"));
     assert.equal(d.querySelectorAll(".chat-contact").length, 1);
-    assert.equal(d.querySelector(".chat-header-person strong").textContent, "Contact");
+    assert.equal(
+      d.querySelector(".chat-header-person strong").textContent,
+      "Contact",
+    );
     assert.equal(d.querySelectorAll(".chat-thread .message").length, 2);
     assert.equal(d.querySelectorAll(".chat-thread .message.mine").length, 1);
     assert.equal(d.querySelectorAll(".chat-thread .message.theirs").length, 1);
-    assert.match(d.querySelector(".chat-preview").textContent, /Vous : Bien reçu/);
+    assert.match(
+      d.querySelector(".chat-preview").textContent,
+      /Vous : Bien reçu/,
+    );
     const search = d.getElementById("conversationSearch");
     search.value = "zzz";
     search.dispatchEvent(new h.w.Event("input", { bubbles: true }));
@@ -1082,4 +1100,222 @@ test("WhatsApp-style messaging renders conversations, bubbles and search", async
   } finally {
     h.close();
   }
+});
+
+test("message drafts survive reply, attachment, refresh and conversation changes", async () => {
+  const h = await setup("admin", false, false, (d) => {
+    d.messages = [
+      {
+        id: "reply-target",
+        senderId: 2,
+        recipientId: 1,
+        sender: "Contact",
+        text: "Bonjour",
+        createdAt: new Date().toISOString(),
+      },
+    ];
+  });
+  try {
+    h.contacts.push({ id: 3, name: "Second contact", role: "manager" });
+    h.contacts[0].photo = "data:image/png;base64,cGhvdG8=";
+    await h.w.SGOChatCore.refresh();
+    click(h, '[data-page="messages"]');
+    const d = h.w.document;
+    assert.ok(d.querySelector("#msg-reply-target img.message-avatar"));
+    d.getElementById("messageText").value = "Brouillon privé <bonjour>";
+    d.getElementById("messageText").focus();
+    d.getElementById("messageText").setSelectionRange(4, 8);
+    click(h, '[data-action="chat-reply"]');
+    assert.equal(
+      d.getElementById("messageText").value,
+      "Brouillon privé <bonjour>",
+    );
+    h.w.SGOChatCore.setAttachmentDraft({ name: "document.pdf", kind: "file" });
+    await h.w.SGOChatCore.refresh();
+    assert.equal(
+      d.getElementById("messageText").value,
+      "Brouillon privé <bonjour>",
+    );
+    click(h, '[data-action="chat-select"][data-id="direct:3"]');
+    assert.equal(d.getElementById("messageText").value, "");
+    assert.equal(h.w.SGOChatCore.getAttachmentDraft(), null);
+    d.getElementById("messageText").value = "Autre brouillon";
+    h.w.SGOChatCore.selectConversation("direct:2");
+    assert.equal(
+      d.getElementById("messageText").value,
+      "Brouillon privé <bonjour>",
+    );
+    h.w.SGOChatCore.selectConversation("direct:3");
+    assert.equal(d.getElementById("messageText").value, "Autre brouillon");
+    await flush();
+  } finally {
+    h.close();
+  }
+});
+
+test("async encryption cannot double-send or clear another conversation draft", async () => {
+  const h = await setup();
+  try {
+    h.contacts.push({ id: 3, name: "Second contact", role: "manager" });
+    await h.w.SGOChatCore.refresh();
+    click(h, '[data-page="messages"]');
+    const d = h.w.document;
+    d.getElementById("messageText").value = "À envoyer";
+    let release,
+      preparations = 0;
+    h.w.SGOMessagingSuite = {
+      prepareOutgoingMessage: async (payload) => {
+        preparations++;
+        await new Promise((resolve) => {
+          release = resolve;
+        });
+        return payload;
+      },
+    };
+    const send = () =>
+      d
+        .getElementById("messageForm")
+        .dispatchEvent(
+          new h.w.Event("submit", { bubbles: true, cancelable: true }),
+        );
+    send();
+    send();
+    assert.equal(preparations, 1);
+    assert.equal(d.getElementById("messageText").readOnly, true);
+    h.w.SGOChatCore.selectConversation("direct:3");
+    // A previously saved draft in another conversation must survive the first send.
+    d.getElementById("messageText").value =
+      "Brouillon de la seconde conversation";
+    release();
+    await flush();
+    await flush();
+    const sends = h.requests.filter(
+      (r) => r.url.endsWith("/messages") && r.opts.method === "POST",
+    );
+    assert.equal(sends.length, 1);
+    assert.equal(JSON.parse(sends[0].opts.body).payload.recipientId, "2");
+    assert.equal(
+      d.getElementById("messageText").value,
+      "Brouillon de la seconde conversation",
+    );
+    h.w.SGOChatCore.selectConversation("direct:2");
+    assert.equal(d.getElementById("messageText").value, "");
+    assert.equal(d.getElementById("messageText").readOnly, false);
+  } finally {
+    h.close();
+  }
+});
+
+test("failed message send retains text and allows retry", async () => {
+  const h = await setup();
+  try {
+    click(h, '[data-page="messages"]');
+    const d = h.w.document;
+    d.getElementById("messageText").value = "À conserver";
+    h.failure = 500;
+    const send = () =>
+      d
+        .getElementById("messageForm")
+        .dispatchEvent(
+          new h.w.Event("submit", { bubbles: true, cancelable: true }),
+        );
+    send();
+    await flush();
+    await flush();
+    assert.equal(d.getElementById("messageText").value, "À conserver");
+    assert.equal(d.getElementById("messageText").readOnly, false);
+    assert.match(
+      d.getElementById("formError").textContent,
+      /Test save failure/,
+    );
+    h.failure = null;
+    send();
+    await flush();
+    await flush();
+    assert.equal(d.getElementById("messageText").value, "");
+  } finally {
+    h.close();
+  }
+});
+
+test("late attachment reads never move files to a different conversation", async () => {
+  const h = await setup();
+  try {
+    h.contacts.push({ id: 3, name: "Second contact", role: "manager" });
+    await h.w.SGOChatCore.refresh();
+    click(h, '[data-page="messages"]');
+    const d = h.w.document;
+    let reader;
+    h.w.FileReader = class {
+      constructor() {
+        reader = this;
+      }
+      readAsDataURL() {}
+    };
+    const input = d.getElementById("chatFile");
+    Object.defineProperty(input, "files", {
+      value: [new h.w.File(["test"], "test.txt", { type: "text/plain" })],
+    });
+    input.dispatchEvent(new h.w.Event("change", { bubbles: true }));
+    h.w.SGOChatCore.selectConversation("direct:3");
+    reader.result = "data:text/plain;base64,dGVzdA==";
+    reader.onload();
+    await flush();
+    assert.equal(h.w.SGOChatCore.getAttachmentDraft(), null);
+    assert.equal(h.w.SGOChatCore.getConversation().key, "direct:3");
+  } finally {
+    h.close();
+  }
+});
+
+test("switching conversation while microphone permission is pending releases the stream", async () => {
+  const h = await setup();
+  try {
+    h.contacts.push({ id: 3, name: "Second contact", role: "manager" });
+    await h.w.SGOChatCore.refresh();
+    click(h, '[data-page="messages"]');
+    let release,
+      stopped = 0,
+      recorders = 0;
+    Object.defineProperty(h.w.navigator, "mediaDevices", {
+      value: {
+        getUserMedia: () =>
+          new Promise((resolve) => {
+            release = resolve;
+          }),
+      },
+    });
+    h.w.MediaRecorder = class {
+      constructor() {
+        recorders++;
+      }
+    };
+    click(h, '[data-action="chat-voice"]');
+    h.w.SGOChatCore.selectConversation("direct:3");
+    release({ getTracks: () => [{ stop: () => stopped++ }] });
+    await flush();
+    assert.equal(stopped, 1);
+    assert.equal(recorders, 0);
+    assert.equal(h.w.SGOChatCore.getAttachmentDraft(), null);
+  } finally {
+    h.close();
+  }
+});
+
+
+test("conversation search and focus survive background refresh", async () => {
+  const h = await setup();
+  try {
+    click(h, '[data-page="messages"]');
+    const d = h.w.document, search = d.getElementById("conversationSearch");
+    search.value = "inexistant";
+    search.focus();
+    search.setSelectionRange(2, 4);
+    search.dispatchEvent(new h.w.Event("input", { bubbles: true }));
+    await h.w.SGOChatCore.refresh();
+    assert.equal(d.getElementById("conversationSearch").value, "inexistant");
+    assert.equal(d.activeElement, d.getElementById("conversationSearch"));
+    assert.equal(d.activeElement.selectionStart, 2);
+    assert.equal(d.querySelector(".chat-contact").hidden, true);
+  } finally { h.close(); }
 });

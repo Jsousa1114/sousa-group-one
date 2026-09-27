@@ -44,6 +44,8 @@ let token = sessionStorage.getItem("sgo_session"),
   chatReplyToId = "",
   chatAttachmentDraft = null,
   chatRecorder = null,
+  chatSending = false,
+  chatMediaGeneration = 0,
   chatRecordingDiscard = false,
   activeCall = null,
   incomingCall = null,
@@ -187,7 +189,33 @@ async function api(path, body) {
   }
   return data;
 }
+const chatTextDrafts = new Map();
+const chatKey = () =>
+  selectedThreadId
+    ? "thread:" + selectedThreadId
+    : "direct:" + selectedRecipient;
+function rememberChatText() {
+  const form = $("messageForm"),
+    composer = $("messageText");
+  if (form && composer)
+    chatTextDrafts.set(form.dataset.conversation, composer.value);
+}
+function selectChat(key) {
+  if (key !== chatKey()) {
+    cancelChatRecording();
+    chatReplyToId = "";
+    chatAttachmentDraft = null;
+  }
+  if (key.startsWith("thread:")) {
+    selectedThreadId = key.slice(7);
+    selectedRecipient = "";
+  } else {
+    selectedRecipient = key.replace(/^direct:/, "");
+    selectedThreadId = "";
+  }
+}
 function cancelChatRecording() {
+  chatMediaGeneration++;
   if (!chatRecorder) return;
   chatRecordingDiscard = true;
   try {
@@ -198,6 +226,7 @@ function cancelChatRecording() {
   } catch {}
 }
 function clearSession() {
+  chatTextDrafts.clear();
   cancelChatRecording();
   if (activeCall || incomingCall) endCurrentCall(false).catch(() => {});
   document.body.dataset.brand = "group";
@@ -242,7 +271,8 @@ async function mutate(
   pending = true;
   const buttons = [...document.querySelectorAll("button[type=submit]")];
   buttons.forEach((b) => (b.disabled = true));
-  let saved = false;
+  let saved = false,
+    savedResult;
   const requestId = form?.dataset.requestId || crypto.randomUUID();
   if (form) form.dataset.requestId = requestId;
   try {
@@ -254,6 +284,7 @@ async function mutate(
       requestId,
     });
     saved = true;
+    savedResult = out.result;
     if (form) delete form.dataset.requestId;
     await refresh();
     closeModal(true);
@@ -271,6 +302,7 @@ async function mutate(
       notice(
         "Modification enregistrée, mais actualisation impossible. Cliquez sur Actualiser.",
       );
+      return savedResult;
     } else {
       const target = $("formError");
       if (target) target.textContent = e.message;
@@ -311,6 +343,22 @@ $("companyFilter").onchange = (e) => {
 };
 function render() {
   if (!state || !profile) return;
+  rememberChatText();
+  const previousKey = $("messageForm")?.dataset.conversation;
+  const oldSearch = $("conversationSearch");
+  const searchValue = oldSearch?.value || "";
+  const searchFocused = document.activeElement === oldSearch;
+  const searchSelection = oldSearch ? [oldSearch.selectionStart, oldSearch.selectionEnd] : null;
+  const oldComposer = $("messageText");
+  const focused = document.activeElement === oldComposer;
+  const selection = oldComposer
+    ? [oldComposer.selectionStart, oldComposer.selectionEnd]
+    : null;
+  const oldThread = $("messageThread");
+  const scrollTop = oldThread?.scrollTop || 0;
+  const atBottom =
+    !oldThread ||
+    oldThread.scrollHeight - scrollTop - oldThread.clientHeight < 60;
   if (company && !state.companies.some((c) => c.id === company)) company = "";
   const activeCompanyId = company || profile.company;
   document.body.dataset.brand = SousaFinance.companyBrand(
@@ -351,7 +399,24 @@ function render() {
     loadUsers();
   if (page === "audit") loadAudit();
   if (page === "messages" && $("messageThread")) {
-    $("messageThread").scrollTop = $("messageThread").scrollHeight;
+    const sameConversation = previousKey === chatKey();
+    $("messageText").value = chatTextDrafts.get(chatKey()) || "";
+    $("messageText").readOnly = chatSending;
+    if (sameConversation && focused) {
+      $("messageText").focus();
+      $("messageText").setSelectionRange(...selection);
+    }
+    $("messageThread").scrollTop =
+      sameConversation && !atBottom
+        ? scrollTop
+        : $("messageThread").scrollHeight;
+    const search = $("conversationSearch");
+    search.value = searchValue;
+    filterChatConversations(searchValue);
+    if (searchFocused) {
+      search.focus();
+      search.setSelectionRange(...searchSelection);
+    }
     hydrateChatAttachments();
     queueMicrotask(() => markChatRead());
   }
@@ -1225,70 +1290,78 @@ async function rejectIncomingCall() {
   if (!incomingCall) return;
   stopRingtone();
   const id = incomingCall.id;
-  await api("state/calls/" + encodeURIComponent(id) + "/reject", {}).catch(() => {});
+  await api("state/calls/" + encodeURIComponent(id) + "/reject", {}).catch(
+    () => {},
+  );
   finishCallLocal("Appel refusé.");
 }
 async function pollCallState() {
   if (!token || callPollBusy) return;
   callPollBusy = true;
   try {
-  if (activeCall?.id) {
-    try {
-      const out = await api("state/calls/" + encodeURIComponent(activeCall.id)),
-        call = out.call;
-      if (["ended", "rejected", "missed"].includes(call.status)) {
-        finishCallLocal(
-          call.status === "rejected"
-            ? "Appel refusé."
-            : call.status === "missed"
-              ? "Pas de réponse."
-              : "Appel terminé.",
+    if (activeCall?.id) {
+      try {
+        const out = await api(
+            "state/calls/" + encodeURIComponent(activeCall.id),
+          ),
+          call = out.call;
+        if (["ended", "rejected", "missed"].includes(call.status)) {
+          finishCallLocal(
+            call.status === "rejected"
+              ? "Appel refusé."
+              : call.status === "missed"
+                ? "Pas de réponse."
+                : "Appel terminé.",
+          );
+          return;
+        }
+        if (
+          same(call.callerId, profile.id) &&
+          call.status === "accepted" &&
+          call.answer &&
+          !activeCall.answerApplied
+        ) {
+          await activeCall.peer.setRemoteDescription(call.answer);
+          activeCall.answerApplied = true;
+          await flushRemoteIceCandidates();
+          setCallUi(call.calleeName, "Connexion…", "active");
+        }
+        await receiveRemoteCandidates();
+      } catch (e) {
+        if (e.status === 404) finishCallLocal();
+      }
+      return;
+    }
+    if (incomingCall) {
+      try {
+        const out = await api(
+          "state/calls/" + encodeURIComponent(incomingCall.id),
         );
-        return;
+        if (out.call.status !== "ringing") finishCallLocal("Appel annulé.");
+      } catch {
+        finishCallLocal("Appel annulé.");
       }
-      if (
-        same(call.callerId, profile.id) &&
-        call.status === "accepted" &&
-        call.answer &&
-        !activeCall.answerApplied
-      ) {
-        await activeCall.peer.setRemoteDescription(call.answer);
-        activeCall.answerApplied = true;
-        await flushRemoteIceCandidates();
-        setCallUi(call.calleeName, "Connexion…", "active");
-      }
-      await receiveRemoteCandidates();
-    } catch (e) {
-      if (e.status === 404) finishCallLocal();
+      return;
     }
-    return;
-  }
-  if (incomingCall) {
     try {
-      const out = await api("state/calls/" + encodeURIComponent(incomingCall.id));
-      if (out.call.status !== "ringing") finishCallLocal("Appel annulé.");
-    } catch {
-      finishCallLocal("Appel annulé.");
-    }
-    return;
-  }
-  try {
-    const out = await api("state/calls/pending"),
-      call = out.call;
-    if (
-      call &&
-      call.status === "ringing" &&
-      same(call.calleeId, profile.id)
-    ) {
-      incomingCall = call;
-      setCallUi(
-        call.callerName,
-        call.callType === "video" ? "Appel vidéo entrant" : "Appel audio entrant",
-        "incoming",
-      );
-      beepRingtone();
-    }
-  } catch {}
+      const out = await api("state/calls/pending"),
+        call = out.call;
+      if (
+        call &&
+        call.status === "ringing" &&
+        same(call.calleeId, profile.id)
+      ) {
+        incomingCall = call;
+        setCallUi(
+          call.callerName,
+          call.callType === "video"
+            ? "Appel vidéo entrant"
+            : "Appel audio entrant",
+          "incoming",
+        );
+        beepRingtone();
+      }
+    } catch {}
   } finally {
     callPollBusy = false;
   }
@@ -1363,18 +1436,22 @@ function messagesView() {
     list
       .map((m) => {
         const currentDay = chatDate(m.createdAt),
-          separator = currentDay !== day
-            ? `<div class="chat-day"><span>${esc(currentDay)}</span></div>`
-            : "";
+          separator =
+            currentDay !== day
+              ? `<div class="chat-day"><span>${esc(currentDay)}</span></div>`
+              : "";
         day = currentDay;
         const mine = same(m.senderId, profile.id),
-          readCount = (m.readBy || []).filter((id) => !same(id, m.senderId)).length,
+          readCount = (m.readBy || []).filter(
+            (id) => !same(id, m.senderId),
+          ).length,
           check = mine
             ? `<span class="message-check ${readCount ? "read" : ""}" title="${readCount ? "Lu" : "Envoyé"}">${readCount ? "✓✓" : "✓"}</span>`
             : "";
         return (
           separator +
           `<div class="message ${mine ? "mine" : "theirs"} ${m.system ? "system-message" : ""} ${m.encryption ? "encrypted-message" : ""} ${m.deletedForAll ? "deleted-message" : ""}" id="msg-${esc(m.id)}" data-message-id="${esc(m.id)}">
+            ${m.system ? "" : chatAvatar(mine ? profile : contacts.find((c) => same(c.id, m.senderId)) || { name: m.sender || "Participant" }, "message-avatar")}
             ${m.forwardedFromId ? '<span class="message-forwarded">↪ Transféré</span>' : ""}
             ${m.system ? '<span class="message-system-label">⚙ Sousa Group One</span>' : ""}
             ${active.kind === "thread" && !mine && !m.system ? `<b class="message-sender">${esc(m.sender || "Participant")}</b>` : ""}
@@ -1424,7 +1501,7 @@ function messagesView() {
         <span>${chatAttachmentDraft ? esc((chatAttachmentDraft.kind === "audio" ? "🎤 " : "📎 ") + chatAttachmentDraft.name) : ""}</span>
         <button type="button" data-action="chat-cancel-attachment" aria-label="Retirer la pièce jointe">✕</button>
       </div>
-      <form id="messageForm" class="chat-composer">
+      <form id="messageForm" class="chat-composer" data-conversation="${esc(active.key)}">
         <input id="chatFile" type="file" hidden accept="image/jpeg,image/png,image/webp,image/gif,application/pdf,text/plain,audio/*">
         <button type="button" class="chat-tool" data-action="chat-file" aria-label="Ajouter une photo ou un fichier" title="Pièce jointe">📎</button>
         <button type="button" class="chat-tool" data-action="chat-voice" aria-label="Enregistrer un message vocal" title="Message vocal">🎤</button>
@@ -2647,16 +2724,19 @@ document.addEventListener("click", async (e) => {
   const a = b.dataset.action,
     id = b.dataset.id;
   try {
+    if (
+      chatSending &&
+      [
+        "chat-reply",
+        "chat-cancel-reply",
+        "chat-file",
+        "chat-voice",
+        "chat-cancel-attachment",
+      ].includes(a)
+    )
+      return;
     if (a === "chat-select") {
-      if (String(id).startsWith("thread:")) {
-        selectedThreadId = String(id).slice(7);
-        selectedRecipient = "";
-      } else {
-        selectedRecipient = String(id).replace(/^direct:/, "");
-        selectedThreadId = "";
-      }
-      chatReplyToId = "";
-      chatAttachmentDraft = null;
+      selectChat(String(id));
       mobileChatOpen = true;
       render();
     } else if (a === "chat-back") {
@@ -2722,15 +2802,20 @@ document.addEventListener("click", async (e) => {
       setTimeout(() => URL.revokeObjectURL(url), 60000);
     } else if (a === "chat-voice") {
       if (activeCall || incomingCall)
-        throw new Error("Terminez l’appel avant d’enregistrer un message vocal.");
+        throw new Error(
+          "Terminez l’appel avant d’enregistrer un message vocal.",
+        );
       if (chatRecorder?.state === "recording") {
         chatRecorder.stop();
         b.textContent = "🎤";
         b.classList.remove("recording");
       } else {
         if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder)
-          throw new Error("Enregistrement vocal non disponible sur cet appareil.");
+          throw new Error(
+            "Enregistrement vocal non disponible sur cet appareil.",
+          );
         let stream;
+        const mediaGeneration = chatMediaGeneration;
         try {
           stream = await navigator.mediaDevices.getUserMedia({
             audio: {
@@ -2739,6 +2824,10 @@ document.addEventListener("click", async (e) => {
               autoGainControl: true,
             },
           });
+          if (mediaGeneration !== chatMediaGeneration) {
+            stream.getTracks().forEach((track) => track.stop());
+            return;
+          }
           const preferred = [
               "audio/webm;codecs=opus",
               "audio/mp4",
@@ -2762,12 +2851,19 @@ document.addEventListener("click", async (e) => {
           };
           recorder.onstop = async () => {
             stream.getTracks().forEach((track) => track.stop());
-            if (chatRecordingDiscard) {
-              chatRecordingDiscard = false;
-              chatRecorder = null;
+            if (
+              chatRecordingDiscard ||
+              mediaGeneration !== chatMediaGeneration
+            ) {
+              if (chatRecorder === recorder) {
+                chatRecordingDiscard = false;
+                chatRecorder = null;
+              }
               return;
             }
-            const mime = (recorder.mimeType || preferred || "audio/webm").split(";")[0],
+            const mime = (recorder.mimeType || preferred || "audio/webm").split(
+                ";",
+              )[0],
               blob = new Blob(chunks, { type: mime });
             chatRecorder = null;
             if (!blob.size) {
@@ -2794,6 +2890,7 @@ document.addEventListener("click", async (e) => {
                   : mime.includes("mpeg")
                     ? "mp3"
                     : "webm";
+            if (mediaGeneration !== chatMediaGeneration) return;
             chatAttachmentDraft = {
               name: "message-vocal-" + Date.now() + "." + extension,
               mime,
@@ -3201,28 +3298,49 @@ document.addEventListener("submit", async (e) => {
   const k = f.dataset.kind;
   try {
     if (formId === "messageForm") {
-      let payload = {
-        text: p.text || "",
-        recipientId: selectedThreadId ? null : selectedRecipient,
-        threadId: selectedThreadId || "",
-        replyToId: chatReplyToId || "",
-        attachment: chatAttachmentDraft,
-      };
-      if (window.SGOMessagingSuite?.prepareOutgoingMessage)
-        payload = await window.SGOMessagingSuite.prepareOutgoingMessage(payload);
-      const result = await mutate(
-        "message",
-        payload,
-        null,
-        "state/messages",
-        f,
-      );
-      if (result) {
-        chatReplyToId = "";
-        chatAttachmentDraft = null;
-        render();
+      if (chatSending) return;
+      chatSending = true;
+      $("messageText").readOnly = true;
+      f.querySelector("button[type=submit]").disabled = true;
+      const sendingKey = f.dataset.conversation;
+      try {
+        let payload = {
+          text: p.text || "",
+          recipientId: selectedThreadId ? null : selectedRecipient,
+          threadId: selectedThreadId || "",
+          replyToId: chatReplyToId || "",
+          attachment: chatAttachmentDraft,
+        };
+        if (window.SGOMessagingSuite?.prepareOutgoingMessage)
+          payload =
+            await window.SGOMessagingSuite.prepareOutgoingMessage(payload);
+        const result = await mutate(
+          "message",
+          payload,
+          null,
+          "state/messages",
+          f,
+        );
+        if (result) {
+          // Refresh during mutate preserved the sent draft; clear only that conversation.
+          chatTextDrafts.delete(sendingKey);
+          if ($("messageForm")?.dataset.conversation === sendingKey)
+            $("messageText").value = "";
+          if (chatKey() === sendingKey) {
+            chatReplyToId = "";
+            chatAttachmentDraft = null;
+          }
+          render();
+        }
+        return result;
+      } finally {
+        chatSending = false;
+        if ($("messageText")) $("messageText").readOnly = false;
+        const sendButton = $("messageForm")?.querySelector(
+          "button[type=submit]",
+        );
+        if (sendButton) sendButton.disabled = false;
       }
-      return result;
     }
     if (k === "message.thread") {
       p.participants = data.getAll("participants");
@@ -3359,20 +3477,22 @@ document.addEventListener("submit", async (e) => {
     else notice(err.message);
   }
 });
+function filterChatConversations(value) {
+  const q = value.trim().toLowerCase();
+  document.querySelectorAll(".chat-contact").forEach((row) => {
+    row.hidden = !!q && !row.dataset.search.includes(q);
+  });
+}
 document.addEventListener("input", (e) => {
   if (e.target.closest(".invoice-line") || e.target.name === "depositPercent")
     financeTotals();
-  if (e.target.id === "conversationSearch") {
-    const q = e.target.value.trim().toLowerCase();
-    document.querySelectorAll(".chat-contact").forEach((row) => {
-      row.hidden = !!q && !row.dataset.search.includes(q);
-    });
-  }
+  if (e.target.id === "conversationSearch") filterChatConversations(e.target.value);
 });
 document.addEventListener("change", async (e) => {
   if (e.target.id === "chatFile") {
     const file = e.target.files?.[0];
     if (!file) return;
+    const mediaGeneration = chatMediaGeneration;
     if (file.size > 5 * 1024 * 1024) {
       notice("Pièce jointe de 5 Mo maximum.");
       e.target.value = "";
@@ -3384,11 +3504,16 @@ document.addEventListener("change", async (e) => {
       reader.onerror = reject;
       reader.readAsDataURL(file);
     });
+    if (mediaGeneration !== chatMediaGeneration) return;
     chatAttachmentDraft = {
       name: file.name,
       mime: file.type || "application/octet-stream",
       content,
-      kind: file.type.startsWith("image/") ? "image" : file.type.startsWith("audio/") ? "audio" : "file",
+      kind: file.type.startsWith("image/")
+        ? "image"
+        : file.type.startsWith("audio/")
+          ? "audio"
+          : "file",
     };
     render();
     return;
@@ -3459,6 +3584,16 @@ window.SGOChatCore = {
   getContacts: () => contacts,
   getPage: () => page,
   getRevision: () => revision,
+  canRefreshMessages: () =>
+    !pending &&
+    !chatSending &&
+    !chatRecorder &&
+    !$("messageText")?.value &&
+    ![
+      ...document.querySelectorAll(
+        "#messageThread audio, #messageThread video",
+      ),
+    ].some((media) => !media.paused),
   getConversation: () => {
     if (!profile) return null;
     if (selectedThreadId) {
@@ -3490,13 +3625,8 @@ window.SGOChatCore = {
     return null;
   },
   selectConversation: (key) => {
-    if (String(key).startsWith("thread:")) {
-      selectedThreadId = String(key).slice(7);
-      selectedRecipient = "";
-    } else if (String(key).startsWith("direct:")) {
-      selectedRecipient = String(key).slice(7);
-      selectedThreadId = "";
-    } else return;
+    if (!/^(thread|direct):/.test(String(key))) return;
+    selectChat(String(key));
     page = "messages";
     mobileChatOpen = true;
     render();
@@ -3552,6 +3682,9 @@ setInterval(() => {
   if (
     token &&
     !pending &&
+    !chatSending &&
+    !chatRecorder &&
+    (page !== "messages" || window.SGOChatCore.canRefreshMessages()) &&
     $("modalWrap").classList.contains("hidden") &&
     document.visibilityState === "visible" &&
     !$("messageText")?.value
