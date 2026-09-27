@@ -4,7 +4,7 @@ const assert = require("node:assert/strict");
 const bcrypt = require("bcryptjs");
 const { chromium } = require("playwright");
 const { database } = require("./database");
-const { migrate } = require("../db");
+const { migrate, replaceStateSnapshot } = require("../db");
 const { createApp } = require("../server");
 const { emptyState } = require("../domain");
 
@@ -31,7 +31,7 @@ async function seed() {
   d.clients = [{ id:"c1", name:"Client", company:"home" }];
   d.projects = [{ id:"p1", title:"Chantier compte", company:"home", clientId:"c1", team:["e1"], status:"En cours", progress:60 }];
   d.time = [{ id:"t1", employeeId:"e1", project:"p1", date:new Date().toISOString().slice(0,7)+"-05", hours:8 }];
-  await db.query("UPDATE app_state SET data=$1 WHERE id=1", [JSON.stringify(d)]);
+  await replaceStateSnapshot(db, d, "test-account-browser-fixture");
   server = createApp(db).listen(0, "127.0.0.1");
   await new Promise((r) => server.once("listening", r));
   base = "http://127.0.0.1:" + server.address().port;
