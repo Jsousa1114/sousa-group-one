@@ -3,6 +3,7 @@ const { Pool } = require("pg");
 const bcrypt = require("bcryptjs");
 const { createHash } = require("node:crypto");
 const { emptyState, normalize, AppError } = require("./domain");
+const { runMigrations } = require("./migration-runner");
 const MIRRORED_COLLECTIONS = [
   "companies",
   "employees",
@@ -692,6 +693,7 @@ async function migrate(db = pool) {
       ('2026-09-27-webauthn-passkeys')
       ON CONFLICT(version) DO NOTHING`,
   );
+  await runMigrations(db);
   // Disable the previously published demo credentials, even on an existing installation.
   const users = await db.query(
     "SELECT id,password_hash FROM users WHERE disabled=false",
