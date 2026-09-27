@@ -277,7 +277,8 @@
                 <b>${money(x.value)}</b>
                 <small>${esc(x.probability)} % · ${esc(x.company || "")}</small>
                 ${x.next_action ? `<p>➡ ${esc(x.next_action)}</p>` : ""}
-                <div class="form-actions">${button("Modifier", "edit-crm", `data-id="${esc(x.id)}"`)}</div>
+                ${x.email || x.phone ? `<small>${esc(x.email || "")}${x.email && x.phone ? " · " : ""}${esc(x.phone || "")}</small>` : ""}
+                <div class="form-actions">${button("Historique", "crm-history", `data-id="${esc(x.id)}" data-name="${esc(x.name)}"`)} ${button("Modifier", "edit-crm", `data-id="${esc(x.id)}"`)}</div>
               </article>`,
             )
             .join("") || '<p class="muted">Aucune opportunité.</p>'}
@@ -623,6 +624,18 @@
       `<form id="opsEntityForm" data-kind="crm" data-id="${esc(x.id || "")}">
         <label>Entreprise<select name="company" required>${companyOptions(x.company || profile().company)}</select></label>
         <label>Nom<input name="name" required maxlength="250" value="${esc(x.name || "")}"></label>
+        <div class="ops-grid-2">
+          <label>E-mail<input type="email" name="email" maxlength="255" value="${esc(x.email || "")}"></label>
+          <label>Téléphone<input name="phone" maxlength="80" value="${esc(x.phone || "")}"></label>
+        </div>
+        <div class="ops-grid-2">
+          <label>Rue<input name="street" maxlength="250" value="${esc(x.street || "")}"></label>
+          <label>NPA<input name="zip" maxlength="30" value="${esc(x.zip || "")}"></label>
+        </div>
+        <div class="ops-grid-2">
+          <label>Ville<input name="city" maxlength="120" value="${esc(x.city || "")}"></label>
+          <label>Pays<input name="country" maxlength="2" value="${esc(x.country || "CH")}"></label>
+        </div>
         <label>Étape<select name="stage">${["lead","qualified","proposal","won","lost"].map((v)=>`<option value="${v}" ${x.stage===v?"selected":""}>${statusLabel(v)}</option>`).join("")}</select></label>
         <label>Valeur CHF<input type="number" min="0" step="0.01" name="value" value="${esc(x.value || 0)}"></label>
         <label>Probabilité %<input type="number" min="0" max="100" name="probability" value="${esc(x.probability || 0)}"></label>
@@ -634,6 +647,36 @@
       </form>`,
     );
   }
+  async function crmActivityForm(id, name = "") {
+    const out = await get("crm/" + encodeURIComponent(id) + "/activities"),
+      rows = out.activities || [];
+    modal(
+      "Historique CRM · " + (name || "Opportunité"),
+      `<section class="ops-crm-history">
+        <div class="ops-simple-list">
+          ${rows.map((x) => `<div><span><b>${esc(statusLabel(x.type))} · ${esc(x.subject)}</b><small>${esc(dt(x.occurred_at))}${x.notes ? " · " + esc(x.notes) : ""}</small></span></div>`).join("") || '<p class="muted">Aucune action commerciale enregistrée.</p>'}
+        </div>
+        <hr>
+        <form id="opsEntityForm" data-kind="crm-activity" data-id="${esc(id)}">
+          <label>Type<select name="type">
+            <option value="call">Appel</option>
+            <option value="email">E-mail</option>
+            <option value="meeting">Rendez-vous</option>
+            <option value="followup">Relance</option>
+            <option value="note">Note</option>
+          </select></label>
+          <label>Objet<input name="subject" required maxlength="250" placeholder="Ex. Appel de découverte"></label>
+          <label>Date / heure<input type="datetime-local" name="occurredAt" value="${new Date().toISOString().slice(0,16)}"></label>
+          <label>Compte rendu<textarea name="notes" maxlength="5000"></textarea></label>
+          <label>Prochaine action<input name="nextAction" maxlength="1000" placeholder="Ex. Relancer avec le devis"></label>
+          <label>Date de relance<input type="datetime-local" name="nextActionAt"></label>
+          <p id="formError" class="error"></p>
+          <div class="form-actions"><button class="btn primary" type="submit">Ajouter à l’historique</button></div>
+        </form>
+      </section>`,
+    );
+  }
+
   function stockForm() {
     modal(
       "Mouvement de stock",
@@ -707,6 +750,8 @@
         p.value = Number(p.value || 0);
         p.probability = Number(p.probability || 0);
         await post("crm", p);
+      } else if (kind === "crm-activity") {
+        await post("crm/" + encodeURIComponent(id) + "/activities", p);
       } else if (kind === "stock") {
         p.quantity = Number(p.quantity);
         await post("inventory/movement", p);
@@ -847,6 +892,7 @@
         await renderTasks();
       } else if (a === "new-crm") await crmForm();
       else if (a === "edit-crm") await crmForm(b.dataset.id);
+      else if (a === "crm-history") await crmActivityForm(b.dataset.id, b.dataset.name || "");
       else if (a === "new-stock") stockForm();
       else if (a === "new-workorder") await workOrderForm();
       else if (a === "edit-workorder") await workOrderForm(b.dataset.id);
