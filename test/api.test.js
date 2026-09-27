@@ -1964,3 +1964,73 @@ test("operations platform covers tasks CRM stock work orders analytics insights 
   assert.equal(search.status, 200);
   assert.ok(search.data.results.some((x) => x.type === "project" && x.id === "p1"));
 });
+
+
+test("P3 AI routes are permissioned and make no external call when unconfigured", async () => {
+  const previous = process.env.OPENAI_API_KEY;
+  delete process.env.OPENAI_API_KEY;
+  try {
+    const status = await call("ai/status", admin);
+    assert.equal(status.status, 200);
+    assert.equal(status.data.configured, false);
+    assert.equal(typeof status.data.model, "string");
+
+    const denied = await call("ai/status", client);
+    assert.equal(denied.status, 403);
+
+    const assistant = await call("ai/assistant", admin, {
+      prompt: "Résume les chantiers visibles.",
+    });
+    assert.equal(assistant.status, 503);
+    assert.match(assistant.data.error, /non configuré/i);
+
+    const employeeStatus = await call("ai/status", employee);
+    assert.equal(employeeStatus.status, 200);
+    assert.equal(employeeStatus.data.configured, false);
+  } finally {
+    if (previous === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previous;
+  }
+});
+
+test("P3 AI helper extracts text and deterministic insights without external AI", () => {
+  const { extractText, deterministicInsights } = require("../ai-routes");
+  assert.equal(
+    extractText({
+      output: [
+        { content: [{ type: "output_text", text: "Bonjour" }] },
+        { content: [{ type: "output_text", text: "Sousa" }] },
+      ],
+    }),
+    "Bonjour\nSousa",
+  );
+  const insights = deterministicInsights({
+    invoices: [
+      {
+        id: "late-1",
+        amount: 1000,
+        paid: 100,
+        due: "2020-01-01",
+      },
+    ],
+    projects: [
+      {
+        id: "p-risk",
+        title: "Chantier risque",
+        budget: 1000,
+        cost: 900,
+      },
+    ],
+    inventory: [
+      {
+        id: "stock-1",
+        name: "Câble",
+        stock: 1,
+        min: 5,
+      },
+    ],
+  });
+  assert.ok(insights.some((x) => x.type === "invoice_overdue"));
+  assert.ok(insights.some((x) => x.type === "project_budget_warning"));
+  assert.ok(insights.some((x) => x.type === "low_stock"));
+});
