@@ -7,6 +7,7 @@ const { auth, profile } = require("./auth-middleware"),
   { mutate } = require("./db");
 const D = require("./domain");
 const { notifyUsers } = require("./messaging-routes");
+const storage = require("./storage");
 function routes(db) {
   const r = express.Router();
   r.use(auth(db));
@@ -376,9 +377,7 @@ function routes(db) {
               D.fail("Cette entreprise possède encore des comptes liés.");
           }
           if (req.body.payload?.kind === "documents")
-            await c.query("DELETE FROM file_contents WHERE id=$1", [
-              String(result.id),
-            ]);
+            await storage.removeFile(c, String(result.id));
         }
         Object.assign(d, data);
         const event = commandProjectAndText(
@@ -748,11 +747,7 @@ function routes(db) {
         ).rows[0];
       if (override?.deleted_for_all) D.fail("Pièce jointe supprimée.", 404);
       if (!msg?.attachment?.fileId) D.fail("Pièce jointe introuvable.", 404);
-      const file = (
-        await db.query("SELECT content FROM file_contents WHERE id=$1", [
-          msg.attachment.fileId,
-        ])
-      ).rows[0];
+      const file = await storage.loadFile(db, msg.attachment.fileId);
       if (!file) D.fail("Pièce jointe introuvable.", 404);
       res
         .set({
@@ -1242,10 +1237,7 @@ function routes(db) {
             }
             m.mime = mime;
             m.size = bytes.length;
-            await c.query(
-              "INSERT INTO file_contents(id,content) VALUES($1,$2)",
-              [m.id, bytes],
-            );
+            await storage.saveFile(c, m.id, bytes, mime);
             d.documents.push(m);
             return { id: m.id };
           },
@@ -1505,9 +1497,7 @@ function routes(db) {
       const d = D.normalize(row.data),
         m = D.ref(d, "documents", req.params.id);
       if (!D.canDocument(d, req.user, m)) D.fail("Accès refusé.", 403);
-      const file = (
-        await db.query("SELECT content FROM file_contents WHERE id=$1", [m.id])
-      ).rows[0];
+      const file = await storage.loadFile(db, m.id);
       if (!file) D.fail("Fichier introuvable.", 404);
       res
         .set({
