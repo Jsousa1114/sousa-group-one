@@ -2082,6 +2082,75 @@ test("operations platform covers tasks CRM stock work orders analytics insights 
     403,
   );
 
+  const lifecycleInit = await call("operations/hr/lifecycle/init", admin, {
+    employeeId: "e1",
+    phase: "onboarding",
+  });
+  assert.equal(lifecycleInit.status, 200, JSON.stringify(lifecycleInit.data));
+  assert.ok(lifecycleInit.data.created >= 8);
+
+  const lifecycle = await call(
+    "operations/hr/lifecycle?employeeId=e1&phase=onboarding",
+    admin,
+  );
+  assert.equal(lifecycle.status, 200, JSON.stringify(lifecycle.data));
+  assert.ok(lifecycle.data.items.length >= 8);
+  assert.equal(lifecycle.data.progress.completed, 0);
+  const firstLifecycleId = lifecycle.data.items[0].id;
+
+  const lifecycleComplete = await call(
+    "operations/hr/lifecycle/item",
+    admin,
+    {
+      id: firstLifecycleId,
+      completed: true,
+    },
+  );
+  assert.equal(
+    lifecycleComplete.status,
+    200,
+    JSON.stringify(lifecycleComplete.data),
+  );
+  const lifecycleAfterComplete = await call(
+    "operations/hr/lifecycle?employeeId=e1&phase=onboarding",
+    admin,
+  );
+  assert.equal(lifecycleAfterComplete.data.progress.completed, 1);
+
+  const lifecycleAdd = await call("operations/hr/lifecycle/add", admin, {
+    employeeId: "e1",
+    phase: "onboarding",
+    label: "Étape RH personnalisée",
+    required: false,
+    dueDate: "2026-10-15",
+  });
+  assert.equal(lifecycleAdd.status, 200, JSON.stringify(lifecycleAdd.data));
+  const lifecycleWithCustom = await call(
+    "operations/hr/lifecycle?employeeId=e1&phase=onboarding",
+    admin,
+  );
+  assert.ok(
+    lifecycleWithCustom.data.items.some(
+      (x) => x.id === lifecycleAdd.data.id && x.label === "Étape RH personnalisée",
+    ),
+  );
+
+  const lifecycleDelete = await call(
+    "operations/hr/lifecycle/delete",
+    admin,
+    { id: lifecycleAdd.data.id },
+  );
+  assert.equal(lifecycleDelete.status, 200);
+  assert.equal(
+    (
+      await call(
+        "operations/hr/lifecycle?employeeId=e1&phase=onboarding",
+        viewer,
+      )
+    ).status,
+    403,
+  );
+
   const complianceStateRow = (
     await db.query("SELECT data FROM app_state WHERE id=1")
   ).rows[0];
