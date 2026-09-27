@@ -171,6 +171,7 @@
               </div>`).join("") : '<p class="muted">Aucune session enregistrée.</p>'}
           </div>
           <button class="btn" data-account-action="logout-others">Déconnecter tous les autres appareils</button>
+          <div id="passkeyPanel" class="account-passkeys"></div>
         </section>
 
         <section class="card account-section">
@@ -258,6 +259,7 @@
     const e2ee = document.getElementById("accountE2eeMode");
     if (e2ee) e2ee.value = localStorage.getItem("sgo_e2ee_mode") || "auto";
     applyPrefs(p);
+    window.SGOPasskeys?.render?.();
   }
   function applyPrefs(prefs) {
     window.SGOAccountPreferences = prefs;
