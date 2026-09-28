@@ -37,6 +37,8 @@ let token = sessionStorage.getItem("sgo_session") ? "cookie" : null,
   state = null,
   profile = null,
   contacts = [],
+  messageStats = {},
+  chatHistoryCache = new Map(),
   revision = 0,
   page = "dashboard",
   company = "",
@@ -248,6 +250,8 @@ function clearSession() {
   state = null;
   profile = null;
   contacts = [];
+  messageStats = {};
+  chatHistoryCache.clear();
   userAccounts = [];
   selectedRecipient = "";
   selectedThreadId = "";
@@ -270,6 +274,16 @@ async function refresh(renderNow = true) {
   try {
     const out = await api("state");
     state = out.data;
+    messageStats = out.messageStats || {};
+    if (chatHistoryCache.size && state?.messages) {
+      const known = new Set(state.messages.map((message) => String(message.id)));
+      for (const cached of chatHistoryCache.values())
+        for (const message of cached || [])
+          if (!known.has(String(message.id))) {
+            state.messages.push(message);
+            known.add(String(message.id));
+          }
+    }
     revision = out.revision;
     profile = out.profile;
     contacts = out.contacts;
@@ -280,6 +294,7 @@ async function refresh(renderNow = true) {
         revision,
         profile,
         contacts,
+        messageStats,
         savedAt: new Date().toISOString(),
       }),
     );
@@ -294,6 +309,7 @@ async function refresh(renderNow = true) {
         revision = cached.revision || 0;
         profile = cached.profile;
         contacts = cached.contacts || [];
+        messageStats = cached.messageStats || {};
         document.body.classList.add("offline-mode");
         notice(
           "Mode hors ligne : dernière copie locale affichée. Les modifications sont désactivées jusqu’au retour du réseau.",
@@ -442,9 +458,10 @@ function render() {
     .map(([k, [label]]) => {
       const unread =
         k === "messages"
-          ? state.messages.filter(
-              (m) => !same(m.senderId, profile.id) && !chatRead(m),
-            ).length
+          ? Object.values(messageStats || {}).reduce(
+              (total, stat) => total + Number(stat?.unread || 0),
+              0,
+            )
           : 0;
       return `<button class="nav-item ${page === k ? "active" : ""}" data-page="${k}">${esc(label)}${unread ? ` <span class="nav-unread">${unread > 99 ? "99+" : unread}</span>` : ""}</button>`;
     })
@@ -970,6 +987,7 @@ async function markChatRead() {
       requestId: crypto.randomUUID(),
     });
     if (Number.isSafeInteger(out.revision)) revision = out.revision;
+    if (messageStats[chatKey()]) messageStats[chatKey()].unread = 0;
     for (const m of state.messages) {
       const belongs = payload.threadId
         ? same(m.threadId, payload.threadId)
@@ -1482,7 +1500,7 @@ function messagesView() {
         subtitle: roles[contact.role] || contact.role,
         messages,
         last: messages.at(-1),
-        unread: messages.filter((m) => !same(m.senderId, profile.id) && !chatRead(m)).length,
+        unread: messageStats["direct:" + contact.id]?.unread ?? messages.filter((m) => !same(m.senderId, profile.id) && !chatRead(m)).length,
       };
     }),
     threadConversations = threads.map((thread) => {
@@ -1499,7 +1517,7 @@ function messagesView() {
           : "Groupe · " + (thread.participants || []).length + " participants",
         messages,
         last: messages.at(-1),
-        unread: messages.filter((m) => !same(m.senderId, profile.id) && !chatRead(m)).length,
+        unread: messageStats["thread:" + thread.id]?.unread ?? messages.filter((m) => !same(m.senderId, profile.id) && !chatRead(m)).length,
       };
     }),
     conversations = [...directConversations, ...threadConversations].sort(
@@ -1523,7 +1541,8 @@ function messagesView() {
   const fullList = active.messages,
     messageLimit = chatMessageLimits.get(active.key) || 120,
     list = fullList.slice(-messageLimit),
-    hiddenMessageCount = Math.max(0, fullList.length - list.length);
+    serverTotal = Number(messageStats[active.key]?.total ?? fullList.length),
+    hiddenMessageCount = Math.max(0, serverTotal - list.length);
   let day = "";
   const bubbles =
     list
@@ -1598,7 +1617,7 @@ function messagesView() {
         <button type="button" data-action="chat-cancel-attachment" aria-label="Retirer la pièce jointe">✕</button>
       </div>
       <form id="messageForm" class="chat-composer" data-conversation="${esc(active.key)}">
-        <input id="chatFile" type="file" hidden accept="image/jpeg,image/png,image/webp,image/gif,application/pdf,text/plain,audio/*">
+        <input id="chatFile" type="file" hidden accept="image/jpeg,image/png,image/webp,image/gif,video/*,application/pdf,text/plain,audio/*">
         <button type="button" class="chat-tool" data-action="chat-file" aria-label="Ajouter une photo ou un fichier" title="Pièce jointe">📎</button>
         <button type="button" class="chat-tool" data-action="chat-voice" aria-label="Enregistrer un message vocal" title="Message vocal">🎤</button>
         <div class="chat-compose-field"><textarea id="messageText" name="text" rows="1" maxlength="5000" placeholder="Écrire un message" aria-label="Écrire un message"></textarea><p id="formError" class="error" role="alert"></p></div>
@@ -2857,8 +2876,32 @@ document.addEventListener("click", async (e) => {
     } else if (a === "chat-load-older") {
       const key = chatKey(),
         current = chatMessageLimits.get(key) || 120,
-        anchorId = id;
-      chatMessageLimits.set(key, current + 100);
+        anchorId = id,
+        out = await api(
+          "messaging/history?key=" +
+            encodeURIComponent(key) +
+            "&beforeId=" +
+            encodeURIComponent(anchorId) +
+            "&limit=100",
+        );
+      const known = new Set((state.messages || []).map((message) => String(message.id)));
+      const added = [];
+      for (const message of out.messages || [])
+        if (!known.has(String(message.id))) {
+          state.messages.push(message);
+          added.push(message);
+          known.add(String(message.id));
+        }
+      const cached = chatHistoryCache.get(key) || [],
+        cachedIds = new Set(cached.map((message) => String(message.id)));
+      for (const message of added)
+        if (!cachedIds.has(String(message.id))) cached.push(message);
+      chatHistoryCache.set(key, cached);
+      messageStats[key] = {
+        ...(messageStats[key] || {}),
+        total: Number(out.total || messageStats[key]?.total || state.messages.length),
+      };
+      chatMessageLimits.set(key, current + Math.max(added.length, 100));
       render();
       requestAnimationFrame(() =>
         document.getElementById("msg-" + anchorId)?.scrollIntoView({ block: "start" }),
