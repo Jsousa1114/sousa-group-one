@@ -7,6 +7,16 @@
   const esc = (v) => core()?.esc?.(v) ?? String(v ?? "");
   const api = (path, body) => core().api("p2/" + path, body);
   const ops = (path, body) => core().api("operations/" + path, body);
+  const proApi = async (path, body) => {
+    const response = await core().authFetch("/api/pro/" + path, {
+      method: body === undefined ? "GET" : "POST",
+      headers: body === undefined ? {} : { "Content-Type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || "Action impossible.");
+    return data;
+  };
   const money = (v) => new Intl.NumberFormat("fr-CH",{style:"currency",currency:"CHF"}).format(Number(v)||0);
   const date = (v) => v ? new Date(v).toLocaleString("fr-CH",{timeZone:"Europe/Zurich"}) : "—";
   const direction = () => ["admin","direction"].includes(profile().role) || (profile().permission_grants||[]).some(x=>["admin","direction"].includes(x));
@@ -108,20 +118,36 @@
   }
   async function renderClient() {
     const id=profile().client_id;
-    const [history,appointments,status]=await Promise.all([api("client/"+encodeURIComponent(id)+"/history"),api("appointments"),api("status")]);
-    const h=history;
+    const [history,appointments]=await Promise.all([api("client/"+encodeURIComponent(id)+"/history"),api("appointments")]);
+    const h=history, upcoming=(appointments.appointments||[]).filter(x=>["requested","confirmed"].includes(x.status));
+    const acceptanceByProject=new Map((h.acceptance||[]).map(x=>[String(x.project_id),x]));
+    const photosByProject=(projectId)=>(h.photos||[]).filter(x=>String(x.project_id)===String(projectId));
+    const docsByProject=(projectId)=>(h.documents||[]).filter(x=>String(x.project||x.projectId||"")===String(projectId));
+    const nextAppointment=(projectId)=>upcoming.find(x=>String(x.project_id||"")===String(projectId));
+    const projectCards=(h.projects||[]).map(p=>{
+      const acceptance=acceptanceByProject.get(String(p.id)), photos=photosByProject(p.id), docs=docsByProject(p.id), next=nextAppointment(p.id);
+      const progress=Math.max(0,Math.min(100,Number(p.progress||0)));
+      return `<article class="card p2-client-project"><div class="p2-card-head"><div><span class="status neutral">${esc(p.status||"En cours")}</span><h3>${esc(p.title||p.id)}</h3><small>${esc(p.address||"")}</small></div><b>${progress}%</b></div><div style="height:8px;background:rgba(127,127,127,.2);border-radius:9px;overflow:hidden;margin:10px 0"><i style="display:block;height:100%;width:${progress}%;background:currentColor"></i></div><div class="p2-actions"><span>${photos.length} photo(s)</span><span>${docs.length} document(s)</span>${next?`<span>RDV ${date(next.starts_at)}</span>`:""}${acceptance?`<a class="btn secondary" href="/api/pro/project/${encodeURIComponent(p.id)}/acceptance.pdf">PV de réception</a>`:(String(p.status||"").toLowerCase().includes("termin")?button("Signer la réception","client-acceptance",`data-project="${esc(p.id)}" data-title="${esc(p.title||p.id)}"`,"primary"):"")}</div></article>`;
+    }).join("");
+    const outstanding=(h.invoices||[]).reduce((sum,x)=>sum+Math.max(0,Number(x.amount||0)-Number(x.paid||0)),0);
     host.innerHTML=`
       <div class="p2-kpis">
         <article><b>${(h.projects||[]).length}</b><span>Chantiers</span></article>
         <article><b>${(h.quotes||[]).length}</b><span>Devis</span></article>
-        <article><b>${(h.invoices||[]).length}</b><span>Factures</span></article>
-        <article><b>${(appointments.appointments||[]).filter(x=>["requested","confirmed"].includes(x.status)).length}</b><span>Rendez-vous à venir</span></article>
+        <article><b>${money(outstanding)}</b><span>Factures ouvertes</span></article>
+        <article><b>${upcoming.length}</b><span>Rendez-vous à venir</span></article>
       </div>
-      ${card("Portail client avancé",`<p>Historique consolidé des chantiers, devis, factures, paiements, maintenance, messages et rendez-vous.</p><div class="p2-actions">${button("Demander un rendez-vous","appointment-new","", "primary")}<a class="btn secondary" href="/api/p2/calendar.ics">Planning .ics</a></div>`)}
-      ${card("Rendez-vous",`<div class="p2-list">${(appointments.appointments||[]).map(x=>`<div><span><b>${esc(x.title)}</b><small>${date(x.starts_at)} · ${esc(x.status)}</small></span></div>`).join("")||"<p>Aucun rendez-vous.</p>"}</div>`)}
-      ${card("Derniers éléments",`<div class="p2-list">${[...(h.projects||[]).map(x=>({t:"Chantier",n:x.title||x.id})),...(h.quotes||[]).map(x=>({t:"Devis",n:x.id})),...(h.invoices||[]).map(x=>({t:"Facture",n:x.id}))].slice(0,20).map(x=>`<div><span><b>${esc(x.t)}</b><small>${esc(x.n)}</small></span></div>`).join("")}</div>`)}
+      ${card("Mon espace client",`<p>Suivez vos travaux, documents, signatures, paiements et échanges depuis une seule vue.</p><div class="p2-actions">${button("Demander une intervention","intervention-request","", "primary")}${button("Messages","client-page",'data-page="messages"')}${button("Documents","client-page",'data-page="documents"')}${button("Devis","client-page",'data-page="quotes"')}${button("Factures","client-page",'data-page="invoices"')}<a class="btn secondary" href="/api/p2/calendar.ics">Planning .ics</a></div>`)}
+      ${card("Mes chantiers",`<div class="p2-list">${projectCards||"<p>Aucun chantier.</p>"}</div>`)}
+      ${card("Rendez-vous & interventions",`<div class="p2-list">${(appointments.appointments||[]).map(x=>`<div><span><b>${esc(x.title)}</b><small>${date(x.starts_at)} · ${esc(x.status)}${x.notes?` · ${esc(x.notes)}`:""}</small></span></div>`).join("")||"<p>Aucune demande ou intervention.</p>"}</div>`)}
+      <div class="p2-grid">
+        ${card("Documents & photos",`<div class="p2-list">${[...(h.documents||[]).map(x=>({t:"Document",n:x.name||x.id})),...(h.photos||[]).map(x=>({t:"Photo",n:x.note||x.album||x.id}))].slice(0,20).map(x=>`<div><span><b>${esc(x.t)}</b><small>${esc(x.n)}</small></span></div>`).join("")||"<p>Aucun document.</p>"}</div>`)}
+        ${card("Devis, factures & paiements",`<div class="p2-list">${[...(h.quotes||[]).map(x=>({t:"Devis",n:x.id,s:x.status,a:x.amount})),...(h.invoices||[]).map(x=>({t:"Facture",n:x.id,s:x.status,a:x.amount})),...(h.payments||[]).map(x=>({t:"Paiement",n:x.id||x.date,s:x.method||"",a:x.amount}))].slice(0,24).map(x=>`<div><span><b>${esc(x.t)} · ${esc(x.n)}</b><small>${esc(x.s||"")} · ${money(x.a)}</small></span></div>`).join("")||"<p>Aucun document financier.</p>"}</div>`)}
+      </div>
+      ${card("Signatures",`<div class="p2-list">${(h.workOrders||[]).map(x=>`<div><span><b>${esc(x.title)}</b><small>${x.customer_signature?`Signé par ${esc(x.customer_signature)} · ${date(x.signed_at)}`:"Signature en attente"}</small></span></div>`).join("")||"<p>Aucun bon de travail.</p>"}</div>`)}
     `;
   }
+
   async function renderCurrent() {
     if (!host) return;
     host.innerHTML='<article class="card"><p>Chargement P2…</p></article>';
@@ -150,10 +176,13 @@
     await renderCurrent();
   }
   function modal(title,html){ core().modal(title,html); }
-  function appointmentForm(){
+  function appointmentForm(options={}){
     const clients=state().clients||[], projects=state().projects||[];
     const isClient=profile().role==="client";
-    modal("Nouveau rendez-vous",`<form id="p2Form" data-kind="appointment">${isClient?"":`<label>Client<select name="clientId">${clients.map(x=>`<option value="${esc(x.id)}">${esc(x.name)}</option>`).join("")}</select></label>`}<label>Chantier (optionnel)<select name="projectId"><option value="">—</option>${projects.map(x=>`<option value="${esc(x.id)}">${esc(x.title)}</option>`).join("")}</select></label><label>Titre<input name="title" value="Rendez-vous" required></label><label>Début<input type="datetime-local" name="startsAt" required></label><label>Fin<input type="datetime-local" name="endsAt" required></label><label>Notes<textarea name="notes"></textarea></label><button class="btn primary" type="submit">Enregistrer</button></form>`);
+    modal("Nouveau rendez-vous",`<form id="p2Form" data-kind="appointment">${isClient?"":`<label>Client<select name="clientId">${clients.map(x=>`<option value="${esc(x.id)}">${esc(x.name)}</option>`).join("")}</select></label>`}<label>Chantier (optionnel)<select name="projectId"><option value="">—</option>${projects.map(x=>`<option value="${esc(x.id)}">${esc(x.title)}</option>`).join("")}</select></label><label>Titre<input name="title" value="${esc(options.title||"Rendez-vous")}" required></label><label>Début<input type="datetime-local" name="startsAt" required></label><label>Fin<input type="datetime-local" name="endsAt" required></label><label>Notes<textarea name="notes"></textarea></label><button class="btn primary" type="submit">Enregistrer</button></form>`);
+  }
+  function clientAcceptanceForm(projectId,title){
+    modal("Réception du chantier",`<form id="p2Form" data-kind="client-acceptance" data-project-id="${esc(projectId)}"><p><b>${esc(title||projectId)}</b></p><label>Nom du signataire<input name="signerName" required maxlength="200" value="${esc(profile().name||"")}"></label><label>Signature électronique<input name="signature" required maxlength="2000" value="${esc(profile().name||"")}"></label><label>Observations / réserves<textarea name="notes" maxlength="3000"></textarea></label><label><input type="checkbox" name="confirmed" required> Je confirme la réception du chantier avec les éventuelles observations ci-dessus.</label><button class="btn primary" type="submit">Signer la réception</button><p id="formError" class="error"></p></form>`);
   }
   function approvalForm(){
     const companies=(state().companies||[]).filter(x=>x.id!=="group");
@@ -181,6 +210,9 @@
       else if(a==="install"){await window.SGOP2Runtime.installApp();await renderCurrent();}
       else if(a==="calendar-sync"){const out=await api("calendar/push",{provider:b.dataset.provider});core().toast(out.count+" événement(s) synchronisé(s).");}
       else if(a==="appointment-new")appointmentForm();
+      else if(a==="intervention-request")appointmentForm({title:"Demande d’intervention"});
+      else if(a==="client-page")core().setPage(b.dataset.page);
+      else if(a==="client-acceptance")clientAcceptanceForm(b.dataset.project,b.dataset.title);
       else if(a==="approval-new")approvalForm();
       else if(a==="approval-decide"){await api("approvals/"+b.dataset.id+"/decision",{status:b.dataset.status});await renderCurrent();}
       else if(a==="appointment-decision"){await api("appointments/"+b.dataset.id+"/decision",{status:b.dataset.status});await renderCurrent();}
@@ -195,7 +227,10 @@
     const f=e.target;if(f.id!=="p2Form")return;e.preventDefault();
     const fd=new FormData(f), p=Object.fromEntries(fd);
     try{
-      if(f.dataset.kind==="appointment") await api("appointments",{...p,clientId:p.clientId||profile().client_id});
+      if(f.dataset.kind==="client-acceptance") {
+        await proApi("project/"+encodeURIComponent(f.dataset.projectId)+"/acceptance",{signerName:p.signerName,signature:p.signature,notes:p.notes});
+      }
+      else if(f.dataset.kind==="appointment") await api("appointments",{...p,clientId:p.clientId||profile().client_id});
       else if(f.dataset.kind==="approval") await api("approvals",p);
       else if(f.dataset.kind==="permission") await api("permissions",{userId:Number(p.userId),grants:fd.getAll("grants"),denials:fd.getAll("denials")});
       else if(f.dataset.kind==="api-key"){
