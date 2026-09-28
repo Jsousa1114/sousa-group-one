@@ -24,6 +24,7 @@
   const fmtDateTime = (value) => value ? new Date(value).toLocaleString("fr-CH", { timeZone: "Europe/Zurich" }) : "—";
   const privileged = () => ["admin", "direction", "hr", "manager", "accounting"].includes(profile().role);
   const direction = () => ["admin", "direction"].includes(profile().role);
+  const proCan = (key) => direction() || (cache.workspaceConfig?.permissions || []).includes(key);
   const company = () => core()?.getCompany?.() || "";
   const visible = (kind) => (state()[kind] || []).filter((x) => !x.deletedAt && (!company() || !x.company || String(x.company) === String(company())));
   const person = (id) => (state().employees || []).find((x) => String(x.id) === String(id))?.name || id || "—";
