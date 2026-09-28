@@ -949,6 +949,56 @@ function routes(db) {
       billing: row.billing || {},
       whiteLabel: row.white_label || {},
       isolation: "database-per-customer",
+      commercialReadiness: {
+        workspaceConfiguration: true,
+        customRoles: true,
+        databaseIsolation: process.env.TENANT_DATABASE_ISOLATION_CONFIRMED === "true",
+        storageIsolation:
+          require("./storage").available() &&
+          process.env.TENANT_STORAGE_ISOLATION_CONFIRMED === "true",
+        subscriptionBilling:
+          process.env.SUBSCRIPTION_BILLING_CONFIRMED === "true",
+      },
+    });
+  }));
+
+  router.get("/tenant-manifest", wrap(async (req, res) => {
+    if (!D.privileged(req.user, ["admin", "direction"])) D.fail("Accès direction requis.", 403);
+    const settings = (await db.query("SELECT * FROM pro_workspace_settings WHERE id=1")).rows[0],
+      roles = (await db.query(
+        "SELECT id,name,description,permissions,modules FROM pro_role_templates WHERE active=true ORDER BY name",
+      )).rows;
+    res.set("Cache-Control", "private, no-store").json({
+      version: 1,
+      generatedAt: new Date().toISOString(),
+      tenant: {
+        key: settings.tenant_key,
+        companyName: settings.company_name,
+        logoUrl: settings.logo_url,
+        primaryColor: settings.primary_color,
+        accentColor: settings.accent_color,
+        modules: { ...defaultModules, ...(settings.modules || {}) },
+        billing: settings.billing || {},
+        whiteLabel: settings.white_label || {},
+        roles,
+      },
+      deploymentRequirements: {
+        architecture: "database-per-customer",
+        databaseIsolationConfirmed:
+          process.env.TENANT_DATABASE_ISOLATION_CONFIRMED === "true",
+        objectStorageConfigured: require("./storage").available(),
+        storageIsolationConfirmed:
+          process.env.TENANT_STORAGE_ISOLATION_CONFIRMED === "true",
+        subscriptionBillingConfirmed:
+          process.env.SUBSCRIPTION_BILLING_CONFIRMED === "true",
+        requiredProductionControls: [
+          "Base PostgreSQL dédiée au client",
+          "Préfixe ou bucket de stockage objet dédié au client",
+          "Sauvegardes et restauration testées",
+          "Domaine et HTTPS du client",
+          "Fournisseur d'abonnement connecté avant facturation automatique",
+        ],
+      },
     });
   }));
 
