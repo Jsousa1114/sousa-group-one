@@ -94,6 +94,7 @@ function createApp(db = pool) {
     "p2-center.js",
     "pro-suite.js",
     "styles.css",
+    "visual-refresh.css",
     "p1.css",
     "p2.css",
     "pro.css",
