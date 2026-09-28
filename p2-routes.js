@@ -357,7 +357,7 @@ function routes(db) {
     const documents=(ctx.view.documents||[]).filter(x=>projectIds.has(String(x.project||x.projectId||""))).slice(-300);
     const projectIdList=[...projectIds];
     const [photoMeta,workOrders,acceptance]=projectIdList.length ? await Promise.all([
-      db.query("SELECT id,project_id,document_id,album,note,created_at FROM p1_project_photo_meta WHERE project_id=ANY($1::text[]) ORDER BY created_at DESC LIMIT 300",[projectIdList]),
+      db.query("SELECT id,project_id,document_id,album,note,created_at FROM p1_project_photo_meta WHERE project_id=ANY($1::text[]) ORDER BY created_at DESC LIMIT 300",[projectIdList]).catch(()=>({rows:[]})),
       db.query("SELECT id,project_id,title,description,status,scheduled_at,customer_signature,signed_at FROM work_orders WHERE client_id=$1 AND status<>'cancelled' ORDER BY scheduled_at DESC NULLS LAST,created_at DESC LIMIT 200",[String(client.id)]),
       db.query("SELECT project_id,signer_name,notes,signed_at FROM pro_project_acceptance WHERE project_id=ANY($1::text[]) ORDER BY signed_at DESC",[projectIdList]).catch(()=>({rows:[]})),
     ]) : [{rows:[]},{rows:[]},{rows:[]}];
