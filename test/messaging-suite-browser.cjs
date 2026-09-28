@@ -287,6 +287,14 @@ async function noOverflow(page, label) {
     await client.page.locator("#suiteSearchResults button").first().waitFor({ timeout: 8000 });
     console.log("STEP 10 search verified");
 
+    const historyProbe = await admin.page.evaluate(async () => {
+      const response = await fetch("/api/messaging/history?key=" + encodeURIComponent("direct:" + clientId) + "&limit=20", { credentials: "same-origin" });
+      return { status: response.status, body: await response.json() };
+    });
+    assert.equal(historyProbe.status, 200, "paginated message history should be accessible");
+    assert.ok(Array.isArray(historyProbe.body.messages), "history endpoint must return messages");
+    assert.ok(historyProbe.body.total >= historyProbe.body.messages.length, "history total must cover page size");
+
     assert.deepEqual(admin.errors, [], "admin page errors: " + admin.errors.join("\n"));
     assert.deepEqual(client.errors, [], "client page errors: " + client.errors.join("\n"));
     console.log("COMPLETE MESSAGING BROWSER PASS: E2EE plaintext absent from server, decrypt UI, reaction/favorite, direct video camera, group call, 390/320 layout, search");
