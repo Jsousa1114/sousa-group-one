@@ -480,7 +480,32 @@
       else if(a==="delete-milestone"){if(confirm("Supprimer ce jalon ?")){await api("project/"+encodeURIComponent(projectId)+"/milestone/delete",{id:b.dataset.id});const root=document.getElementById("p1Suite")?.parentElement;if(root)await renderInto(root);}}
       else if(a==="project-history"){const out=await api("project/"+encodeURIComponent(projectId)+"/history");modal("Historique · "+out.project.title,`<div class="p1-timeline">${(out.history||[]).map(x=>`<div><i></i><span><b>${esc(x.title)}</b><small>${date(x.at)} · ${esc(x.type)}</small></span></div>`).join("")}</div>`);}
       else if(a==="quick-clock-start")await clockAction("clock.start",{project:b.dataset.project});
-      else if(a==="quick-clock-stop")await clockAction("clock.stop",{});
+      else if(a==="quick-clock-stop"){const ended=await clockAction("clock.stop",{});if(ended?.id)endOfDayForm(ended);}
+      else if(a==="field-clock-start"){
+        const project=document.getElementById("p1ClockProject")?.value;
+        if(!project)throw new Error("Choisissez un chantier.");
+        await clockAction("clock.start",{project});
+        const root=document.getElementById("p1Suite")?.parentElement;if(root)await renderInto(root);
+      }
+      else if(a==="field-clock-pause"){
+        await clockAction("clock.pause",{});
+        const root=document.getElementById("p1Suite")?.parentElement;if(root)await renderInto(root);
+      }
+      else if(a==="field-clock-resume"){
+        await clockAction("clock.resume",{});
+        const root=document.getElementById("p1Suite")?.parentElement;if(root)await renderInto(root);
+      }
+      else if(a==="field-clock-stop"){
+        const ended=await clockAction("clock.stop",{});
+        if(ended?.id) endOfDayForm(ended);
+      }
+      else if(a==="field-clock-switch"){
+        const project=document.getElementById("p1ClockSwitchProject")?.value;
+        if(!project)throw new Error("Choisissez le nouveau chantier.");
+        const switched=await clockAction("clock.switch",{project});
+        if(switched?.switched) core().toast("Pointage basculé sur le nouveau chantier.");
+        const root=document.getElementById("p1Suite")?.parentElement;if(root)await renderInto(root);
+      }
       else if(a==="scan-project")await scanCode(async(code)=>{const p=projects().find(x=>String(x.id)===String(code)||String(code).includes(String(x.id)));if(!p)throw new Error("Chantier non reconnu.");projectId=p.id;area="project";const root=document.getElementById("p1Suite")?.parentElement;if(root)await renderInto(root);});
       else if(a==="finance-template")openForm("finance-template");
       else if(a==="finance-catalog")openForm("finance-catalog");
@@ -531,6 +556,48 @@
   });
   document.addEventListener("submit",async(e)=>{
     if(e.target.id!=="p1Form")return;e.preventDefault();
+    if(e.target.dataset.kind==="field-end-day"){
+      const fd=new FormData(e.target), projectIdValue=e.target.dataset.projectId, timeId=e.target.dataset.timeId;
+      const photo=fd.get("photo");
+      if(photo?.size){
+        if(photo.size>5*1024*1024) throw new Error("La photo doit faire 5 Mo maximum.");
+        if(!["image/jpeg","image/png","image/webp"].includes(photo.type)) throw new Error("Photo JPG, PNG ou WebP uniquement.");
+      }
+      const project=projects().find(x=>String(x.id)===String(projectIdValue));
+      if(!project) throw new Error("Chantier introuvable.");
+      const localDate=new Intl.DateTimeFormat("en-CA",{timeZone:"Europe/Zurich",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date());
+      await opsApi("project/"+encodeURIComponent(projectIdValue)+"/report",{
+        reportDate:localDate,
+        summary:fd.get("summary"),
+        issues:fd.get("issues"),
+        materials:fd.get("materials"),
+        team:"Technicien : "+String(fd.get("signature")||profile().name||"")+" · Pointage : "+String(timeId||""),
+      });
+      if(photo?.size){
+        const content=await fileBase64(photo);
+        const uploaded=await core().mutate("document",{
+          company:project.company,
+          project:projectIdValue,
+          name:photo.name||("fin-journee-"+localDate+".jpg"),
+          mime:photo.type,
+          content,
+          visibility:"team",
+        },null,"state/documents");
+        if(uploaded?.id){
+          await api("project/"+encodeURIComponent(projectIdValue)+"/photo-meta",{
+            documentId:uploaded.id,
+            album:"pendant",
+            note:"Photo de fin de pointage · "+localDate,
+            annotation:[],
+          });
+        }
+      }
+      core().closeModal(true);
+      core().toast("Fin de journée enregistrée sur le chantier.");
+      await core().refresh();
+      const root=document.getElementById("p1Suite")?.parentElement;if(root)await renderInto(root);
+      return;
+    }
     if(e.target.dataset.kind==="dashboard-settings"){
       const fd=new FormData(e.target);
       await api("dashboard/preferences",{compact:fd.get("compact")==="on",showPlanning:fd.get("showPlanning")==="on",showAlerts:fd.get("showAlerts")==="on"});
