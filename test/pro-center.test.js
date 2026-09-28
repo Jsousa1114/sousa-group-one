@@ -28,6 +28,7 @@ test("professional center schema is idempotent and complete", async () => {
     for (const table of [
       "pro_trash",
       "pro_user_permissions",
+      "pro_role_templates",
       "pro_workspace_settings",
       "pro_notification_preferences",
       "pro_project_acceptance",
@@ -77,6 +78,8 @@ test("requested professional capabilities are wired", () => {
     "/trash",
     "/trash/:id/restore",
     "/permissions",
+    "/roles",
+    "/roles/:id/apply/:userId",
     "/settings",
     "/planning/:id/move",
     "/planning/bulk",
@@ -150,4 +153,37 @@ test("vehicle tracking covers fuel EV inventory and deadlines", () => {
   assert.match(ui, /Recharge électrique/);
   assert.match(ui, /Matériel embarqué/);
   assert.match(ui, /Échéances véhicules · 60 jours/);
+});
+
+
+test("field time clock supports atomic project switching and guided closeout", () => {
+  const domain = fs.readFileSync("domain.js", "utf8");
+  const ui = fs.readFileSync("p1-suite.js", "utf8");
+  const runtime = fs.readFileSync("p2-runtime.js", "utf8");
+  assert.match(domain, /clock\.switch/);
+  assert.match(ui, /Pointage terrain/);
+  assert.match(ui, /field-end-day/);
+  assert.match(ui, /Photo de fin/);
+  assert.match(runtime, /clock\.switch/);
+});
+
+test("long conversations use bounded state windows and cursor history", () => {
+  const stateRoutes = fs.readFileSync("state-routes.js", "utf8");
+  const messaging = fs.readFileSync("messaging-routes.js", "utf8");
+  const app = fs.readFileSync("app.js", "utf8");
+  assert.match(stateRoutes, /messageStats/);
+  assert.match(stateRoutes, /slice\(-120\)/);
+  assert.match(messaging, /"\/history"/);
+  assert.match(app, /messaging\/history\?key=/);
+  assert.match(app, /chatHistoryCache/);
+});
+
+test("sellable workspace supports reusable custom roles", () => {
+  const routes = fs.readFileSync("pro-routes.js", "utf8");
+  const suite = fs.readFileSync("pro-suite.js", "utf8");
+  assert.match(routes, /pro_role_templates/);
+  assert.match(routes, /role_template_id/);
+  assert.match(routes, /roles\/:id\/apply\/:userId/);
+  assert.match(suite, /Rôles personnalisés/);
+  assert.match(suite, /role-template/);
 });
