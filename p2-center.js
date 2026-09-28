@@ -137,7 +137,7 @@
         <article><b>${money(outstanding)}</b><span>Factures ouvertes</span></article>
         <article><b>${upcoming.length}</b><span>Rendez-vous à venir</span></article>
       </div>
-      ${card("Mon espace client",`<p>Suivez vos travaux, documents, signatures, paiements et échanges depuis une seule vue.</p><div class="p2-actions">${button("Demander une intervention","intervention-request","", "primary")}${button("Messages","client-page",'data-page="messages"')}${button("Documents","client-page",'data-page="documents"')}${button("Devis","client-page",'data-page="quotes"')}${button("Factures","client-page",'data-page="invoices"')}<a class="btn secondary" href="/api/p2/calendar.ics">Planning .ics</a></div>`)}
+      ${card("Portail client avancé · Mon espace client",`<p>Suivez vos travaux, documents, signatures, paiements et échanges depuis une seule vue.</p><div class="p2-actions">${button("Demander une intervention","intervention-request","", "primary")}${button("Messages","client-page",'data-page="messages"')}${button("Documents","client-page",'data-page="documents"')}${button("Devis","client-page",'data-page="quotes"')}${button("Factures","client-page",'data-page="invoices"')}<a class="btn secondary" href="/api/p2/calendar.ics">Planning .ics</a></div>`)}
       ${card("Mes chantiers",`<div class="p2-list">${projectCards||"<p>Aucun chantier.</p>"}</div>`)}
       ${card("Rendez-vous & interventions",`<div class="p2-list">${(appointments.appointments||[]).map(x=>`<div><span><b>${esc(x.title)}</b><small>${date(x.starts_at)} · ${esc(x.status)}${x.notes?` · ${esc(x.notes)}`:""}</small></span></div>`).join("")||"<p>Aucune demande ou intervention.</p>"}</div>`)}
       <div class="p2-grid">
