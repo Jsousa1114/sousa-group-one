@@ -149,6 +149,10 @@
         <article><span>Impayés</span><b>${money(finance.outstanding)}</b></article>
         <article><span>Heures productives</span><b>${Number(finance.productiveHours || 0).toFixed(2)} h</b></article>
       </div>` : ""}
+      ${finance?.byCompany?.length ? `<div class="pro-grid-2">
+        ${card("Rentabilité par entreprise", simpleRows(finance.byCompany, (x) => `<button type="button" data-pro-action="company-profit" data-company="${esc(x.company)}"><span><b>${esc((state().companies || []).find((c) => String(c.id) === String(x.company))?.name || x.company)}</b><small>CA ${money(x.revenue)} · coût ${money(Math.max(Number(x.expenses || 0), Number(x.projectCost || 0)))} · impayés ${money(x.outstanding)}</small></span><strong>${money(x.margin)}</strong></button>`))}
+        ${card("Rentabilité par chantier", simpleRows((finance.byProject || []).slice(0, 12), (x) => `<button type="button" data-pro-action="project-central" data-id="${esc(x.id)}"><span><b>${esc(x.title || x.id)}</b><small>${esc(x.id)} · CA ${money(x.revenue)} · coût ${money(x.cost)} · ${Number(x.productiveHours || 0).toFixed(1)} h</small></span><strong>${money(x.margin)}</strong></button>`))}
+      </div>` : ""}
       <div class="pro-grid-2">
         ${card("Chantiers en retard", `<div class="pro-list">${(out.lists?.overdueProjects || []).map((x) => `<button type="button" data-pro-action="project-central" data-id="${esc(x.id)}"><span><b>${esc(x.title)}</b><small>${esc(x.id)} · prévu ${fmtDate(x.end)}</small></span><strong>Ouvrir</strong></button>`).join("") || empty("Aucun chantier en retard.")}</div>`)}
         ${card("Factures échues", `<div class="pro-list">${(out.lists?.overdueInvoices || []).map((x) => `<button type="button" data-pro-action="goto-invoice" data-id="${esc(x.id)}"><span><b>${esc(x.id)}</b><small>Échéance ${fmtDate(x.due)} · solde ${money(Number(x.amount || 0) - Number(x.paid || 0))}</small></span><strong>Ouvrir</strong></button>`).join("") || empty("Aucune facture échue.")}</div>`)}
