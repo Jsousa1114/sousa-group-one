@@ -312,6 +312,29 @@
       </div>`;
   }
 
+  async function notificationPreferencesForm() {
+    const out = await api("notification-preferences");
+    const labels = {
+      messages: "Messages",
+      planning: "Planning",
+      projects: "Chantiers",
+      finance: "Devis, factures & paiements",
+      crm: "CRM / relances",
+      stock: "Stock faible / achats",
+      maintenance: "Maintenance / échéances",
+      hr: "RH / absences / heures",
+      system: "Système / sécurité",
+    };
+    core().modal("Préférences de notifications", `<form id="proForm" data-kind="notification-preferences">
+      <div class="pro-module-grid">${Object.entries(out.categories || {}).map(([key, enabled]) => `<label><input type="checkbox" name="category:${esc(key)}" ${enabled ? "checked" : ""}> ${esc(labels[key] || key)}</label>`).join("")}</div>
+      <hr>
+      <label class="pro-check"><input type="checkbox" name="quietEnabled" ${out.quietHours?.enabled ? "checked" : ""}> Activer les heures silencieuses</label>
+      <div class="pro-grid-2"><label>Début<input type="time" name="quietStart" value="${esc(out.quietHours?.start || "21:00")}"></label><label>Fin<input type="time" name="quietEnd" value="${esc(out.quietHours?.end || "07:00")}"></label></div>
+      <p class="muted">Les préférences servent de filtre central pour les alertes ciblées. Les alertes système critiques restent visibles dans le centre d'activité.</p>
+      <p id="formError" class="error"></p><button class="btn primary" type="submit">Enregistrer</button>
+    </form>`);
+  }
+
   async function renderTrash() {
     const out = await api("trash");
     host.innerHTML = `<div class="pro-toolbar"><div><h3>Corbeille 30 jours</h3><p class="muted">Les éléments importants peuvent être restaurés avant suppression définitive.</p></div></div>
