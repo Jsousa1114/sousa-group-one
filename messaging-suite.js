@@ -1020,6 +1020,101 @@
     }
   }
 
+  function attachmentBlob(attachment) {
+    const binary = atob(String(attachment?.content || ""));
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return new Blob([bytes], { type: attachment?.mime || "application/octet-stream" });
+  }
+
+  async function blobContent(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result).split(",")[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  async function optimizeVideoAttachment(attachment) {
+    if (!attachment || attachment.kind !== "video" || !attachment.content) return attachment;
+    const source = attachmentBlob(attachment);
+    const serverLimit = 5 * 1024 * 1024;
+    if (source.size <= serverLimit) return attachment;
+    if (source.size > 25 * 1024 * 1024)
+      throw new Error("La vidéo dépasse 25 Mo avant compression.");
+    if (typeof MediaRecorder === "undefined")
+      throw new Error("Cette vidéo dépasse 5 Mo et ce navigateur ne permet pas sa compression. Réduisez ou découpez la vidéo.");
+
+    const video = document.createElement("video");
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = "auto";
+    video.style.cssText = "position:fixed;left:-99999px;top:-99999px;width:1px;height:1px;opacity:0;pointer-events:none";
+    const url = URL.createObjectURL(source);
+    video.src = url;
+    document.body.appendChild(video);
+    try {
+      await new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error("Lecture vidéo impossible.")), 12000);
+        video.onloadedmetadata = () => { clearTimeout(timer); resolve(); };
+        video.onerror = () => { clearTimeout(timer); reject(new Error("Format vidéo non pris en charge.")); };
+      });
+      if (!Number.isFinite(video.duration) || video.duration <= 0)
+        throw new Error("Durée vidéo invalide.");
+      if (video.duration > 75)
+        throw new Error("Pour rester sous 5 Mo, découpez les vidéos de plus de 75 secondes avant envoi.");
+
+      const stream = video.captureStream?.() || video.mozCaptureStream?.();
+      if (!stream)
+        throw new Error("La compression vidéo n'est pas disponible sur ce navigateur.");
+      const mime = [
+        "video/webm;codecs=vp9,opus",
+        "video/webm;codecs=vp8,opus",
+        "video/webm",
+      ].find((value) => MediaRecorder.isTypeSupported?.(value)) || "";
+      const chunks = [];
+      const recorder = new MediaRecorder(stream, {
+        ...(mime ? { mimeType: mime } : {}),
+        videoBitsPerSecond: 500000,
+        audioBitsPerSecond: 64000,
+      });
+      const done = new Promise((resolve, reject) => {
+        recorder.ondataavailable = (event) => { if (event.data?.size) chunks.push(event.data); };
+        recorder.onerror = () => reject(new Error("Compression vidéo interrompue."));
+        recorder.onstop = resolve;
+      });
+      recorder.start(1000);
+      await video.play();
+      await new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error("Compression vidéo trop longue.")), 90000);
+        video.onended = () => { clearTimeout(timer); resolve(); };
+        video.onerror = () => { clearTimeout(timer); reject(new Error("Lecture vidéo interrompue.")); };
+      });
+      if (recorder.state !== "inactive") recorder.stop();
+      await done;
+      const compressed = new Blob(chunks, { type: recorder.mimeType || "video/webm" });
+      if (!compressed.size)
+        throw new Error("La compression vidéo n'a produit aucun fichier.");
+      if (compressed.size > serverLimit)
+        throw new Error("La vidéo compressée reste supérieure à 5 Mo. Réduisez sa durée.");
+      if (compressed.size >= source.size) return attachment;
+      return {
+        ...attachment,
+        name: String(attachment.name || "video").replace(/\.[^.]+$/, "") + ".webm",
+        mime: (recorder.mimeType || "video/webm").split(";")[0],
+        kind: "video",
+        content: await blobContent(compressed),
+        originalSize: source.size,
+        compressed: true,
+      };
+    } finally {
+      try { video.pause(); } catch {}
+      video.remove();
+      URL.revokeObjectURL(url);
+    }
+  }
+
   function crc32(bytes) {
     if (!crc32.table) {
       crc32.table = Array.from({ length: 256 }, (_, n) => {
@@ -1173,6 +1268,7 @@
         sharedRef: payload.sharedRef || pendingSharedRef || null,
       };
     next.attachment = await optimizeImageAttachment(next.attachment);
+    next.attachment = await optimizeVideoAttachment(next.attachment);
     if (!conv) return next;
     const e2eeMode = mode();
     if (e2eeMode !== "off" && cryptoBox()) {
