@@ -32,6 +32,9 @@ const PERMISSIONS = [
   ["hr.access", "Accéder aux fonctions RH"],
   ["data.export", "Exporter les données"],
   ["project.close", "Terminer un chantier"],
+  ["project.acceptance", "Signer / valider la réception d'un chantier"],
+  ["notification.manage", "Configurer ses notifications ciblées"],
+  ["vehicle.manage", "Gérer les échéances et le suivi véhicules"],
   ["trash.restore", "Restaurer depuis la corbeille"],
   ["settings.branding", "Modifier la marque / le white-label"],
   ["settings.modules", "Activer ou désactiver des modules"],
@@ -42,7 +45,7 @@ const DEFAULT_PERMISSION_KEYS = {
   admin: PERMISSIONS.map(([key]) => key),
   direction: PERMISSIONS.map(([key]) => key),
   hr: ["salary.view", "time.edit", "hr.access", "data.export"],
-  manager: ["client.delete", "time.edit", "project.close", "data.export"],
+  manager: ["client.delete", "time.edit", "project.close", "project.acceptance", "notification.manage", "vehicle.manage", "data.export"],
   accounting: ["invoice.edit", "margin.view", "data.export"],
   employee: [],
   client: [],
@@ -149,6 +152,23 @@ async function ensureSchema(db) {
         JSON.stringify({ customDomain: "", supportEmail: "", bankCoordinates: "", vatMode: "configurable" }),
       ],
     );
+    await db.query(`CREATE TABLE IF NOT EXISTS pro_notification_preferences(
+      user_id INTEGER PRIMARY KEY,
+      categories JSONB NOT NULL DEFAULT '{}'::jsonb,
+      quiet_hours JSONB NOT NULL DEFAULT '{}'::jsonb,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`);
+    await db.query(`CREATE TABLE IF NOT EXISTS pro_project_acceptance(
+      project_id TEXT PRIMARY KEY,
+      company TEXT NOT NULL,
+      client_id TEXT,
+      signer_name TEXT NOT NULL,
+      signature TEXT NOT NULL,
+      notes TEXT,
+      signed_by INTEGER,
+      signed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`);
     await db.query(`CREATE TABLE IF NOT EXISTS p1_project_milestones(
       id TEXT PRIMARY KEY,
       project_id TEXT NOT NULL,
@@ -253,7 +273,7 @@ function routes(db) {
     next();
   }));
 
-  router.get("/config", wrap(async (_req, res) => {
+  router.get("/config", wrap(async (req, res) => {
     const row = (await db.query("SELECT company_name,logo_url,primary_color,accent_color,modules,white_label FROM pro_workspace_settings WHERE id=1")).rows[0];
     res.json({
       companyName: row.company_name,
@@ -262,6 +282,7 @@ function routes(db) {
       accentColor: row.accent_color,
       modules: { ...defaultModules, ...(row.modules || {}) },
       supportEmail: row.white_label?.supportEmail || "",
+      permissions: await effectivePermissionKeys(db, req.user),
     });
   }));
 
@@ -280,6 +301,9 @@ function routes(db) {
         moduleFlags: true,
         interventionPdf: true,
         multiCompany: true,
+        profitabilityBreakdown: true,
+        targetedNotifications: true,
+        projectAcceptanceSignature: true,
       },
       settings: {
         tenantKey: settings.tenant_key,
@@ -323,6 +347,44 @@ function routes(db) {
     const projectCost = projects.reduce((n, x) => n + Number(x.cost || 0), 0);
     const outstanding = unpaid.reduce((n, x) => n + Math.max(0, Number(x.amount || 0) - Number(x.paid || 0)), 0);
     const financeVisible = D.privileged(req.user, ["admin", "direction", "accounting"]) || await hasPermission(db, req.user, "margin.view");
+    const projectFinance = financeVisible ? projects.map((project) => {
+      const projectInvoices = invoices.filter((invoice) => same(invoice.project, project.id));
+      const projectExpenses = scoped(view.expenses).filter((expense) => same(expense.project, project.id));
+      const projectRevenue = projectInvoices.filter((invoice) => invoice.status !== "Brouillon").reduce((sum, invoice) => sum + Number(invoice.amount || 0), 0);
+      const expenseTotal = projectExpenses.reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
+      const cost = Math.max(Number(project.cost || 0), expenseTotal);
+      const projectOutstanding = projectInvoices.reduce((sum, invoice) => sum + Math.max(0, Number(invoice.amount || 0) - Number(invoice.paid || 0)), 0);
+      const hours = times.filter((entry) => same(entry.project, project.id) && entry.status === "Validée").reduce((sum, entry) => sum + Number(entry.hours || 0), 0);
+      return {
+        id: project.id,
+        title: project.title,
+        company: project.company,
+        revenue: money(projectRevenue),
+        cost: money(cost),
+        margin: money(projectRevenue - cost),
+        outstanding: money(projectOutstanding),
+        productiveHours: money(hours),
+      };
+    }).sort((a, b) => Math.abs(Number(b.revenue)) - Math.abs(Number(a.revenue))) : [];
+    const companyIds = [...new Set(projects.map((project) => String(project.company || "")).filter(Boolean))];
+    const companyFinance = financeVisible ? companyIds.map((companyId) => {
+      const companyInvoices = invoices.filter((invoice) => String(invoice.company || "") === companyId);
+      const companyExpenses = scoped(view.expenses).filter((expense) => String(expense.company || "") === companyId);
+      const companyProjects = projects.filter((project) => String(project.company || "") === companyId);
+      const companyTimes = times.filter((entry) => String(entry.company || "") === companyId && entry.status === "Validée");
+      const companyRevenue = companyInvoices.filter((invoice) => invoice.status !== "Brouillon").reduce((sum, invoice) => sum + Number(invoice.amount || 0), 0);
+      const companyExpenseTotal = companyExpenses.reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
+      const companyProjectCost = companyProjects.reduce((sum, project) => sum + Number(project.cost || 0), 0);
+      return {
+        company: companyId,
+        revenue: money(companyRevenue),
+        expenses: money(companyExpenseTotal),
+        projectCost: money(companyProjectCost),
+        margin: money(companyRevenue - Math.max(companyExpenseTotal, companyProjectCost)),
+        outstanding: money(companyInvoices.reduce((sum, invoice) => sum + Math.max(0, Number(invoice.amount || 0) - Number(invoice.paid || 0)), 0)),
+        productiveHours: money(companyTimes.reduce((sum, entry) => sum + Number(entry.hours || 0), 0)),
+      };
+    }) : [];
     res.json({
       at: new Date().toISOString(),
       company: currentCompany || null,
@@ -352,6 +414,8 @@ function routes(db) {
         margin: money(revenue - Math.max(expenses, projectCost)),
         outstanding: money(outstanding),
         productiveHours: times.filter((x) => x.status === "Validée").reduce((n, x) => n + Number(x.hours || 0), 0),
+        byCompany: companyFinance,
+        byProject: projectFinance.slice(0, 30),
       } : null,
     });
   }));
@@ -396,6 +460,10 @@ function routes(db) {
     const acceptedChangeOrders = changes.rows.filter((x) => ["approved", "accepted"].includes(String(x.status).toLowerCase())).reduce((sum, x) => sum + Number(x.amount || 0), 0);
     const marginVisible = D.privileged(req.user, ["admin", "direction", "accounting"]) || await hasPermission(db, req.user, "margin.view");
     const thread = (view.messageThreads || []).find((x) => same(x.projectId, pid)) || null;
+    const acceptance = (await db.query(
+      "SELECT project_id,company,client_id,signer_name,signature,notes,signed_by,signed_at,updated_at FROM pro_project_acceptance WHERE project_id=$1",
+      [pid],
+    )).rows[0] || null;
     res.json({
       project,
       client,
@@ -419,6 +487,7 @@ function routes(db) {
       workOrders: workOrders.rows,
       appointments: appointments.rows,
       conversation: thread,
+      acceptance,
       history: events.rows,
       finance: marginVisible ? {
         budget: money(project.budget),
@@ -439,7 +508,7 @@ function routes(db) {
     const results = [];
     const add = (type, row, title, subtitle, page, extra = {}) => {
       if (!row || row.deletedAt || (currentCompany && row.company && String(row.company) !== currentCompany)) return;
-      const hay = [row.id, title, subtitle, row.address, row.city, row.email, row.phone, row.description, row.status].filter(Boolean).join(" ").toLowerCase();
+      const hay = [row.id, title, subtitle, row.address, row.street, row.zip, row.city, row.country, row.email, row.phone, row.description, row.notes, row.source, row.next_action, row.status].filter(Boolean).join(" ").toLowerCase();
       if (!hay.includes(query)) return;
       results.push({ type, id: String(row.id), title: String(title || row.id), subtitle: String(subtitle || ""), page, company: row.company || null, ...extra });
     };
@@ -451,7 +520,7 @@ function routes(db) {
     for (const row of active(view.documents)) add("document", row, row.name, row.category || "Document", "documents");
     for (const row of active(view.vehicles)) add("vehicle", row, row.plate || row.id, [row.brand, row.model].filter(Boolean).join(" "), "vehicles");
     for (const row of active(view.inventory)) add("inventory", row, row.name, row.sku || "Matériel", "inventory");
-    const crm = (await db.query("SELECT id,company,client_id,name,stage,value,next_action,source FROM crm_opportunities ORDER BY updated_at DESC LIMIT 1000")).rows;
+    const crm = (await db.query("SELECT id,company,client_id,name,email,phone,street,zip,city,country,stage,value,next_action,source,notes FROM crm_opportunities ORDER BY updated_at DESC LIMIT 1000")).rows;
     for (const row of crm.filter((x) => companyAllowed(req.user, x.company))) add("crm", row, row.name, `${row.stage} · ${row.next_action || row.source || ""}`, "advanced");
     const messageMatches = active(view.messages).filter((x) => String(x.text || "").toLowerCase().includes(query)).slice(-30);
     for (const row of messageMatches) results.push({ type: "message", id: String(row.id), title: String(row.text || "Message").slice(0, 90), subtitle: "Message", page: "messages", conversationKey: row.threadId ? `thread:${row.threadId}` : `direct:${same(row.senderId, req.user.id) ? row.recipientId : row.senderId}` });
@@ -597,6 +666,46 @@ function routes(db) {
       await db.query("UPDATE user_notifications SET read_at=COALESCE(read_at,NOW()) WHERE user_id=$1 AND id=$2", [req.user.id, String(req.body.id)]);
     } else D.fail("Notification requise.");
     res.json({ ok: true });
+  }));
+
+  router.get("/notification-preferences", wrap(async (req, res) => {
+    const defaults = {
+      messages: true,
+      planning: true,
+      projects: true,
+      finance: true,
+      crm: true,
+      stock: true,
+      maintenance: true,
+      hr: true,
+      system: true,
+    };
+    const row = (await db.query(
+      "SELECT categories,quiet_hours,updated_at FROM pro_notification_preferences WHERE user_id=$1",
+      [req.user.id],
+    )).rows[0];
+    res.json({
+      categories: { ...defaults, ...(row?.categories || {}) },
+      quietHours: row?.quiet_hours || { enabled: false, start: "21:00", end: "07:00" },
+      updatedAt: row?.updated_at || null,
+    });
+  }));
+
+  router.post("/notification-preferences", wrap(async (req, res) => {
+    await requirePermission(db, req.user, "notification.manage", "Configuration des notifications non autorisée.");
+    const allowedKeys = ["messages", "planning", "projects", "finance", "crm", "stock", "maintenance", "hr", "system"];
+    const categories = Object.fromEntries(allowedKeys.map((key) => [key, req.body?.categories?.[key] !== false]));
+    const quiet = req.body?.quietHours && typeof req.body.quietHours === "object" ? req.body.quietHours : {};
+    const start = /^\d{2}:\d{2}$/.test(String(quiet.start || "")) ? String(quiet.start) : "21:00";
+    const end = /^\d{2}:\d{2}$/.test(String(quiet.end || "")) ? String(quiet.end) : "07:00";
+    const quietHours = { enabled: quiet.enabled === true, start, end };
+    await db.query(
+      `INSERT INTO pro_notification_preferences(user_id,categories,quiet_hours)
+       VALUES($1,$2,$3)
+       ON CONFLICT(user_id) DO UPDATE SET categories=EXCLUDED.categories,quiet_hours=EXCLUDED.quiet_hours,updated_at=NOW()`,
+      [req.user.id, JSON.stringify(categories), JSON.stringify(quietHours)],
+    );
+    res.json({ ok: true, categories, quietHours });
   }));
 
   router.get("/trash", wrap(async (req, res) => {
@@ -865,6 +974,66 @@ function routes(db) {
       return { data, changed: ["planning"], result: row, audit: { id: row.id, date, start, end, employeeId: employee.id, projectId: project.id } };
     });
     res.json({ ok: true, planning: result.result });
+  }));
+
+  router.post("/project/:id/acceptance", wrap(async (req, res) => {
+    const { view } = await stateContext(db, req.user);
+    const project = active(view.projects).find((x) => same(x.id, req.params.id));
+    if (!project) D.fail("Chantier inaccessible.", 404);
+    const isClientSigner = req.user.role === "client" && req.user.client_id && same(project.clientId, req.user.client_id);
+    if (!isClientSigner) await requirePermission(db, req.user, "project.acceptance", "Signature de réception non autorisée.");
+    const signerName = clean(String(req.body?.signerName || req.user.name || ""), 200);
+    const signature = clean(String(req.body?.signature || ""), 2000);
+    const notes = clean(String(req.body?.notes || ""), 3000, true) || null;
+    await db.query(
+      `INSERT INTO pro_project_acceptance(project_id,company,client_id,signer_name,signature,notes,signed_by)
+       VALUES($1,$2,$3,$4,$5,$6,$7)
+       ON CONFLICT(project_id) DO UPDATE SET signer_name=EXCLUDED.signer_name,signature=EXCLUDED.signature,
+       notes=EXCLUDED.notes,signed_by=EXCLUDED.signed_by,signed_at=NOW(),updated_at=NOW()`,
+      [String(project.id), String(project.company), project.clientId ? String(project.clientId) : null, signerName, signature, notes, req.user.id],
+    );
+    await db.query(
+      `INSERT INTO app_events(event_type,actor_user_id,company,project_id,entity_type,entity_id,payload)
+       VALUES('project.acceptance.signed',$1,$2,$3,'project',$3,$4)`,
+      [req.user.id, project.company, String(project.id), JSON.stringify({ signerName, clientId: project.clientId || null })],
+    );
+    res.json({ ok: true, projectId: String(project.id), signerName, signedAt: new Date().toISOString() });
+  }));
+
+  router.get("/project/:id/acceptance.pdf", wrap(async (req, res) => {
+    const { view } = await stateContext(db, req.user);
+    const project = active(view.projects).find((x) => same(x.id, req.params.id));
+    if (!project) D.fail("Chantier inaccessible.", 404);
+    const acceptance = (await db.query("SELECT * FROM pro_project_acceptance WHERE project_id=$1", [String(project.id)])).rows[0];
+    if (!acceptance) D.fail("Aucune réception signée pour ce chantier.", 404);
+    const client = active(view.clients).find((x) => same(x.id, project.clientId)) || null;
+    const company = active(view.companies).find((x) => same(x.id, project.company)) || null;
+    const pdf = new PDFDocument({ size: "A4", margin: 48, info: { Title: `Réception chantier ${project.id}` } });
+    const chunks = [];
+    pdf.on("data", (chunk) => chunks.push(chunk));
+    const done = new Promise((resolve, reject) => { pdf.on("end", resolve); pdf.on("error", reject); });
+    pdf.fontSize(20).text(company?.name || "Sousa Group One");
+    pdf.moveDown(0.3).fontSize(14).text("Procès-verbal de réception");
+    pdf.moveDown().fontSize(10).text(`Chantier : ${project.id} — ${project.title}`);
+    pdf.text(`Client : ${client?.name || "—"}`);
+    pdf.text(`Adresse : ${project.address || "—"}`);
+    pdf.text(`Date de signature : ${new Date(acceptance.signed_at).toLocaleString("fr-CH", { timeZone: "Europe/Zurich" })}`);
+    pdf.moveDown().fontSize(12).text("Validation", { underline: true });
+    pdf.moveDown(0.3).fontSize(10).text(`Signataire : ${acceptance.signer_name}`);
+    pdf.text(`Signature électronique : ${acceptance.signature}`);
+    if (acceptance.notes) {
+      pdf.moveDown().fontSize(12).text("Observations", { underline: true });
+      pdf.moveDown(0.3).fontSize(10).text(acceptance.notes);
+    }
+    pdf.moveDown().fontSize(8).fillColor("#555555").text("Document généré par Sousa Group One. La trace de signature et l'horodatage sont conservés dans l'historique du chantier.");
+    pdf.end();
+    await done;
+    res.set({
+      "Content-Type": "application/pdf",
+      "Content-Disposition": `attachment; filename="reception-${encodeURIComponent(project.id)}.pdf"`,
+      "Cache-Control": "no-store",
+    });
+    res.send(Buffer.concat(chunks));
   }));
 
   router.get("/intervention/:id.pdf", wrap(async (req, res) => {
