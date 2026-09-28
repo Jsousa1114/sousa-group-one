@@ -29,6 +29,8 @@ test("professional center schema is idempotent and complete", async () => {
       "pro_trash",
       "pro_user_permissions",
       "pro_workspace_settings",
+      "pro_notification_preferences",
+      "pro_project_acceptance",
       "p1_project_milestones",
       "p1_project_photo_meta",
       "p2_appointments",
@@ -69,11 +71,15 @@ test("requested professional capabilities are wired", () => {
     "/search",
     "/activity",
     "/notifications/read",
+    "/notification-preferences",
+    "/project/:id/acceptance",
+    "/project/:id/acceptance.pdf",
     "/trash",
     "/trash/:id/restore",
     "/permissions",
     "/settings",
     "/planning/:id/move",
+    "/planning/bulk",
     "/intervention/:id.pdf",
   ]) assert.ok(api.includes(endpoint), "missing pro endpoint: " + endpoint);
   for (const label of [
@@ -84,6 +90,9 @@ test("requested professional capabilities are wired", () => {
     "Préparation à la vente",
     "Recherche globale",
     "Centre de notifications & activités",
+    "Réception du chantier",
+    "Préférences de notifications",
+    "Rentabilité par entreprise",
   ]) assert.ok(ui.includes(label), "missing pro UI: " + label);
 });
 
@@ -104,7 +113,41 @@ test("messaging professional upgrades stay wired", () => {
   assert.match(app, /chatMessageLimits/);
   assert.match(app, /chat-load-older/);
   assert.match(suite, /optimizeImageAttachment/);
+  assert.match(suite, /optimizeVideoAttachment/);
+  assert.match(app, /kind: file\.type\.startsWith\("image\/"\)/);
+  assert.match(app, /file\.type\.startsWith\("video\/"\)/);
+  assert.match(suite, /chat-video-wrap/);
   assert.match(suite, /downloadConversationFiles/);
   assert.match(suite, /application\/zip/);
   assert.match(suite, /download-files/);
+});
+
+
+test("granular permissions protect legacy sensitive commands", () => {
+  const stateRoutes = fs.readFileSync("state-routes.js", "utf8");
+  assert.match(stateRoutes, /enforceCommandPermission/);
+  assert.match(stateRoutes, /client\.delete/);
+  assert.match(stateRoutes, /project\.close/);
+  assert.match(stateRoutes, /invoice\.edit/);
+  assert.match(stateRoutes, /hr\.access/);
+  assert.match(stateRoutes, /time\.edit/);
+});
+
+test("targeted notifications are enforced by the push engine", () => {
+  const messaging = fs.readFileSync("messaging-routes.js", "utf8");
+  const p1 = fs.readFileSync("p1-routes.js", "utf8");
+  assert.match(messaging, /pro_notification_preferences/);
+  assert.match(messaging, /quiet_hours/);
+  assert.match(messaging, /Europe\/Zurich/);
+  assert.match(p1, /notifyUsers/);
+});
+
+test("vehicle tracking covers fuel EV inventory and deadlines", () => {
+  const api = fs.readFileSync("p1-routes.js", "utf8");
+  const ui = fs.readFileSync("p1-suite.js", "utf8");
+  assert.match(api, /"charge"/);
+  assert.match(api, /"inventory"/);
+  assert.match(ui, /Recharge électrique/);
+  assert.match(ui, /Matériel embarqué/);
+  assert.match(ui, /Échéances véhicules · 60 jours/);
 });
