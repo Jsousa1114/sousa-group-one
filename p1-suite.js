@@ -163,15 +163,25 @@
   }
 
   async function renderTime(root){
-    const selectedCompany=cache.timeCompany||companies()[0]?.id||"";
+    const activeClock=(state().clocks||[]).find(x=>!profile().employee_id||String(x.employeeId)===String(profile().employee_id))||null;
+    const activeProject=activeClock?projects().find(x=>String(x.id)===String(activeClock.project)):null;
+    const selectedCompany=activeProject?.company||cache.timeCompany||companies()[0]?.id||"";
     if(!selectedCompany){ root.querySelector("#p1Body").innerHTML=card("Pointage+","<p>Aucune entreprise.</p>");return; }
     const [policy,summary]=await Promise.all([
       api("time/policy?company="+encodeURIComponent(selectedCompany)),
       api("time/summary?month="+encodeURIComponent(new Date().toISOString().slice(0,7)))
     ]);
     cache.timePolicy=policy.policy;
+    const companyProjects=projects().filter(x=>String(x.company)===String(selectedCompany));
+    const otherProjects=companyProjects.filter(x=>!activeClock||String(x.id)!==String(activeClock.project));
+    const fieldClock=profile().employee_id
+      ? activeClock
+        ? `<div class="p1-clock-live"><span class="status neutral">${activeClock.pauseAt?"En pause":"En cours"}</span><h3>${esc(activeProject?.title||activeClock.project)}</h3><p>Depuis ${date(activeClock.startedAt)}</p><div class="p1-actions">${activeClock.pauseAt?btn("Reprendre","field-clock-resume","","primary"):btn("Pause","field-clock-pause")} ${btn("Terminer la journée","field-clock-stop","","danger")}</div>${otherProjects.length?`<label>Changer de chantier<select id="p1ClockSwitchProject"><option value="">— Choisir —</option>${option(otherProjects,"id","title")}</select></label>${btn("Basculer sans couper le pointage","field-clock-switch","","primary")}`:""}</div>`
+        : `<p>Sélectionnez le chantier sur lequel vous commencez à travailler.</p><label>Chantier<select id="p1ClockProject">${option(companyProjects,"id","title")}</select></label><div class="p1-actions">${companyProjects.length?btn("Démarrer le pointage","field-clock-start","","primary"):"<span>Aucun chantier accessible dans cette entreprise.</span>"}</div>`
+      : "<p>Le pointage terrain est disponible sur un compte lié à un salarié.</p>";
     root.querySelector("#p1Body").innerHTML=`
-      <div class="p1-toolbar"><label>Entreprise<select id="p1TimeCompany">${companyOptions(selectedCompany)}</select></label><div>${hr()?btn("Historique salarié","employee-history"):""}</div></div>
+      <div class="p1-toolbar"><label>Entreprise<select id="p1TimeCompany" ${activeClock?"disabled":""}>${companyOptions(selectedCompany)}</select></label><div>${hr()?btn("Historique salarié","employee-history"):""}</div></div>
+      ${card("Pointage terrain",fieldClock)}
       <div class="p1-grid-2">
         ${card("Règles de pointage",`<form id="p1Form" data-kind="time-policy">
           <input type="hidden" name="company" value="${esc(selectedCompany)}">
