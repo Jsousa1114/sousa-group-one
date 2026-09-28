@@ -305,7 +305,7 @@
   async function renderActivity() {
     const out = await api("activity");
     cache.activity = out;
-    host.innerHTML = `<div class="pro-toolbar"><div><h3>Centre de notifications & activités</h3><p class="muted">Tout ce qui change dans l'application, au même endroit.</p></div>${button("Tout marquer comme lu", "read-all")}</div>
+    host.innerHTML = `<div class="pro-toolbar"><div><h3>Centre de notifications & activités</h3><p class="muted">Tout ce qui change dans l'application, au même endroit.</p></div><div>${proCan("notification.manage") ? button("Préférences", "notification-prefs") : ""} ${button("Tout marquer comme lu", "read-all")}</div></div>
       <div class="pro-grid-2">
         ${card("Notifications", simpleRows(out.notifications || [], (x) => `<button type="button" class="${x.read_at ? "" : "unread"}" data-pro-action="read-notification" data-id="${esc(x.id)}"><span><b>${esc(x.title)}</b><small>${esc(x.body || "")} · ${fmtDateTime(x.created_at)}</small></span>${x.read_at ? "" : "<i>●</i>"}</button>`, "Aucune notification."))}
         ${card("Activité du groupe", simpleRows(out.events || [], (x) => `<div><span><b>${esc(x.event_type)}</b><small>${fmtDateTime(x.created_at)} · ${esc(x.company || "Groupe")}${x.project_id ? ` · ${esc(x.project_id)}` : ""}</small></span></div>`, "Aucune activité."))}
