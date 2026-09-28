@@ -354,7 +354,18 @@ function routes(db) {
     const appointments=(await db.query("SELECT * FROM p2_appointments WHERE client_id=$1 ORDER BY starts_at DESC LIMIT 200",[String(client.id)])).rows
       .filter(x=>companyAllowed(req.user,x.company) || req.user.role==="client");
     const messages=(ctx.view.messages||[]).filter(x=>projectIds.has(String(x.projectId||""))).slice(-200);
-    res.json({client:{id:client.id,name:client.name,email:client.email,phone:client.phone},projects,quotes,invoices,payments,maintenance,appointments,messages});
+    const documents=(ctx.view.documents||[]).filter(x=>projectIds.has(String(x.project||x.projectId||""))).slice(-300);
+    const projectIdList=[...projectIds];
+    const [photoMeta,workOrders,acceptance]=projectIdList.length ? await Promise.all([
+      db.query("SELECT id,project_id,document_id,album,note,created_at FROM p1_project_photo_meta WHERE project_id=ANY($1::text[]) ORDER BY created_at DESC LIMIT 300",[projectIdList]),
+      db.query("SELECT id,project_id,title,description,status,scheduled_at,customer_signature,signed_at FROM work_orders WHERE client_id=$1 AND status<>'cancelled' ORDER BY scheduled_at DESC NULLS LAST,created_at DESC LIMIT 200",[String(client.id)]),
+      db.query("SELECT project_id,signer_name,notes,signed_at FROM pro_project_acceptance WHERE project_id=ANY($1::text[]) ORDER BY signed_at DESC",[projectIdList]).catch(()=>({rows:[]})),
+    ]) : [{rows:[]},{rows:[]},{rows:[]}];
+    res.json({
+      client:{id:client.id,name:client.name,email:client.email,phone:client.phone},
+      projects,quotes,invoices,payments,maintenance,appointments,messages,documents,
+      photos:photoMeta.rows,workOrders:workOrders.rows,acceptance:acceptance.rows,
+    });
   }));
 
   r.get("/appointments", wrap(async (req,res) => {
