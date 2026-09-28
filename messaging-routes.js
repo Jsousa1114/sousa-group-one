@@ -770,6 +770,7 @@ async function notifyUsers(db, userIds, payload) {
     allowedUserIds = allowedUserIds.filter((id) => !mutedSet.has(id));
   }
   if (!allowedUserIds.length) return { sent: 0, stored: 0 };
+
   const category =
       payload?.category ||
       (/call/i.test(String(payload?.tag || ""))
@@ -777,6 +778,20 @@ async function notifyUsers(db, userIds, payload) {
         : payload?.conversationKey?.startsWith("thread:")
           ? "groups"
           : "messages"),
+    normalizeCategory = (value) => {
+      const key = String(value || "").toLowerCase();
+      if (["messages", "groups", "calls", "call"].includes(key)) return "messages";
+      if (["project", "projects", "chantier", "chantiers"].includes(key)) return "projects";
+      if (["finance", "quotes", "quote", "invoices", "invoice", "payments", "payment"].includes(key)) return "finance";
+      if (["planning", "schedule"].includes(key)) return "planning";
+      if (["crm", "sales", "commercial"].includes(key)) return "crm";
+      if (["stock", "inventory", "purchase", "purchases"].includes(key)) return "stock";
+      if (["maintenance", "vehicle", "vehicles", "tools"].includes(key)) return "maintenance";
+      if (["hr", "time", "times", "absence", "absences"].includes(key)) return "hr";
+      if (["system", "security"].includes(key)) return "system";
+      return key || "system";
+    },
+    targetedCategory = normalizeCategory(category),
     prefRows = (
       await db.query(
         "SELECT user_id,data FROM account_preferences WHERE user_id=ANY($1::int[])",
@@ -784,9 +799,24 @@ async function notifyUsers(db, userIds, payload) {
       )
     ).rows,
     prefMap = new Map(prefRows.map((x) => [Number(x.user_id), x.data || {}]));
+
+  let proPrefMap = new Map();
+  try {
+    const rows = (
+      await db.query(
+        "SELECT user_id,categories,quiet_hours FROM pro_notification_preferences WHERE user_id=ANY($1::int[])",
+        [allowedUserIds],
+      )
+    ).rows;
+    proPrefMap = new Map(rows.map((x) => [Number(x.user_id), x]));
+  } catch {
+    // The professional-center schema may not have been initialized yet.
+  }
+
   allowedUserIds = allowedUserIds.filter((id) => {
-    const n = prefMap.get(Number(id))?.notifications || {};
-    return n[category] !== false;
+    const legacy = prefMap.get(Number(id))?.notifications || {},
+      targeted = proPrefMap.get(Number(id))?.categories || {};
+    return legacy[category] !== false && legacy[targetedCategory] !== false && targeted[targetedCategory] !== false;
   });
   if (!allowedUserIds.length) return { sent: 0, stored: 0 };
 
@@ -799,7 +829,7 @@ async function notifyUsers(db, userIds, payload) {
       [
         randomUUID(),
         userId,
-        String(category).slice(0, 60),
+        String(targetedCategory).slice(0, 60),
         String(payload?.title || "Sousa Group One").slice(0, 200),
         String(payload?.body || "Nouvelle activité").slice(0, 1000),
         String(payload?.url || "/").slice(0, 1000),
@@ -822,9 +852,27 @@ async function notifyUsers(db, userIds, payload) {
     process.env.VAPID_PUBLIC_KEY,
     process.env.VAPID_PRIVATE_KEY,
   );
+  const zurichTime = new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Europe/Zurich",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).format(new Date()),
+    inQuietHours = (quiet) => {
+      if (!quiet?.enabled) return false;
+      const start = /^\d{2}:\d{2}$/.test(String(quiet.start || "")) ? String(quiet.start) : "21:00",
+        end = /^\d{2}:\d{2}$/.test(String(quiet.end || "")) ? String(quiet.end) : "07:00";
+      if (start === end) return true;
+      return start < end
+        ? zurichTime >= start && zurichTime < end
+        : zurichTime >= start || zurichTime < end;
+    };
   const pushUserIds = allowedUserIds.filter((id) => {
-    const n = prefMap.get(Number(id))?.notifications || {};
-    return n.push !== false;
+    const legacy = prefMap.get(Number(id))?.notifications || {},
+      quiet = proPrefMap.get(Number(id))?.quiet_hours || {};
+    if (legacy.push === false) return false;
+    if (targetedCategory !== "system" && inQuietHours(quiet)) return false;
+    return true;
   });
   if (!pushUserIds.length) return { sent: 0, stored };
   const rows = (
@@ -839,6 +887,7 @@ async function notifyUsers(db, userIds, payload) {
       const n = prefMap.get(Number(row.user_id))?.notifications || {},
         notificationPayload = {
           ...payload,
+          category: targetedCategory,
           silent: n.sound === false,
           vibrate: n.vibration === false ? [] : [180, 90, 180],
         };
