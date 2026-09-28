@@ -153,7 +153,54 @@ function routes(db) {
       const contactPhoto = (u) =>
         employeePhotos.get(String(u.employee_id)) || "";
       const view = D.viewState(row.data, req.user);
+      const messageStats = {};
       if (view.messages.length) {
+        const readForUser = new Set(
+            (
+              await db.query(
+                "SELECT message_id FROM message_reads WHERE user_id=$1",
+                [req.user.id],
+              )
+            ).rows.map((row) => String(row.message_id)),
+          ),
+          grouped = new Map();
+        for (const message of view.messages) {
+          const key = message.threadId
+            ? "thread:" + String(message.threadId)
+            : "direct:" +
+              String(
+                D.same(message.senderId, req.user.id)
+                  ? message.recipientId
+                  : message.senderId,
+              );
+          if (!grouped.has(key)) grouped.set(key, []);
+          grouped.get(key).push(message);
+          if (!messageStats[key]) messageStats[key] = { total: 0, unread: 0 };
+          messageStats[key].total++;
+          const alreadyRead =
+            readForUser.has(String(message.id)) ||
+            (message.readBy || []).some((id) => D.same(id, req.user.id));
+          if (!D.same(message.senderId, req.user.id) && !alreadyRead)
+            messageStats[key].unread++;
+        }
+        view.messages = [...grouped.values()]
+          .flatMap((messages) =>
+            messages
+              .sort(
+                (a, b) =>
+                  new Date(a.createdAt).getTime() -
+                    new Date(b.createdAt).getTime() ||
+                  String(a.id).localeCompare(String(b.id)),
+              )
+              .slice(-120),
+          )
+          .sort(
+            (a, b) =>
+              new Date(a.createdAt).getTime() -
+                new Date(b.createdAt).getTime() ||
+              String(a.id).localeCompare(String(b.id)),
+          );
+
         const ids = view.messages.map((m) => String(m.id)),
           [readsResult, overridesResult] = await Promise.all([
             db.query(
@@ -203,6 +250,7 @@ function routes(db) {
       }
       res.set("Cache-Control", "no-store").json({
         data: view,
+        messageStats,
         revision: row.revision,
         contacts: users
           .filter(
