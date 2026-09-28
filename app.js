@@ -896,6 +896,7 @@ function chatMessagePreview(m) {
   if (m.sharedRef) return prefix + "📄 " + (m.sharedRef.title || m.sharedRef.id);
   if (m.text) return prefix + m.text;
   if (m.attachment?.kind === "image") return prefix + "📷 Photo";
+  if (m.attachment?.kind === "video") return prefix + "🎬 Vidéo";
   if (m.attachment?.kind === "audio") return prefix + "🎤 Message vocal";
   return prefix + "📎 " + (m.attachment?.name || "Fichier");
 }
@@ -906,6 +907,8 @@ function chatAttachmentHtml(m) {
     return `<button type="button" class="chat-attachment-link encrypted-attachment" data-encrypted-attachment="${esc(m.id)}">🔐 ${label} · déchiffrement…</button>`;
   if (m.attachment.kind === "image")
     return `<button type="button" class="chat-media-button" data-action="chat-open-attachment" data-id="${esc(m.id)}"><img data-chat-media="${esc(m.id)}" alt="${label}" class="chat-image-preview"><span>📷 ${label}</span></button>`;
+  if (m.attachment.kind === "video")
+    return `<div class="chat-video-wrap"><video controls playsinline preload="metadata" data-chat-media="${esc(m.id)}"></video><button type="button" class="chat-attachment-link" data-action="chat-open-attachment" data-id="${esc(m.id)}">🎬 ${label}</button></div>`;
   if (m.attachment.kind === "audio")
     return `<div class="chat-audio-wrap"><audio controls preload="none" data-chat-media="${esc(m.id)}"></audio><button type="button" class="chat-attachment-link" data-action="chat-open-attachment" data-id="${esc(m.id)}">🎤 ${label}</button></div>`;
   return `<button type="button" class="chat-attachment-link" data-action="chat-open-attachment" data-id="${esc(m.id)}">📎 ${label} · ${Math.ceil((m.attachment.size || 0) / 1024)} Ko</button>`;
