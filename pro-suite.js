@@ -361,7 +361,7 @@
     const moduleLabels = { dashboard: "Tableau de bord", employees: "RH / salariés", time: "Pointage", planning: "Planning", absences: "Absences", projects: "Chantiers", crm: "CRM", quotes: "Devis", invoices: "Factures", payments: "Paiements", inventory: "Stock", vehicles: "Véhicules", tools: "Outillage", maintenance: "Maintenance", documents: "Documents", messaging: "Messagerie", reports: "Rapports", clientPortal: "Portail client" };
     host.innerHTML = `<div class="pro-toolbar"><div><h3>Préparation à la vente</h3><p class="muted">Chaque futur client peut avoir sa marque, ses modules et une base de données isolée.</p></div></div>
       <form id="proForm" data-kind="settings" class="pro-settings">
-        ${card("Marque / White-label", `<label>Nom de l'application<input name="companyName" value="${esc(out.companyName)}"></label><label>Clé client / tenant<input name="tenantKey" value="${esc(out.tenantKey)}"></label><label>Logo URL<input name="logoUrl" value="${esc(out.logoUrl)}"></label><div class="pro-grid-2"><label>Couleur principale<input name="primaryColor" value="${esc(out.primaryColor)}"></label><label>Couleur accent<input name="accentColor" value="${esc(out.accentColor)}"></label></div><label>Domaine personnalisé<input name="customDomain" value="${esc(out.whiteLabel?.customDomain || "")}" placeholder="app.client.ch"></label><label>E-mail support<input name="supportEmail" value="${esc(out.whiteLabel?.supportEmail || "")}"></label>`)}
+        ${card("Marque / White-label", `<label>Nom de l'application<input name="companyName" value="${esc(out.companyName)}"></label><label>Clé client / tenant<input name="tenantKey" value="${esc(out.tenantKey)}"></label><label>Logo URL<input name="logoUrl" value="${esc(out.logoUrl)}"></label><div class="pro-grid-2"><label>Couleur principale<input name="primaryColor" value="${esc(out.primaryColor)}"></label><label>Couleur accent<input name="accentColor" value="${esc(out.accentColor)}"></label></div><label>Domaine personnalisé<input name="customDomain" value="${esc(out.whiteLabel?.customDomain || "")}" placeholder="app.client.ch"></label><label>E-mail support<input name="supportEmail" value="${esc(out.whiteLabel?.supportEmail || "")}"></label><label>Coordonnées bancaires / IBAN<textarea name="bankCoordinates" maxlength="1000">${esc(out.whiteLabel?.bankCoordinates || "")}</textarea></label><label>Mode TVA<select name="vatMode"><option value="configurable" ${(out.whiteLabel?.vatMode || "configurable") === "configurable" ? "selected" : ""}>Configurable par client</option><option value="taxable" ${out.whiteLabel?.vatMode === "taxable" ? "selected" : ""}>Assujetti TVA</option><option value="non-taxable" ${out.whiteLabel?.vatMode === "non-taxable" ? "selected" : ""}>Non assujetti</option></select></label>`)}
         ${card("Modules activables", `<div class="pro-module-grid">${Object.entries(out.modules || {}).map(([key, enabled]) => `<label><input type="checkbox" name="module:${esc(key)}" ${enabled ? "checked" : ""}> ${esc(moduleLabels[key] || key)}</label>`).join("")}</div>`)}
         ${card("Abonnement", `<div class="pro-grid-3"><label>Plan<input name="plan" value="${esc(out.billing?.plan || "internal")}"></label><label>Statut<input name="billingStatus" value="${esc(out.billing?.status || "active")}"></label><label>Utilisateurs / sièges<input type="number" min="1" name="seats" value="${esc(out.billing?.seats || "")}"></label></div><p class="muted">Isolation prévue : <b>${esc(out.isolation)}</b>. Pour les clients externes, le modèle recommandé est une base PostgreSQL + stockage fichiers séparés par client.</p>`)}
         <button class="btn primary" type="submit">Enregistrer la configuration</button><p id="formError" class="error"></p>
@@ -470,6 +470,9 @@
         await core().mutate("project.finish", { id: b.dataset.id });
         await openProject(b.dataset.id);
       }
+      else if (action === "project-acceptance") projectAcceptanceForm(b.dataset.id);
+      else if (action === "notification-prefs") await notificationPreferencesForm();
+      else if (action === "company-profit") { core().setCompany(b.dataset.company || ""); activeTab = "overview"; await renderOverview(); }
       else if (action === "read-all") { await api("notifications/read", { all: true }); await renderActivity(); }
       else if (action === "read-notification") { await api("notifications/read", { id: b.dataset.id }); await renderActivity(); }
       else if (action === "restore-trash") { await api("trash/" + encodeURIComponent(b.dataset.id) + "/restore", {}); await core().refresh(false); await renderTrash(); core().toast("Élément restauré."); }
@@ -550,7 +553,26 @@
     event.preventDefault();
     const fd = new FormData(form);
     try {
-      if (form.dataset.kind === "planning-bulk") {
+      if (form.dataset.kind === "project-acceptance") {
+        await api("project/" + encodeURIComponent(form.dataset.projectId) + "/acceptance", {
+          signerName: fd.get("signerName"),
+          signature: fd.get("signature"),
+          notes: fd.get("notes"),
+        });
+        core().closeModal(true);
+        await openProject(form.dataset.projectId);
+        core().toast("Réception signée et PV généré.");
+      } else if (form.dataset.kind === "notification-preferences") {
+        const categories = {};
+        for (const key of ["messages", "planning", "projects", "finance", "crm", "stock", "maintenance", "hr", "system"])
+          categories[key] = fd.get("category:" + key) === "on";
+        await api("notification-preferences", {
+          categories,
+          quietHours: { enabled: fd.get("quietEnabled") === "on", start: fd.get("quietStart"), end: fd.get("quietEnd") },
+        });
+        core().closeModal(true);
+        core().toast("Préférences de notifications enregistrées.");
+      } else if (form.dataset.kind === "planning-bulk") {
         await api("planning/bulk", {
           projectId: fd.get("projectId"),
           employeeIds: fd.getAll("employeeIds"),
@@ -576,7 +598,7 @@
         await api("settings", {
           companyName: fd.get("companyName"), tenantKey: fd.get("tenantKey"), logoUrl: fd.get("logoUrl"), primaryColor: fd.get("primaryColor"), accentColor: fd.get("accentColor"), modules,
           billing: { plan: fd.get("plan"), status: fd.get("billingStatus"), seats: fd.get("seats") },
-          whiteLabel: { customDomain: fd.get("customDomain"), supportEmail: fd.get("supportEmail"), vatMode: "configurable" },
+          whiteLabel: { customDomain: fd.get("customDomain"), supportEmail: fd.get("supportEmail"), bankCoordinates: fd.get("bankCoordinates"), vatMode: fd.get("vatMode") || "configurable" },
         });
         core().toast("Configuration enregistrée.");
         await applyWorkspaceConfig(true);
