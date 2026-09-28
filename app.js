@@ -553,7 +553,7 @@ function sum(k, field) {
   return visible(k).reduce((n, r) => n + (Number(r[field]) || 0), 0);
 }
 function dashboard() {
-  const intro = `<section class="workspace-welcome"><div><p class="eyebrow">${esc(new Date().toLocaleDateString("fr-CH", {weekday:"long", day:"numeric", month:"long",timeZone:"Europe/Zurich"}))}</p><h1>Bonjour, ${esc(profile.name.split(" ")[0])}.</h1><p>Voici l’essentiel de votre activité.</p></div><div class="workspace-shortcuts">${["planning", "projects", "messages"].filter(k => can(menus[k][1])).map(k=>`<button class="workspace-shortcut" data-page="${k}">${navigationIcon(k)}<span>${esc(menus[k][0])}</span></button>`).join("")}</div></section>`;
+  const intro = `<section class="workspace-welcome"><div><p class="eyebrow">${esc(new Date().toLocaleDateString("fr-CH", {weekday:"long", day:"numeric", month:"long",timeZone:"Europe/Zurich"}))}</p><h1>Bonjour, ${esc(profile.name.split(" ")[0])}.</h1><p>Voici l’essentiel de votre activité.</p></div><div class="workspace-shortcuts">${["planning", "projects", "messages"].filter(k => can(menus[k][1])).map(k=>`<button type="button" class="workspace-shortcut" data-shortcut="${k}">${navigationIcon(k)}<span>${esc(menus[k][0])}</span></button>`).join("")}</div></section>`;
   if (profile.role === "client")
     return (
       intro +
@@ -2844,9 +2844,9 @@ document.addEventListener("change", (e) => {
   }
 });
 document.addEventListener("click", async (e) => {
-  const nav = e.target.closest("[data-page]");
+  const nav = e.target.closest("[data-page], [data-shortcut]");
   if (nav) {
-    const nextPage = nav.dataset.page;
+    const nextPage = nav.dataset.page || nav.dataset.shortcut;
     if (page === "messages" && nextPage !== "messages") cancelChatRecording();
     page = nextPage;
     if (page === "messages") mobileChatOpen = false;
