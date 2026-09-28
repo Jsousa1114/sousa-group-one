@@ -3640,8 +3640,9 @@ document.addEventListener("change", async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const mediaGeneration = chatMediaGeneration;
-    if (file.size > 5 * 1024 * 1024) {
-      notice("Pièce jointe de 5 Mo maximum.");
+    const rawLimit = file.type.startsWith("video/") ? 25 * 1024 * 1024 : 5 * 1024 * 1024;
+    if (file.size > rawLimit) {
+      notice(file.type.startsWith("video/") ? "Vidéo de 25 Mo maximum avant compression." : "Pièce jointe de 5 Mo maximum.");
       e.target.value = "";
       return;
     }
@@ -3658,9 +3659,11 @@ document.addEventListener("change", async (e) => {
       content,
       kind: file.type.startsWith("image/")
         ? "image"
-        : file.type.startsWith("audio/")
-          ? "audio"
-          : "file",
+        : file.type.startsWith("video/")
+          ? "video"
+          : file.type.startsWith("audio/")
+            ? "audio"
+            : "file",
     };
     render();
     return;
