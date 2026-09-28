@@ -342,30 +342,42 @@
   }
 
   async function renderPermissions() {
-    const out = await api("permissions");
+    const [out, roleOut] = await Promise.all([api("permissions"), api("roles")]);
     cache.permissions = out;
+    cache.roleTemplates = roleOut;
+    const roleName = (id) => (roleOut.roles || []).find((role) => String(role.id) === String(id))?.name || "";
     host.innerHTML = `<div class="pro-toolbar"><div><h3>Permissions fines</h3><p class="muted">Au-delà des rôles : salaires, factures, marges, RH, exports, suppressions, etc.</p></div></div>
-      <div class="pro-permission-users">${(out.users || []).map((u) => `<article class="card"><div><b>${esc(u.name)}</b><small>${esc(u.role)} · ${esc(u.company)}</small></div>${button("Configurer", "permission-user", `data-id="${esc(u.id)}"`, "primary")}</article>`).join("")}</div>`;
+      <div class="pro-permission-users">${(out.users || []).map((u) => `<article class="card"><div><b>${esc(u.name)}</b><small>${esc(u.role)} · ${esc(u.company)}${u.role_template_id ? " · profil : " + esc(roleName(u.role_template_id)) : ""}</small></div>${button("Configurer", "permission-user", `data-id="${esc(u.id)}"`, "primary")}</article>`).join("")}</div>`;
   }
   function openPermission(userId) {
     const out = cache.permissions || {};
     const user = (out.users || []).find((x) => String(x.id) === String(userId));
     if (!user) return;
     const row = (key, label) => `<tr><td>${esc(label)}</td><td><input type="checkbox" name="grants" value="${esc(key)}" ${(user.grants || []).includes(key) ? "checked" : ""}></td><td><input type="checkbox" name="denials" value="${esc(key)}" ${(user.denials || []).includes(key) ? "checked" : ""}></td></tr>`;
-    core().modal("Permissions · " + user.name, `<form id="proForm" data-kind="permissions" data-user-id="${esc(user.id)}"><p class="muted">Le rôle principal reste la base. Les autorisations et interdictions ci-dessous permettent d'affiner précisément l'accès.</p><div class="table"><table><thead><tr><th>Permission</th><th>Autoriser</th><th>Refuser</th></tr></thead><tbody>${(out.catalog || []).map((x) => row(x.key, x.label)).join("")}</tbody></table></div><button class="btn primary" type="submit">Enregistrer</button><p id="formError" class="error"></p></form>`);
+    const roles = cache.roleTemplates?.roles || [];
+    core().modal("Permissions · " + user.name, `<form id="proForm" data-kind="permissions" data-user-id="${esc(user.id)}"><p class="muted">Vous pouvez appliquer un profil réutilisable ou rester en réglage manuel.</p><label>Profil personnalisé<select name="roleTemplateId"><option value="">Réglage manuel</option>${roles.map((role) => `<option value="${esc(role.id)}" ${String(user.role_template_id || "") === String(role.id) ? "selected" : ""}>${esc(role.name)}</option>`).join("")}</select></label><div class="table"><table><thead><tr><th>Permission</th><th>Autoriser</th><th>Refuser</th></tr></thead><tbody>${(out.catalog || []).map((x) => row(x.key, x.label)).join("")}</tbody></table></div><button class="btn primary" type="submit">Enregistrer</button><p id="formError" class="error"></p></form>`);
   }
 
   async function renderSettings() {
-    const out = await api("settings");
+    const [out, roleOut] = await Promise.all([api("settings"), api("roles")]);
     cache.settings = out;
+    cache.roleTemplates = roleOut;
     const moduleLabels = { dashboard: "Tableau de bord", employees: "RH / salariés", time: "Pointage", planning: "Planning", absences: "Absences", projects: "Chantiers", crm: "CRM", quotes: "Devis", invoices: "Factures", payments: "Paiements", inventory: "Stock", vehicles: "Véhicules", tools: "Outillage", maintenance: "Maintenance", documents: "Documents", messaging: "Messagerie", reports: "Rapports", clientPortal: "Portail client" };
     host.innerHTML = `<div class="pro-toolbar"><div><h3>Préparation à la vente</h3><p class="muted">Chaque futur client peut avoir sa marque, ses modules et une base de données isolée.</p></div></div>
       <form id="proForm" data-kind="settings" class="pro-settings">
         ${card("Marque / White-label", `<label>Nom de l'application<input name="companyName" value="${esc(out.companyName)}"></label><label>Clé client / tenant<input name="tenantKey" value="${esc(out.tenantKey)}"></label><label>Logo URL<input name="logoUrl" value="${esc(out.logoUrl)}"></label><div class="pro-grid-2"><label>Couleur principale<input name="primaryColor" value="${esc(out.primaryColor)}"></label><label>Couleur accent<input name="accentColor" value="${esc(out.accentColor)}"></label></div><label>Domaine personnalisé<input name="customDomain" value="${esc(out.whiteLabel?.customDomain || "")}" placeholder="app.client.ch"></label><label>E-mail support<input name="supportEmail" value="${esc(out.whiteLabel?.supportEmail || "")}"></label><label>Coordonnées bancaires / IBAN<textarea name="bankCoordinates" maxlength="1000">${esc(out.whiteLabel?.bankCoordinates || "")}</textarea></label><label>Mode TVA<select name="vatMode"><option value="configurable" ${(out.whiteLabel?.vatMode || "configurable") === "configurable" ? "selected" : ""}>Configurable par client</option><option value="taxable" ${out.whiteLabel?.vatMode === "taxable" ? "selected" : ""}>Assujetti TVA</option><option value="non-taxable" ${out.whiteLabel?.vatMode === "non-taxable" ? "selected" : ""}>Non assujetti</option></select></label>`)}
         ${card("Modules activables", `<div class="pro-module-grid">${Object.entries(out.modules || {}).map(([key, enabled]) => `<label><input type="checkbox" name="module:${esc(key)}" ${enabled ? "checked" : ""}> ${esc(moduleLabels[key] || key)}</label>`).join("")}</div>`)}
+        ${card("Rôles personnalisés", `<div class="pro-card-head"><p class="muted">Créez des profils réutilisables avec permissions et modules propres.</p>${button("Nouveau rôle", "role-new", "", "primary")}</div><div class="pro-list">${(roleOut.roles || []).map((role) => `<div><span><b>${esc(role.name)}</b><small>${esc(role.description || "")} · ${(role.permissions || []).length} permission(s)</small></span><div>${button("Modifier", "role-edit", `data-id="${esc(role.id)}"`)} ${button("Archiver", "role-archive", `data-id="${esc(role.id)}"`, "danger")}</div></div>`).join("") || "<p>Aucun rôle personnalisé.</p>"}</div>`)}
         ${card("Abonnement", `<div class="pro-grid-3"><label>Plan<input name="plan" value="${esc(out.billing?.plan || "internal")}"></label><label>Statut<input name="billingStatus" value="${esc(out.billing?.status || "active")}"></label><label>Utilisateurs / sièges<input type="number" min="1" name="seats" value="${esc(out.billing?.seats || "")}"></label></div><p class="muted">Isolation prévue : <b>${esc(out.isolation)}</b>. Pour les clients externes, le modèle recommandé est une base PostgreSQL + stockage fichiers séparés par client.</p>`)}
         <button class="btn primary" type="submit">Enregistrer la configuration</button><p id="formError" class="error"></p>
       </form>`;
+  }
+
+  function roleTemplateForm(roleId="") {
+    const out=cache.roleTemplates || {roles:[],catalog:[],modules:{}};
+    const role=(out.roles||[]).find((item)=>String(item.id)===String(roleId)) || {id:"",name:"",description:"",permissions:[],modules:{}};
+    const moduleLabels = { dashboard: "Tableau de bord", employees: "RH / salariés", time: "Pointage", planning: "Planning", absences: "Absences", projects: "Chantiers", crm: "CRM", quotes: "Devis", invoices: "Factures", payments: "Paiements", inventory: "Stock", vehicles: "Véhicules", tools: "Outillage", maintenance: "Maintenance", documents: "Documents", messaging: "Messagerie", reports: "Rapports", clientPortal: "Portail client" };
+    core().modal(role.id ? "Modifier le rôle" : "Nouveau rôle", `<form id="proForm" data-kind="role-template" data-role-id="${esc(role.id)}"><label>Nom du rôle<input name="name" required maxlength="120" value="${esc(role.name)}" placeholder="Chef d'équipe, secrétaire…"></label><label>Description<textarea name="description" maxlength="1000">${esc(role.description||"")}</textarea></label><h4>Permissions</h4><div class="pro-module-grid">${(out.catalog||[]).map((item)=>`<label><input type="checkbox" name="rolePermission" value="${esc(item.key)}" ${(role.permissions||[]).includes(item.key)?"checked":""}> ${esc(item.label)}</label>`).join("")}</div><h4>Modules visibles</h4><div class="pro-module-grid">${Object.keys(out.modules||{}).map((key)=>`<label><input type="checkbox" name="roleModule" value="${esc(key)}" ${role.modules?.[key]!==false?"checked":""}> ${esc(moduleLabels[key]||key)}</label>`).join("")}</div><p id="formError" class="error"></p><button class="btn primary" type="submit">Enregistrer le rôle</button></form>`);
   }
 
   async function renderCurrent() {
@@ -473,6 +485,14 @@
       }
       else if (action === "project-acceptance") projectAcceptanceForm(b.dataset.id);
       else if (action === "notification-prefs") await notificationPreferencesForm();
+      else if (action === "role-new") roleTemplateForm();
+      else if (action === "role-edit") roleTemplateForm(b.dataset.id);
+      else if (action === "role-archive") {
+        if (!confirm("Archiver ce rôle personnalisé ?")) return;
+        await api("roles/" + encodeURIComponent(b.dataset.id) + "/archive", {});
+        await renderSettings();
+        core().toast("Rôle archivé.");
+      }
       else if (action === "company-profit") { core().setCompany(b.dataset.company || ""); activeTab = "overview"; await renderOverview(); }
       else if (action === "read-all") { await api("notifications/read", { all: true }); await renderActivity(); }
       else if (action === "read-notification") { await api("notifications/read", { id: b.dataset.id }); await renderActivity(); }
@@ -589,10 +609,19 @@
         await renderPlanning();
         core().toast("Affectation ajoutée au planning.");
       } else if (form.dataset.kind === "permissions") {
-        await api("permissions/" + encodeURIComponent(form.dataset.userId), { grants: fd.getAll("grants"), denials: fd.getAll("denials") });
+        const roleTemplateId=fd.get("roleTemplateId");
+        if(roleTemplateId) await api("roles/" + encodeURIComponent(roleTemplateId) + "/apply/" + encodeURIComponent(form.dataset.userId), {});
+        else await api("permissions/" + encodeURIComponent(form.dataset.userId), { grants: fd.getAll("grants"), denials: fd.getAll("denials") });
         core().closeModal(true);
         await renderPermissions();
-        core().toast("Permissions enregistrées.");
+        core().toast(roleTemplateId ? "Profil personnalisé appliqué." : "Permissions enregistrées.");
+      } else if (form.dataset.kind === "role-template") {
+        const modules={};
+        for(const key of Object.keys(cache.roleTemplates?.modules||{})) modules[key]=fd.getAll("roleModule").includes(key);
+        await api("roles", {id:form.dataset.roleId||undefined,name:fd.get("name"),description:fd.get("description"),permissions:fd.getAll("rolePermission"),modules});
+        core().closeModal(true);
+        await renderSettings();
+        core().toast("Rôle personnalisé enregistré.");
       } else if (form.dataset.kind === "settings") {
         const modules = {};
         for (const key of Object.keys(cache.settings?.modules || {})) modules[key] = fd.get("module:" + key) === "on";
