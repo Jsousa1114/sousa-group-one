@@ -225,6 +225,20 @@
     </div>`);
   }
 
+  function projectAcceptanceForm(projectId) {
+    const project = (state().projects || []).find((x) => String(x.id) === String(projectId)) || cache.project?.project || {};
+    const existing = cache.project?.project?.id === projectId ? cache.project?.acceptance : null;
+    core().modal("Réception du chantier", `<form id="proForm" data-kind="project-acceptance" data-project-id="${esc(projectId)}">
+      <p><b>${esc(project.title || projectId)}</b></p>
+      <label>Nom du signataire<input name="signerName" required maxlength="200" value="${esc(existing?.signer_name || profile().name || "")}"></label>
+      <label>Signature électronique<input name="signature" required maxlength="2000" autocomplete="off" placeholder="Nom / validation électronique" value="${esc(existing?.signature || "")}"></label>
+      <label>Observations / réserves<textarea name="notes" maxlength="3000" placeholder="Facultatif">${esc(existing?.notes || "")}</textarea></label>
+      <label class="pro-check"><input type="checkbox" name="confirmed" required> Je confirme que le signataire valide la réception du chantier et les observations ci-dessus.</label>
+      <p class="muted">La signature, l'utilisateur et l'horodatage sont conservés dans l'historique du chantier. Un PV PDF est généré automatiquement.</p>
+      <p id="formError" class="error"></p><button class="btn primary" type="submit">Signer la réception</button>
+    </form>`);
+  }
+
   function shiftDate(value, days) {
     const d = new Date(value + "T12:00:00Z");
     d.setUTCDate(d.getUTCDate() + days);
