@@ -62,6 +62,55 @@ function routes(db) {
     }
     D.fail("Conversation invalide.");
   }
+  async function hydrateMessages(messages) {
+    if (!messages.length) return messages;
+    const ids = messages.map((m) => String(m.id));
+    const [readsResult, overridesResult] = await Promise.all([
+      db.query(
+        "SELECT message_id,user_id FROM message_reads WHERE message_id=ANY($1::text[])",
+        [ids],
+      ),
+      db.query(
+        "SELECT message_id,edited_text,edited_encryption,edited_at,deleted_for_all,deleted_at FROM message_overrides WHERE message_id=ANY($1::text[])",
+        [ids],
+      ),
+    ]);
+    const reads = new Map();
+    for (const row of readsResult.rows) {
+      const key = String(row.message_id);
+      if (!reads.has(key)) reads.set(key, []);
+      reads.get(key).push(String(row.user_id));
+    }
+    const overrides = new Map(
+      overridesResult.rows.map((row) => [String(row.message_id), row]),
+    );
+    return messages.map((source) => {
+      const message = { ...source };
+      message.readBy = [
+        ...new Set([
+          ...(message.readBy || []).map(String),
+          ...(reads.get(String(message.id)) || []),
+        ]),
+      ];
+      const override = overrides.get(String(message.id));
+      if (override?.edited_at && !override.deleted_for_all) {
+        message.text = override.edited_encryption ? "" : override.edited_text || "";
+        if (override.edited_encryption)
+          message.encryption = override.edited_encryption;
+        message.editedAt = override.edited_at;
+      }
+      if (override?.deleted_for_all) {
+        message.text = "";
+        message.attachment = null;
+        message.sharedRef = null;
+        message.encryption = null;
+        message.deletedForAll = true;
+        message.deletedAt = override.deleted_at;
+      }
+      return message;
+    });
+  }
+
   function configurePush() {
     if (
       !webPush ||
@@ -85,6 +134,44 @@ function routes(db) {
         process.env.VAPID_PUBLIC_KEY &&
         process.env.VAPID_PRIVATE_KEY
       ),
+    }),
+  );
+
+  r.get(
+    "/history",
+    wrap(async (req, res) => {
+      const ctx = await context(req.user),
+        key = String(req.query.key || ""),
+        conv = await conversation(ctx, key),
+        limit = Math.min(100, Math.max(20, Number(req.query.limit) || 100));
+      let messages = ctx.view.messages.filter((message) =>
+        conv.type === "thread"
+          ? D.same(message.threadId, conv.thread.id)
+          : !message.threadId &&
+            ((D.same(message.senderId, ctx.user.id) &&
+              D.same(message.recipientId, conv.contact.id)) ||
+              (D.same(message.senderId, conv.contact.id) &&
+                D.same(message.recipientId, ctx.user.id))),
+      );
+      messages.sort(
+        (a, b) =>
+          new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime() ||
+          String(a.id).localeCompare(String(b.id)),
+      );
+      const beforeId = String(req.query.beforeId || "");
+      let end = messages.length;
+      if (beforeId) {
+        const index = messages.findIndex((message) => D.same(message.id, beforeId));
+        if (index >= 0) end = index;
+      }
+      const start = Math.max(0, end - limit),
+        page = await hydrateMessages(messages.slice(start, end));
+      res.set("Cache-Control", "private, no-store").json({
+        messages: page,
+        total: messages.length,
+        hasMore: start > 0,
+        nextBeforeId: page[0]?.id || null,
+      });
     }),
   );
   r.post(
