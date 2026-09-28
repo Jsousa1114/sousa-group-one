@@ -129,6 +129,19 @@ async function ensureSchema(db) {
       updated_by INTEGER,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )`);
+    await db.query("ALTER TABLE pro_user_permissions ADD COLUMN IF NOT EXISTS role_template_id TEXT");
+    await db.query(`CREATE TABLE IF NOT EXISTS pro_role_templates(
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT,
+      permissions TEXT[] NOT NULL DEFAULT '{}',
+      modules JSONB NOT NULL DEFAULT '{}'::jsonb,
+      active BOOLEAN NOT NULL DEFAULT TRUE,
+      created_by INTEGER,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_by INTEGER,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`);
     await db.query(`CREATE TABLE IF NOT EXISTS pro_workspace_settings(
       id INTEGER PRIMARY KEY DEFAULT 1 CHECK(id=1),
       tenant_key TEXT NOT NULL DEFAULT 'sousa-group',
@@ -275,14 +288,30 @@ function routes(db) {
 
   router.get("/config", wrap(async (req, res) => {
     const row = (await db.query("SELECT company_name,logo_url,primary_color,accent_color,modules,white_label FROM pro_workspace_settings WHERE id=1")).rows[0];
+    const role = (await db.query(
+      `SELECT r.id,r.name,r.modules
+       FROM pro_user_permissions p
+       JOIN pro_role_templates r ON r.id=p.role_template_id AND r.active=true
+       WHERE p.user_id=$1`,
+      [req.user.id],
+    )).rows[0];
+    const workspaceModules = { ...defaultModules, ...(row.modules || {}) };
+    const roleModules = role?.modules || {};
+    const effectiveModules = Object.fromEntries(
+      Object.entries(workspaceModules).map(([key, enabled]) => [
+        key,
+        enabled !== false && roleModules[key] !== false,
+      ]),
+    );
     res.json({
       companyName: row.company_name,
       logoUrl: row.logo_url,
       primaryColor: row.primary_color,
       accentColor: row.accent_color,
-      modules: { ...defaultModules, ...(row.modules || {}) },
+      modules: effectiveModules,
       supportEmail: row.white_label?.supportEmail || "",
       permissions: await effectivePermissionKeys(db, req.user),
+      customRole: role ? { id: role.id, name: role.name } : null,
     });
   }));
 
@@ -788,7 +817,7 @@ function routes(db) {
     if (!D.privileged(req.user, ["admin", "direction"])) D.fail("Accès direction requis.", 403);
     const users = (await db.query(
       `SELECT u.id,u.name,u.email,u.role,u.company,
-        COALESCE(p.grants,'{}') grants,COALESCE(p.denials,'{}') denials
+        COALESCE(p.grants,'{}') grants,COALESCE(p.denials,'{}') denials,p.role_template_id
        FROM users u LEFT JOIN pro_user_permissions p ON p.user_id=u.id
        WHERE u.deleted_at IS NULL ORDER BY u.name`,
     )).rows;
@@ -806,12 +835,105 @@ function routes(db) {
     if (!target) D.fail("Utilisateur introuvable.", 404);
     if (target.company !== "group" && !companyAllowed(req.user, target.company)) D.fail("Utilisateur hors périmètre.", 403);
     await db.query(
-      `INSERT INTO pro_user_permissions(user_id,grants,denials,updated_by)
-       VALUES($1,$2,$3,$4)
-       ON CONFLICT(user_id) DO UPDATE SET grants=EXCLUDED.grants,denials=EXCLUDED.denials,updated_by=EXCLUDED.updated_by,updated_at=NOW()`,
+      `INSERT INTO pro_user_permissions(user_id,grants,denials,role_template_id,updated_by)
+       VALUES($1,$2,$3,NULL,$4)
+       ON CONFLICT(user_id) DO UPDATE SET grants=EXCLUDED.grants,denials=EXCLUDED.denials,role_template_id=NULL,updated_by=EXCLUDED.updated_by,updated_at=NOW()`,
       [userId, grants, denials, req.user.id],
     );
     res.json({ ok: true, userId, grants, denials });
+  }));
+
+  router.get("/roles", wrap(async (req, res) => {
+    if (!D.privileged(req.user, ["admin", "direction"])) D.fail("Accès direction requis.", 403);
+    const roles = (await db.query(
+      "SELECT id,name,description,permissions,modules,active,created_at,updated_at FROM pro_role_templates WHERE active=true ORDER BY name",
+    )).rows;
+    res.json({
+      roles,
+      catalog: PERMISSIONS.map(([key, label]) => ({ key, label })),
+      modules: defaultModules,
+    });
+  }));
+
+  router.post("/roles", wrap(async (req, res) => {
+    await requirePermission(db, req.user, "settings.modules", "Gestion des rôles personnalisés non autorisée.");
+    const body = req.body || {},
+      id = body.id ? clean(String(body.id), 120) : "role-" + randomUUID(),
+      name = clean(body.name, 120),
+      description = clean(body.description, 1000, true) || null,
+      validPermissions = new Set(PERMISSIONS.map(([key]) => key)),
+      permissions = [...new Set((Array.isArray(body.permissions) ? body.permissions : []).map(String).filter((key) => validPermissions.has(key)))],
+      requestedModules = body.modules && typeof body.modules === "object" ? body.modules : {},
+      modules = Object.fromEntries(Object.keys(defaultModules).map((key) => [key, requestedModules[key] !== false]));
+    await db.query(
+      `INSERT INTO pro_role_templates(id,name,description,permissions,modules,created_by,updated_by)
+       VALUES($1,$2,$3,$4,$5,$6,$6)
+       ON CONFLICT(id) DO UPDATE SET name=EXCLUDED.name,description=EXCLUDED.description,
+       permissions=EXCLUDED.permissions,modules=EXCLUDED.modules,active=true,updated_by=EXCLUDED.updated_by,updated_at=NOW()`,
+      [id, name, description, permissions, JSON.stringify(modules), req.user.id],
+    );
+    const assigned = (await db.query(
+      `SELECT u.id,u.role
+       FROM users u JOIN pro_user_permissions p ON p.user_id=u.id
+       WHERE p.role_template_id=$1 AND u.deleted_at IS NULL`,
+      [id],
+    )).rows;
+    const desired = new Set(permissions);
+    for (const user of assigned) {
+      const base = new Set(DEFAULT_PERMISSION_KEYS[user.role] || []),
+        grants = [...desired].filter((key) => !base.has(key)),
+        denials = [...base].filter((key) => !desired.has(key));
+      await db.query(
+        "UPDATE pro_user_permissions SET grants=$1,denials=$2,updated_by=$3,updated_at=NOW() WHERE user_id=$4",
+        [grants, denials, req.user.id, user.id],
+      );
+    }
+    res.json({ ok: true, id, name, assignedUpdated: assigned.length });
+  }));
+
+  router.post("/roles/:id/apply/:userId", wrap(async (req, res) => {
+    await requirePermission(db, req.user, "settings.modules", "Affectation de rôle non autorisée.");
+    const role = (await db.query(
+      "SELECT id,name,permissions FROM pro_role_templates WHERE id=$1 AND active=true",
+      [String(req.params.id)],
+    )).rows[0];
+    if (!role) D.fail("Rôle personnalisé introuvable.", 404);
+    const userId = Number(req.params.userId),
+      target = (await db.query(
+        "SELECT id,role,company FROM users WHERE id=$1 AND deleted_at IS NULL",
+        [userId],
+      )).rows[0];
+    if (!target) D.fail("Utilisateur introuvable.", 404);
+    if (target.company !== "group" && !companyAllowed(req.user, target.company))
+      D.fail("Utilisateur hors périmètre.", 403);
+    const base = new Set(DEFAULT_PERMISSION_KEYS[target.role] || []),
+      desired = new Set(role.permissions || []),
+      grants = [...desired].filter((key) => !base.has(key)),
+      denials = [...base].filter((key) => !desired.has(key));
+    await db.query(
+      `INSERT INTO pro_user_permissions(user_id,grants,denials,role_template_id,updated_by)
+       VALUES($1,$2,$3,$4,$5)
+       ON CONFLICT(user_id) DO UPDATE SET grants=EXCLUDED.grants,denials=EXCLUDED.denials,
+       role_template_id=EXCLUDED.role_template_id,updated_by=EXCLUDED.updated_by,updated_at=NOW()`,
+      [userId, grants, denials, role.id, req.user.id],
+    );
+    res.json({ ok: true, userId, role: { id: role.id, name: role.name }, grants, denials });
+  }));
+
+  router.post("/roles/:id/archive", wrap(async (req, res) => {
+    await requirePermission(db, req.user, "settings.modules", "Archivage de rôle non autorisé.");
+    const id = String(req.params.id);
+    const assigned = Number((await db.query(
+      "SELECT COUNT(*)::int n FROM pro_user_permissions WHERE role_template_id=$1",
+      [id],
+    )).rows[0]?.n || 0);
+    if (assigned) D.fail("Ce rôle est encore affecté à un ou plusieurs utilisateurs.");
+    const result = await db.query(
+      "UPDATE pro_role_templates SET active=false,updated_by=$1,updated_at=NOW() WHERE id=$2 AND active=true RETURNING id",
+      [req.user.id, id],
+    );
+    if (!result.rows.length) D.fail("Rôle personnalisé introuvable.", 404);
+    res.json({ ok: true, id });
   }));
 
   router.get("/settings", wrap(async (req, res) => {
