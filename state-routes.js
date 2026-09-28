@@ -7,7 +7,57 @@ const { auth, profile } = require("./auth-middleware"),
   { mutate, loadState } = require("./db");
 const D = require("./domain");
 const { notifyUsers } = require("./messaging-routes");
+const { DEFAULT_PERMISSION_KEYS } = require("./pro-routes");
 const storage = require("./storage");
+
+async function hasProPermission(db, user, key) {
+  const permissions = new Set(DEFAULT_PERMISSION_KEYS[user.role] || []);
+  try {
+    const row = (
+      await db.query(
+        "SELECT grants,denials FROM pro_user_permissions WHERE user_id=$1",
+        [user.id],
+      )
+    ).rows[0];
+    for (const grant of row?.grants || []) permissions.add(String(grant));
+    for (const denial of row?.denials || []) permissions.delete(String(denial));
+  } catch {
+    // The Pro schema can be initialized after the first legacy state request.
+  }
+  return permissions.has(key);
+}
+async function requireProPermission(db, user, key, message) {
+  if (!(await hasProPermission(db, user, key))) D.fail(message || "Permission requise.", 403);
+}
+async function enforceCommandPermission(db, user, body) {
+  const action = String(body?.action || ""),
+    collection = String(body?.collection || ""),
+    payload = body?.payload || {};
+  let permission = "";
+
+  if (action === "client.delete") permission = "client.delete";
+  else if (["project.finish", "project.delete"].includes(action)) permission = "project.close";
+  else if (["employee.delete", "employee.companies"].includes(action)) permission = "hr.access";
+  else if (action === "employee.update" && [
+    "salary", "salaryPeriod", "activity", "weeklyHours", "vacation", "entry", "job",
+  ].some((key) => Object.prototype.hasOwnProperty.call(payload, key))) permission = "hr.access";
+  else if (["time.approve", "planning.delete"].includes(action)) permission = "time.edit";
+  else if (action === "time.add" && user.role !== "employee") permission = "time.edit";
+  else if (
+    ["finance.update", "finance.delete", "finance.archive", "finance.duplicate", "finance.settings", "invoice.issue", "quote.issue", "quote.convert"].includes(action)
+  ) permission = "invoice.edit";
+  else if (action === "create" && ["quotes", "invoices"].includes(collection)) permission = "invoice.edit";
+  else if (action === "create" && collection === "employees") permission = "hr.access";
+  else if (action === "create" && collection === "planning") permission = "time.edit";
+
+  if (permission)
+    await requireProPermission(
+      db,
+      user,
+      permission,
+      "Cette action est bloquée par les permissions fines de votre compte.",
+    );
+}
 function routes(db) {
   const r = express.Router();
   r.use(auth(db));
@@ -323,6 +373,7 @@ function routes(db) {
   r.post(
     "/command",
     wrap(async (req, res) => {
+      await enforceCommandPermission(db, req.user, req.body);
       let systemPush = null;
       const bodyForSystem = {
         ...(req.body || {}),
