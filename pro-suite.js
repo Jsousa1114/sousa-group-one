@@ -431,6 +431,7 @@
   }
 
   async function afterRender() {
+    if (!profile()?.id) return;
     ensureTopActions();
     await applyWorkspaceConfig().catch(() => {});
     await dashboardEnhance();
