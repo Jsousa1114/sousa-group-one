@@ -465,6 +465,13 @@
             esc(message.attachment.name) +
             "</span>";
           encryptedAttachment.querySelector("img").src = url;
+        } else if (message.attachment.kind === "video") {
+          encryptedAttachment.className = "chat-video-wrap";
+          encryptedAttachment.innerHTML =
+            '<video controls playsinline preload="metadata"></video><span>🔐 🎬 ' +
+            esc(message.attachment.name) +
+            "</span>";
+          encryptedAttachment.querySelector("video").src = url;
         } else if (message.attachment.kind === "audio") {
           encryptedAttachment.className = "chat-audio-wrap";
           encryptedAttachment.innerHTML =
@@ -477,7 +484,7 @@
         }
         encryptedAttachment.dataset.decrypted = "1";
         encryptedAttachment.onclick = () => {
-          if (message.attachment.kind !== "audio") window.open(url, "_blank", "noopener");
+          if (!["audio", "video"].includes(message.attachment.kind)) window.open(url, "_blank", "noopener");
         };
       } catch {
         encryptedAttachment.textContent = "🔐 Pièce jointe impossible à déchiffrer";
