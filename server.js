@@ -92,6 +92,7 @@ function createApp(db = pool) {
     "p2-runtime.js",
     "p2-center.js",
     "styles.css",
+    "visual-refresh.css",
     "p1.css",
     "p2.css",
     "pay.html",

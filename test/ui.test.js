@@ -55,6 +55,8 @@ async function setup(
       },
     ];
   }
+  // An employee account must have a linked active record, even with no activity.
+  if (empty && role === "employee") d.employees = [{id:"e1",name:"Employee",company:"home",status:"Actif",vacation:20}];
   configure(d);
   const h = {
     dom,
@@ -287,7 +289,7 @@ test("all role navigation and empty dashboards render without errors", async () 
       for (const p of buttons) {
         click(h, `[data-page="${p}"]`);
         await flush();
-        assert.ok(h.w.document.getElementById("content").textContent.trim());
+        assert.ok(h.w.document.getElementById("content").textContent.trim(), role + ":" + p);
         assert.equal(
           h.w.document
             .getElementById("content")

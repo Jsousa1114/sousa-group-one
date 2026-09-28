@@ -7,7 +7,8 @@
     <title>Sousa Group One</title>
     <link rel="stylesheet" href="styles.css" />
     <link rel="stylesheet" href="p1.css" />
-    <link rel="stylesheet" href="p2.css" />\n    <link rel="stylesheet" href="visual-refresh.css?v=20260927-v3" />
+    <link rel="stylesheet" href="p2.css" />
+    <link rel="stylesheet" href="visual-refresh.css?v=20260928-workspace" />
     <link
       rel="icon"
       type="image/png"
@@ -32,6 +33,7 @@
     <script src="p1-suite.js" defer></script>
   </head>
   <body data-brand="group">
+    <a class="skip-link" href="#content">Aller au contenu</a>
     <section id="login" class="login">
       <div class="login-art">
         <div class="brand">
@@ -44,13 +46,16 @@
         </div>
         <div class="hero">
           <span class="pill">GESTION DU GROUPE</span>
-          <h1>Votre équipe.<br />Vos projets.</h1>
+          <h1>Tout votre groupe.<br /><span>Un seul espace.</span></h1>
           <p>
             Suivez les interventions, les heures et les documents de vos
             entreprises.
           </p>
         </div>
-        <small>Un espace adapté à chaque membre du groupe.</small>
+        <div class="login-companies" aria-label="Les entreprises du groupe">
+          <span>Électricité</span><span>Home Service</span><span>Tech</span>
+          <span>Moving</span><span>Solar</span><span>Events</span>
+        </div>
       </div>
       <div class="login-side">
         <form id="loginForm" class="login-card">
@@ -98,6 +103,7 @@
     </section>
     <div id="app" class="app hidden">
       <aside id="sidebar" class="sidebar">
+        <button class="icon mobile side-close" data-action="close-side" aria-label="Fermer le menu">✕</button>
         <div class="side-brand brand">
           <img
             class="brand-logo"
@@ -113,7 +119,7 @@
             src="/assets/logos/group.png"
             alt="Sousa Group"
           />
-          <label for="companyFilter">Vue active</label
+          <label for="companyFilter">Espace de travail</label
           ><select id="companyFilter"></select>
         </div>
         <nav id="nav" aria-label="Navigation principale"></nav>
@@ -130,12 +136,14 @@
             <button
               class="icon mobile"
               data-action="open-side"
+              aria-controls="sidebar"
+              aria-expanded="false"
               aria-label="Ouvrir le menu"
             >
               ☰
             </button>
             <div>
-              <p class="eyebrow">SOUSA GROUP ONE</p>
+              <p class="eyebrow" id="sectionLabel">VUE D’ENSEMBLE</p>
               <h2 id="title">Tableau de bord</h2>
             </div>
           </div>
@@ -148,11 +156,11 @@
               aria-label="Changer le thème"
             >
               ◐</button
-            ><span id="userName"></span>
+            ><button class="profile-button" data-page="settings" aria-label="Ouvrir mon compte"><span class="profile-monogram" id="userInitials" aria-hidden="true"></span><span id="userName"></span></button>
           </div>
         </header>
         <div id="notice" role="status" class="notice hidden"></div>
-        <section id="content" class="content"></section>
+        <section id="content" class="content" tabindex="-1" aria-labelledby="title"></section>
       </main>
     </div>
     <div id="toast" role="status" class="toast hidden"></div>
