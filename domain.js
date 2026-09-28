@@ -1437,7 +1437,7 @@ function applyCommand(
       breakMs: 0,
     };
     d.clocks.push(result);
-  } else if (["clock.pause", "clock.resume", "clock.stop"].includes(action)) {
+  } else if (["clock.pause", "clock.resume", "clock.stop", "clock.switch"].includes(action)) {
     const c = d.clocks.find((x) => same(x.userId, u.id));
     if (!c) fail("Aucun pointage actif.");
     if (action === "clock.pause") {
@@ -1450,13 +1450,15 @@ function applyCommand(
       c.pauseAt = null;
       result = c;
     } else {
+      const previousProject = ref(d, "projects", c.project);
       const breaks =
           c.breakMs + (c.pauseAt ? new Date(now) - new Date(c.pauseAt) : 0),
         ms = new Date(now) - new Date(c.startedAt) - breaks;
       if (ms < 0) fail("Durée invalide.");
-      result = {
+      const previousTime = {
         id: randomUUID(),
         employeeId: c.employeeId,
+        company: previousProject.company,
         project: c.project,
         date: c.startedAt.slice(0, 10),
         startedAt: c.startedAt,
@@ -1465,14 +1467,33 @@ function applyCommand(
         seconds: Math.round(ms / 1000),
         hours: Math.round(ms / 3600) / 1000,
         status: "À valider",
+        source: action === "clock.switch" ? "clock-switch" : "clock",
       };
-      d.time.push(result);
-      d.clocks = d.clocks.filter((x) => x !== c);
-      const proj = d.projects.find((x) => same(x.id, c.project));
-      if (proj)
-        proj.hours = d.time
-          .filter((x) => same(x.project, proj.id))
-          .reduce((a, x) => a + x.hours, 0);
+      d.time.push(previousTime);
+      previousProject.hours = d.time
+        .filter((x) => same(x.project, previousProject.id))
+        .reduce((a, x) => a + Number(x.hours || 0), 0);
+
+      if (action === "clock.switch") {
+        const nextProject = ref(d, "projects", p.project);
+        if (!canProject(d, u, nextProject)) fail("Chantier non autorisé.", 403);
+        if (same(nextProject.id, previousProject.id))
+          fail("Choisissez un autre chantier.");
+        c.project = nextProject.id;
+        c.startedAt = now;
+        c.pauseAt = null;
+        c.breakMs = 0;
+        result = {
+          ...c,
+          switched: true,
+          previousTime,
+          previousProject: previousProject.id,
+          project: nextProject.id,
+        };
+      } else {
+        d.clocks = d.clocks.filter((x) => x !== c);
+        result = previousTime;
+      }
     }
   } else if (action === "time.add") {
     if (!privileged(u, [...HR, "manager", "employee"]))
