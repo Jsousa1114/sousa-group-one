@@ -2,6 +2,7 @@
 const express = require("express");
 const { randomUUID, randomBytes } = require("node:crypto");
 const D = require("./domain");
+const { notifyUsers } = require("./messaging-routes");
 const { auth } = require("./auth-middleware");
 const { syncEntityMirror, loadState, persistedState } = require("./db");
 
@@ -318,13 +319,9 @@ function lineTotal(line) {
   return Math.round(gross * (1 - Number(line.discount || 0) / 100) * (1 + Number(line.vatRate || 0) / 100) * 100) / 100;
 }
 async function notify(db, userIds, category, title, body, url = "") {
-  for (const userId of [...new Set(userIds.map(Number).filter(Number.isFinite))])
-    await db.query(
-      `INSERT INTO user_notifications(id,user_id,category,title,body,url)
-       VALUES($1,$2,$3,$4,$5,$6)`,
-      [randomUUID(), userId, category.slice(0,60), title.slice(0,200), String(body || "").slice(0,1000), String(url || "").slice(0,1000)],
-    );
+  return notifyUsers(db, userIds, { category, title, body, url });
 }
+
 async function withStateWrite(db, actorId, action, fn) {
   const c = await db.connect();
   try {
