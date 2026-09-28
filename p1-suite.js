@@ -358,6 +358,31 @@
     }catch(e){const el=document.getElementById("formError");if(el)el.textContent=e.message;else core().notice(e.message);}
   }
 
+  function endOfDayForm(timeEntry){
+    if(!timeEntry?.project) return;
+    const project=projects().find(x=>String(x.id)===String(timeEntry.project))||{};
+    modal("Clôture du pointage",`<form id="p1Form" data-kind="field-end-day" data-project-id="${esc(timeEntry.project)}" data-time-id="${esc(timeEntry.id||"")}">
+      <p><b>${esc(project.title||timeEntry.project)}</b> · ${Number(timeEntry.hours||0).toFixed(2)} h enregistrée(s)</p>
+      <label>Travail réalisé / commentaire<textarea name="summary" required maxlength="5000" placeholder="Décrivez ce qui a été fait aujourd'hui."></textarea></label>
+      <label>Problèmes / points à suivre<textarea name="issues" maxlength="5000"></textarea></label>
+      <label>Matériel utilisé / posé<textarea name="materials" maxlength="5000" placeholder="Matériel, quantités, références…"></textarea></label>
+      <label>Photo de fin (facultatif)<input type="file" name="photo" accept="image/jpeg,image/png,image/webp"></label>
+      <label>Validation du technicien<input name="signature" required maxlength="500" value="${esc(profile().name||"")}" placeholder="Nom du technicien"></label>
+      <label class="p1-check"><input type="checkbox" name="confirmed" required> Je confirme l'exactitude du rapport et du pointage.</label>
+      <p class="muted">Le rapport est lié au chantier et horodaté. La photo, si fournie, est classée dans l'album « pendant » du chantier.</p>
+      <p id="formError" class="error"></p><button class="btn primary" type="submit">Enregistrer la fin de journée</button>
+    </form>`);
+  }
+
+  async function fileBase64(file){
+    return await new Promise((resolve,reject)=>{
+      const reader=new FileReader();
+      reader.onload=()=>resolve(String(reader.result||"").split(",")[1]||"");
+      reader.onerror=()=>reject(new Error("Lecture de la photo impossible."));
+      reader.readAsDataURL(file);
+    });
+  }
+
   function currentPosition(){
     return new Promise((resolve)=>{
       if(!navigator.geolocation) return resolve(null);
@@ -369,7 +394,8 @@
     });
   }
   async function clockAction(action, payload={}){
-    const project=action==="clock.start"?payload.project:(state().clocks||[])[0]?.project;
+    const currentClock=(state().clocks||[]).find(x=>!profile().employee_id||String(x.employeeId)===String(profile().employee_id))||(state().clocks||[])[0];
+    const project=["clock.start","clock.switch"].includes(action)?payload.project:currentClock?.project;
     let policy=null;
     const p=projects().find(x=>String(x.id)===String(project));
     if(p) policy=(await api("time/policy?company="+encodeURIComponent(p.company)).catch(()=>null))?.policy;
@@ -380,7 +406,16 @@
     if(geo) await api("time/geolocation",{...geo,action:action==="clock.stop"?"stop":"start",projectId:projectIdValue,timeId:action==="clock.stop"?result.id:null}).catch(()=>{});
     if(action==="clock.stop"&&result.id){
       const applied=await api("time/auto-break",{timeId:result.id}).catch(()=>null);
-      if(applied?.applied){await core().refresh();core().toast("Pause automatique appliquée : "+applied.minutes+" min.");}
+      if(applied?.applied){
+        result.break=applied.minutes;
+        result.hours=applied.hours;
+        await core().refresh();
+        core().toast("Pause automatique appliquée : "+applied.minutes+" min.");
+      }
+    }
+    if(action==="clock.switch"&&result.previousTime?.id){
+      const applied=await api("time/auto-break",{timeId:result.previousTime.id}).catch(()=>null);
+      if(applied?.applied) core().toast("Pause automatique appliquée au chantier précédent.");
     }
     return result;
   }
