@@ -1,6 +1,6 @@
 "use strict";
 
-const STATIC_CACHE = "sgo-shell-2026-09-27-v6",
+const STATIC_CACHE = "sgo-shell-2026-09-28-workspace-v1",
   STATIC_ASSETS = [
     "/",
     "/index.html",
@@ -13,6 +13,8 @@ const STATIC_CACHE = "sgo-shell-2026-09-27-v6",
     "/p2-runtime.js",
     "/p2-center.js",
     "/p1.css",
+    "/p1-suite.js",
+    "/passkeys.js",
     "/p2.css",
     "/visual-refresh.css",
     "/p3-center.js",
