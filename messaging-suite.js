@@ -465,6 +465,13 @@
             esc(message.attachment.name) +
             "</span>";
           encryptedAttachment.querySelector("img").src = url;
+        } else if (message.attachment.kind === "video") {
+          encryptedAttachment.className = "chat-video-wrap";
+          encryptedAttachment.innerHTML =
+            '<video controls playsinline preload="metadata"></video><span>🔐 🎬 ' +
+            esc(message.attachment.name) +
+            "</span>";
+          encryptedAttachment.querySelector("video").src = url;
         } else if (message.attachment.kind === "audio") {
           encryptedAttachment.className = "chat-audio-wrap";
           encryptedAttachment.innerHTML =
@@ -477,7 +484,7 @@
         }
         encryptedAttachment.dataset.decrypted = "1";
         encryptedAttachment.onclick = () => {
-          if (message.attachment.kind !== "audio") window.open(url, "_blank", "noopener");
+          if (!["audio", "video"].includes(message.attachment.kind)) window.open(url, "_blank", "noopener");
         };
       } catch {
         encryptedAttachment.textContent = "🔐 Pièce jointe impossible à déchiffrer";
@@ -815,6 +822,7 @@
         <button type="button" data-suite-action="pref-pin">${p.pinned ? "Retirer l’épingle" : "📌 Épingler"}</button>
         <button type="button" data-suite-action="pref-archive">${p.archived ? "Restaurer des archives" : "🗄 Archiver"}</button>
         <button type="button" data-suite-action="pref-mute">${muted ? "🔔 Réactiver les notifications" : "🔕 Mettre en sourdine"}</button>
+        <button type="button" data-suite-action="download-files">📦 Télécharger toutes les pièces jointes</button>
       </div>`,
     );
   }
@@ -979,6 +987,286 @@
     input.click();
   }
 
+  async function optimizeImageAttachment(attachment) {
+    if (!attachment || attachment.kind !== "image" || !attachment.content || attachment.mime === "image/gif") return attachment;
+    try {
+      const binary = atob(attachment.content),
+        bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      if (bytes.length < 220 * 1024) return attachment;
+      const source = new Blob([bytes], { type: attachment.mime || "image/jpeg" }),
+        bitmap = await createImageBitmap(source),
+        scale = Math.min(1, 1920 / Math.max(bitmap.width, bitmap.height)),
+        canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+      canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+      canvas.getContext("2d").drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      bitmap.close?.();
+      const mime = attachment.mime === "image/png" && source.size < 800 * 1024 ? "image/png" : "image/jpeg",
+        compressed = await new Promise((resolve) =>
+          canvas.toBlob(resolve, mime, mime === "image/jpeg" ? 0.82 : undefined),
+        );
+      if (!compressed || compressed.size >= source.size) return attachment;
+      const content = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result).split(",")[1]);
+        reader.onerror = reject;
+        reader.readAsDataURL(compressed);
+      });
+      return {
+        ...attachment,
+        name:
+          mime === "image/jpeg"
+            ? String(attachment.name || "image").replace(/\.(png|webp|jpe?g)$/i, "") + ".jpg"
+            : attachment.name,
+        mime,
+        content,
+      };
+    } catch {
+      return attachment;
+    }
+  }
+
+  function attachmentBlob(attachment) {
+    const binary = atob(String(attachment?.content || ""));
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return new Blob([bytes], { type: attachment?.mime || "application/octet-stream" });
+  }
+
+  async function blobContent(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result).split(",")[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  async function optimizeVideoAttachment(attachment) {
+    if (!attachment || attachment.kind !== "video" || !attachment.content) return attachment;
+    const source = attachmentBlob(attachment);
+    const serverLimit = 5 * 1024 * 1024;
+    if (source.size <= serverLimit) return attachment;
+    if (source.size > 25 * 1024 * 1024)
+      throw new Error("La vidéo dépasse 25 Mo avant compression.");
+    if (typeof MediaRecorder === "undefined")
+      throw new Error("Cette vidéo dépasse 5 Mo et ce navigateur ne permet pas sa compression. Réduisez ou découpez la vidéo.");
+
+    const video = document.createElement("video");
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = "auto";
+    video.style.cssText = "position:fixed;left:-99999px;top:-99999px;width:1px;height:1px;opacity:0;pointer-events:none";
+    const url = URL.createObjectURL(source);
+    video.src = url;
+    document.body.appendChild(video);
+    try {
+      await new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error("Lecture vidéo impossible.")), 12000);
+        video.onloadedmetadata = () => { clearTimeout(timer); resolve(); };
+        video.onerror = () => { clearTimeout(timer); reject(new Error("Format vidéo non pris en charge.")); };
+      });
+      if (!Number.isFinite(video.duration) || video.duration <= 0)
+        throw new Error("Durée vidéo invalide.");
+      if (video.duration > 75)
+        throw new Error("Pour rester sous 5 Mo, découpez les vidéos de plus de 75 secondes avant envoi.");
+
+      const stream = video.captureStream?.() || video.mozCaptureStream?.();
+      if (!stream)
+        throw new Error("La compression vidéo n'est pas disponible sur ce navigateur.");
+      const mime = [
+        "video/webm;codecs=vp9,opus",
+        "video/webm;codecs=vp8,opus",
+        "video/webm",
+      ].find((value) => MediaRecorder.isTypeSupported?.(value)) || "";
+      const chunks = [];
+      const recorder = new MediaRecorder(stream, {
+        ...(mime ? { mimeType: mime } : {}),
+        videoBitsPerSecond: 500000,
+        audioBitsPerSecond: 64000,
+      });
+      const done = new Promise((resolve, reject) => {
+        recorder.ondataavailable = (event) => { if (event.data?.size) chunks.push(event.data); };
+        recorder.onerror = () => reject(new Error("Compression vidéo interrompue."));
+        recorder.onstop = resolve;
+      });
+      recorder.start(1000);
+      await video.play();
+      await new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error("Compression vidéo trop longue.")), 90000);
+        video.onended = () => { clearTimeout(timer); resolve(); };
+        video.onerror = () => { clearTimeout(timer); reject(new Error("Lecture vidéo interrompue.")); };
+      });
+      if (recorder.state !== "inactive") recorder.stop();
+      await done;
+      const compressed = new Blob(chunks, { type: recorder.mimeType || "video/webm" });
+      if (!compressed.size)
+        throw new Error("La compression vidéo n'a produit aucun fichier.");
+      if (compressed.size > serverLimit)
+        throw new Error("La vidéo compressée reste supérieure à 5 Mo. Réduisez sa durée.");
+      if (compressed.size >= source.size) return attachment;
+      return {
+        ...attachment,
+        name: String(attachment.name || "video").replace(/\.[^.]+$/, "") + ".webm",
+        mime: (recorder.mimeType || "video/webm").split(";")[0],
+        kind: "video",
+        content: await blobContent(compressed),
+        originalSize: source.size,
+        compressed: true,
+      };
+    } finally {
+      try { video.pause(); } catch {}
+      video.remove();
+      URL.revokeObjectURL(url);
+    }
+  }
+
+  function crc32(bytes) {
+    if (!crc32.table) {
+      crc32.table = Array.from({ length: 256 }, (_, n) => {
+        let c = n;
+        for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+        return c >>> 0;
+      });
+    }
+    let crc = 0xffffffff;
+    for (const byte of bytes) crc = crc32.table[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+    return (crc ^ 0xffffffff) >>> 0;
+  }
+  function concatBytes(parts) {
+    const out = new Uint8Array(parts.reduce((n, part) => n + part.length, 0));
+    let offset = 0;
+    for (const part of parts) {
+      out.set(part, offset);
+      offset += part.length;
+    }
+    return out;
+  }
+  function zipLocal(nameBytes, data, crc) {
+    const out = new Uint8Array(30 + nameBytes.length),
+      view = new DataView(out.buffer);
+    view.setUint32(0, 0x04034b50, true);
+    view.setUint16(4, 20, true);
+    view.setUint16(6, 0x0800, true);
+    view.setUint16(8, 0, true);
+    view.setUint16(10, 0, true);
+    view.setUint16(12, 0x21, true);
+    view.setUint32(14, crc, true);
+    view.setUint32(18, data.length, true);
+    view.setUint32(22, data.length, true);
+    view.setUint16(26, nameBytes.length, true);
+    view.setUint16(28, 0, true);
+    out.set(nameBytes, 30);
+    return out;
+  }
+  function zipCentral(nameBytes, data, crc, offset) {
+    const out = new Uint8Array(46 + nameBytes.length),
+      view = new DataView(out.buffer);
+    view.setUint32(0, 0x02014b50, true);
+    view.setUint16(4, 20, true);
+    view.setUint16(6, 20, true);
+    view.setUint16(8, 0x0800, true);
+    view.setUint16(10, 0, true);
+    view.setUint16(12, 0, true);
+    view.setUint16(14, 0x21, true);
+    view.setUint32(16, crc, true);
+    view.setUint32(20, data.length, true);
+    view.setUint32(24, data.length, true);
+    view.setUint16(28, nameBytes.length, true);
+    view.setUint16(30, 0, true);
+    view.setUint16(32, 0, true);
+    view.setUint16(34, 0, true);
+    view.setUint16(36, 0, true);
+    view.setUint32(38, 0, true);
+    view.setUint32(42, offset, true);
+    out.set(nameBytes, 46);
+    return out;
+  }
+  async function buildZip(files) {
+    const encoder = new TextEncoder(),
+      localParts = [],
+      centralParts = [];
+    let offset = 0;
+    for (const file of files) {
+      const data = new Uint8Array(await file.blob.arrayBuffer()),
+        nameBytes = encoder.encode(file.name),
+        crc = crc32(data),
+        local = zipLocal(nameBytes, data, crc),
+        central = zipCentral(nameBytes, data, crc, offset);
+      localParts.push(local, data);
+      centralParts.push(central);
+      offset += local.length + data.length;
+    }
+    const central = concatBytes(centralParts),
+      end = new Uint8Array(22),
+      endView = new DataView(end.buffer);
+    endView.setUint32(0, 0x06054b50, true);
+    endView.setUint16(4, 0, true);
+    endView.setUint16(6, 0, true);
+    endView.setUint16(8, files.length, true);
+    endView.setUint16(10, files.length, true);
+    endView.setUint32(12, central.length, true);
+    endView.setUint32(16, offset, true);
+    endView.setUint16(20, 0, true);
+    return new Blob([...localParts, central, end], { type: "application/zip" });
+  }
+  async function conversationAttachmentBlob(message) {
+    const response = await core().authFetch(
+      "/api/state/messages/" + encodeURIComponent(message.id) + "/attachment",
+    );
+    if (!response.ok) throw new Error("Pièce jointe inaccessible : " + (message.attachment?.name || message.id));
+    if (message.encryption) {
+      return cryptoBox().decryptAttachment(
+        core().api,
+        message.encryption,
+        profile().id,
+        await response.arrayBuffer(),
+        message.attachment?.originalMime || message.attachment?.mime || "application/octet-stream",
+      );
+    }
+    return response.blob();
+  }
+  async function downloadConversationFiles() {
+    const conv = currentConversation();
+    if (!conv) throw new Error("Ouvrez une conversation.");
+    const messages = (state()?.messages || []).filter(
+      (message) =>
+        keyForMessage(message) === conv.key &&
+        message.attachment &&
+        !message.deletedForAll,
+    );
+    if (!messages.length) throw new Error("Aucune pièce jointe dans cette conversation.");
+    if (messages.length > 150)
+      throw new Error("La conversation contient plus de 150 fichiers. Utilisez la recherche pour limiter l'export.");
+    core().toast("Préparation des fichiers…");
+    const files = [];
+    let total = 0;
+    for (const message of messages) {
+      const blob = await conversationAttachmentBlob(message);
+      total += blob.size;
+      if (total > 250 * 1024 * 1024)
+        throw new Error("Le téléchargement groupé dépasse 250 Mo.");
+      const safe = String(message.attachment?.name || "fichier")
+        .replace(/[\\/:*?"<>|]+/g, "-")
+        .slice(0, 160);
+      files.push({
+        name: String(message.id).slice(0, 12) + "-" + safe,
+        blob,
+      });
+    }
+    const zip = await buildZip(files),
+      url = URL.createObjectURL(zip),
+      link = document.createElement("a");
+    objectUrls.add(url);
+    link.href = url;
+    link.download = "conversation-" + new Date().toISOString().slice(0, 10) + ".zip";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    core().toast(files.length + " fichier(s) téléchargé(s).");
+  }
+
   async function prepareOutgoingMessage(payload, targetKey = null) {
     const conv = targetKey ? conversationByKey(targetKey) : currentConversation(),
       next = {
@@ -986,6 +1274,8 @@
         forwardedFromId: payload.forwardedFromId || pendingForwardedFromId || "",
         sharedRef: payload.sharedRef || pendingSharedRef || null,
       };
+    next.attachment = await optimizeImageAttachment(next.attachment);
+    next.attachment = await optimizeVideoAttachment(next.attachment);
     if (!conv) return next;
     const e2eeMode = mode();
     if (e2eeMode !== "off" && cryptoBox()) {
@@ -1492,6 +1782,10 @@
           );
         }
       } else if (action === "chat-options") openChatOptions();
+      else if (action === "download-files") {
+        core().closeModal();
+        await downloadConversationFiles();
+      }
       else if (action === "pref-pin") {
         const conv = currentConversation(),
           p = prefFor(conv.key);

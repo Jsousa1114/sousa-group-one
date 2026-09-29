@@ -7,7 +7,57 @@ const { auth, profile } = require("./auth-middleware"),
   { mutate, loadState } = require("./db");
 const D = require("./domain");
 const { notifyUsers } = require("./messaging-routes");
+const { DEFAULT_PERMISSION_KEYS } = require("./pro-routes");
 const storage = require("./storage");
+
+async function hasProPermission(db, user, key) {
+  const permissions = new Set(DEFAULT_PERMISSION_KEYS[user.role] || []);
+  try {
+    const row = (
+      await db.query(
+        "SELECT grants,denials FROM pro_user_permissions WHERE user_id=$1",
+        [user.id],
+      )
+    ).rows[0];
+    for (const grant of row?.grants || []) permissions.add(String(grant));
+    for (const denial of row?.denials || []) permissions.delete(String(denial));
+  } catch {
+    // The Pro schema can be initialized after the first legacy state request.
+  }
+  return permissions.has(key);
+}
+async function requireProPermission(db, user, key, message) {
+  if (!(await hasProPermission(db, user, key))) D.fail(message || "Permission requise.", 403);
+}
+async function enforceCommandPermission(db, user, body) {
+  const action = String(body?.action || ""),
+    collection = String(body?.collection || ""),
+    payload = body?.payload || {};
+  let permission = "";
+
+  if (action === "client.delete") permission = "client.delete";
+  else if (["project.finish", "project.delete"].includes(action)) permission = "project.close";
+  else if (["employee.delete", "employee.companies"].includes(action)) permission = "hr.access";
+  else if (action === "employee.update" && [
+    "salary", "salaryPeriod", "activity", "weeklyHours", "vacation", "entry", "job",
+  ].some((key) => Object.prototype.hasOwnProperty.call(payload, key))) permission = "hr.access";
+  else if (["time.approve", "planning.delete"].includes(action)) permission = "time.edit";
+  else if (action === "time.add" && user.role !== "employee") permission = "time.edit";
+  else if (
+    ["finance.update", "finance.delete", "finance.archive", "finance.duplicate", "finance.settings", "invoice.issue", "quote.issue", "quote.convert"].includes(action)
+  ) permission = "invoice.edit";
+  else if (action === "create" && ["quotes", "invoices"].includes(collection)) permission = "invoice.edit";
+  else if (action === "create" && collection === "employees") permission = "hr.access";
+  else if (action === "create" && collection === "planning") permission = "time.edit";
+
+  if (permission)
+    await requireProPermission(
+      db,
+      user,
+      permission,
+      "Cette action est bloquée par les permissions fines de votre compte.",
+    );
+}
 function routes(db) {
   const r = express.Router();
   r.use(auth(db));
@@ -103,7 +153,54 @@ function routes(db) {
       const contactPhoto = (u) =>
         employeePhotos.get(String(u.employee_id)) || "";
       const view = D.viewState(row.data, req.user);
+      const messageStats = {};
       if (view.messages.length) {
+        const readForUser = new Set(
+            (
+              await db.query(
+                "SELECT message_id FROM message_reads WHERE user_id=$1",
+                [req.user.id],
+              )
+            ).rows.map((row) => String(row.message_id)),
+          ),
+          grouped = new Map();
+        for (const message of view.messages) {
+          const key = message.threadId
+            ? "thread:" + String(message.threadId)
+            : "direct:" +
+              String(
+                D.same(message.senderId, req.user.id)
+                  ? message.recipientId
+                  : message.senderId,
+              );
+          if (!grouped.has(key)) grouped.set(key, []);
+          grouped.get(key).push(message);
+          if (!messageStats[key]) messageStats[key] = { total: 0, unread: 0 };
+          messageStats[key].total++;
+          const alreadyRead =
+            readForUser.has(String(message.id)) ||
+            (message.readBy || []).some((id) => D.same(id, req.user.id));
+          if (!D.same(message.senderId, req.user.id) && !alreadyRead)
+            messageStats[key].unread++;
+        }
+        view.messages = [...grouped.values()]
+          .flatMap((messages) =>
+            messages
+              .sort(
+                (a, b) =>
+                  new Date(a.createdAt).getTime() -
+                    new Date(b.createdAt).getTime() ||
+                  String(a.id).localeCompare(String(b.id)),
+              )
+              .slice(-120),
+          )
+          .sort(
+            (a, b) =>
+              new Date(a.createdAt).getTime() -
+                new Date(b.createdAt).getTime() ||
+              String(a.id).localeCompare(String(b.id)),
+          );
+
         const ids = view.messages.map((m) => String(m.id)),
           [readsResult, overridesResult] = await Promise.all([
             db.query(
@@ -153,6 +250,7 @@ function routes(db) {
       }
       res.set("Cache-Control", "no-store").json({
         data: view,
+        messageStats,
         revision: row.revision,
         contacts: users
           .filter(
@@ -323,6 +421,7 @@ function routes(db) {
   r.post(
     "/command",
     wrap(async (req, res) => {
+      await enforceCommandPermission(db, req.user, req.body);
       let systemPush = null;
       const bodyForSystem = {
         ...(req.body || {}),

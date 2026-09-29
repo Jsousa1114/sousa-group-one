@@ -83,6 +83,10 @@ async function make(viewport) {
   page.on("console", (m) => {
     if (m.type() === "error") errors.push("console:" + m.text());
   });
+  page.on("response", (response) => {
+    if (response.status() === 401)
+      errors.push("response:401 " + response.url());
+  });
   return { context, page, errors };
 }
 async function login(page, email) {
@@ -282,6 +286,14 @@ async function noOverflow(page, label) {
     await client.page.locator("#suiteGlobalSearch").fill(secret.slice(0, 12));
     await client.page.locator("#suiteSearchResults button").first().waitFor({ timeout: 8000 });
     console.log("STEP 10 search verified");
+
+    const historyProbe = await admin.page.evaluate(async () => {
+      const response = await fetch("/api/messaging/history?key=" + encodeURIComponent("direct:" + clientId) + "&limit=20", { credentials: "same-origin" });
+      return { status: response.status, body: await response.json() };
+    });
+    assert.equal(historyProbe.status, 200, "paginated message history should be accessible");
+    assert.ok(Array.isArray(historyProbe.body.messages), "history endpoint must return messages");
+    assert.ok(historyProbe.body.total >= historyProbe.body.messages.length, "history total must cover page size");
 
     assert.deepEqual(admin.errors, [], "admin page errors: " + admin.errors.join("\n"));
     assert.deepEqual(client.errors, [], "client page errors: " + client.errors.join("\n"));

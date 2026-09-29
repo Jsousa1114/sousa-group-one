@@ -17,6 +17,10 @@ on:
       - p2-center.js
       - p2-routes.js
       - p2.css
+      - pro-suite.js
+      - pro-routes.js
+      - pro.css
+      - test/pro-center.test.js
       - test/p2.test.js
       - pay.html
       - pay.js

@@ -37,6 +37,8 @@ let token = sessionStorage.getItem("sgo_session") ? "cookie" : null,
   state = null,
   profile = null,
   contacts = [],
+  messageStats = {},
+  chatHistoryCache = new Map(),
   revision = 0,
   page = "dashboard",
   company = "",
@@ -102,19 +104,20 @@ const menus = {
   messages: ["Messages", Object.keys(roles)],
   reports: ["Rapports", [...core, "hr", "accounting", "manager"]],
   pilotage: ["Pilotage", [...core, "hr", "manager", "accounting", "employee"]],
+  pro: ["Centre de gestion", [...core, "hr", "manager", "accounting", "employee"]],
   advanced: ["P2 · Avancé", Object.keys(roles)],
   users: ["Comptes", ["admin"]],
   audit: ["Journal", hr],
   settings: ["Mon compte", Object.keys(roles)],
 };
-// Presentation-only navigation. Existing role checks remain the authority.
+// Presentation-only navigation. Existing role and fine-permission checks remain authoritative.
 const navigationGroups = [
   ["Vue d’ensemble", ["dashboard", "messages"]],
   ["Équipe", ["employees", "planning", "time", "absences"]],
   ["Activité", ["projects", "clients", "maintenance", "documents"]],
   ["Finances", ["quotes", "invoices", "payments", "expenses"]],
   ["Ressources", ["inventory", "tools", "vehicles", "suppliers"]],
-  ["Gestion", ["companies", "reports", "pilotage", "advanced", "audit", "settings"]],
+  ["Gestion", ["pro", "companies", "reports", "pilotage", "advanced", "audit", "settings"]],
 ];
 function navigationIcon(key) {
   const paths = {
@@ -135,6 +138,7 @@ function navigationIcon(key) {
     vehicles: '<path d="M3 7h11v11H3V7Zm11 4h4l3 4v3h-7"/><circle cx="7" cy="18" r="2"/><circle cx="18" cy="18" r="2"/>',
     reports: '<path d="M4 3v18h17M8 16v-4M13 16V7M18 16v-7"/>',
     settings: '<circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/>',
+    pro: '<path d="M4 5h16v14H4z"/><path d="M8 9h8M8 13h5"/>',
   };
   const aliases = {maintenance:"planning",tools:"settings",suppliers:"inventory",companies:"projects",pilotage:"reports",advanced:"dashboard",audit:"quotes"};
   return `<svg class="nav-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${paths[key] || paths[aliases[key]] || paths.documents}</svg>`;
@@ -166,7 +170,7 @@ const can = (rs) => {
 };
 const visible = (k) =>
   (state?.[k] || []).filter((x) => {
-    if (k === "employees" && x.deletedAt) return false;
+    if (x.deletedAt && k !== "messages") return false;
     if (!company) return true;
     const employee =
       k === "employees"
@@ -234,6 +238,7 @@ async function api(path, body) {
   return data;
 }
 const chatTextDrafts = new Map();
+const chatMessageLimits = new Map();
 const chatKey = () =>
   selectedThreadId
     ? "thread:" + selectedThreadId
@@ -278,6 +283,8 @@ function clearSession() {
   state = null;
   profile = null;
   contacts = [];
+  messageStats = {};
+  chatHistoryCache.clear();
   userAccounts = [];
   selectedRecipient = "";
   selectedThreadId = "";
@@ -300,6 +307,16 @@ async function refresh(renderNow = true) {
   try {
     const out = await api("state");
     state = out.data;
+    messageStats = out.messageStats || {};
+    if (chatHistoryCache.size && state?.messages) {
+      const known = new Set(state.messages.map((message) => String(message.id)));
+      for (const cached of chatHistoryCache.values())
+        for (const message of cached || [])
+          if (!known.has(String(message.id))) {
+            state.messages.push(message);
+            known.add(String(message.id));
+          }
+    }
     revision = out.revision;
     profile = out.profile;
     contacts = out.contacts;
@@ -310,6 +327,7 @@ async function refresh(renderNow = true) {
         revision,
         profile,
         contacts,
+        messageStats,
         savedAt: new Date().toISOString(),
       }),
     );
@@ -324,6 +342,7 @@ async function refresh(renderNow = true) {
         revision = cached.revision || 0;
         profile = cached.profile;
         contacts = cached.contacts || [];
+        messageStats = cached.messageStats || {};
         document.body.classList.add("offline-mode");
         notice(
           "Mode hors ligne : dernière copie locale affichée. Les modifications sont désactivées jusqu’au retour du réseau.",
@@ -467,24 +486,37 @@ function render() {
   if (!can(menus[page]?.[1] || [])) page = "dashboard";
   $("title").textContent = menus[page][0];
   document.body.dataset.view = page;
-  $("sectionLabel").textContent = navigationGroups.find(([, keys]) => keys.includes(page))?.[0] || "Espace de travail";
-  $("userInitials").textContent = profile.name.trim().split(/\s+/).slice(0, 2).map((n) => n[0]).join("");
+  if ($("sectionLabel"))
+    $("sectionLabel").textContent =
+      navigationGroups.find(([, keys]) => keys.includes(page))?.[0] || "Espace de travail";
+  if ($("userInitials"))
+    $("userInitials").textContent = profile.name
+      .trim()
+      .split(/\s+/)
+      .slice(0, 2)
+      .map((n) => n[0])
+      .join("");
   $("userName").textContent = profile.name + " · " + roles[profile.role];
   const navScroll = $("nav").scrollTop;
-  $("nav").innerHTML = navigationGroups.map(([group, keys]) => {
-    const available = keys.filter((k) => can(menus[k][1]));
-    if (!available.length) return "";
-    return `<div class="nav-section"><p class="nav-group">${esc(group)}</p>${available.map((k) => {
-      const label = menus[k][0];
-      const unread =
-        k === "messages"
-          ? state.messages.filter(
-              (m) => !same(m.senderId, profile.id) && !chatRead(m),
-            ).length
-          : 0;
-      return `<button class="nav-item ${page === k ? "active" : ""}" data-page="${k}" ${page === k ? 'aria-current="page"' : ""}>${navigationIcon(k)}<span>${esc(label)}</span>${unread ? ` <span class="nav-unread">${unread > 99 ? "99+" : unread}</span>` : ""}</button>`;
-    }).join("")}</div>`;
-  }).join("");
+  $("nav").innerHTML = navigationGroups
+    .map(([group, keys]) => {
+      const available = keys.filter((k) => menus[k] && can(menus[k][1]) && k !== "users");
+      if (!available.length) return "";
+      return `<div class="nav-section"><p class="nav-group">${esc(group)}</p>${available
+        .map((k) => {
+          const label = menus[k][0];
+          const unread =
+            k === "messages"
+              ? Object.values(messageStats || {}).reduce(
+                  (total, stat) => total + Number(stat?.unread || 0),
+                  0,
+                )
+              : 0;
+          return `<button class="nav-item ${page === k ? "active" : ""}" data-page="${k}" ${page === k ? 'aria-current="page"' : ""}>${navigationIcon(k)}<span>${esc(label)}</span>${unread ? ` <span class="nav-unread">${unread > 99 ? "99+" : unread}</span>` : ""}</button>`;
+        })
+        .join("")}</div>`;
+    })
+    .join("");
   $("nav").scrollTop = navScroll;
   $("companyFilter").innerHTML =
     '<option value="">Toutes mes données</option>' +
@@ -499,6 +531,8 @@ function render() {
   $("content").innerHTML = views[page] ? views[page]() : genericPage(page);
   if (page === "advanced" && window.SGOP2Center?.render)
     window.SGOP2Center.render($("p2Standalone")).catch((e) => notice(e.message));
+  if (page === "pro" && window.SGOProSuite?.render)
+    window.SGOProSuite.render($("proStandalone")).catch((e) => notice(e.message));
   if (
     (page === "users" || page === "employees") &&
     profile.role === "admin" &&
@@ -535,6 +569,7 @@ function render() {
     window.SGOAccountCenter?.afterRender?.();
     window.SGOOperationsCenter?.afterRender?.();
     window.SGOP1Suite?.afterRender?.();
+    window.SGOProSuite?.afterRender?.();
   });
 }
 function projectRows(list) {
@@ -553,7 +588,10 @@ function sum(k, field) {
   return visible(k).reduce((n, r) => n + (Number(r[field]) || 0), 0);
 }
 function dashboard() {
-  const intro = `<section class="workspace-welcome"><div><p class="eyebrow">${esc(new Date().toLocaleDateString("fr-CH", {weekday:"long", day:"numeric", month:"long",timeZone:"Europe/Zurich"}))}</p><h1>Bonjour, ${esc(profile.name.split(" ")[0])}.</h1><p>Voici l’essentiel de votre activité.</p></div><div class="workspace-shortcuts">${["planning", "projects", "messages"].filter(k => can(menus[k][1])).map(k=>`<button type="button" class="workspace-shortcut" data-shortcut="${k}">${navigationIcon(k)}<span>${esc(menus[k][0])}</span></button>`).join("")}</div></section>`;
+  const shortcutKeys = ["planning", "projects", "messages", "pro"].filter(
+    (k) => menus[k] && can(menus[k][1]),
+  ).slice(0, 3);
+  const intro = `<section class="workspace-welcome"><div><p class="eyebrow">${esc(new Date().toLocaleDateString("fr-CH", {weekday:"long", day:"numeric", month:"long",timeZone:"Europe/Zurich"}))}</p><h1>Bonjour, ${esc(profile.name.split(" ")[0])}.</h1><p>Voici l’essentiel de votre activité.</p></div><div class="workspace-shortcuts">${shortcutKeys.map(k=>`<button type="button" class="workspace-shortcut" data-shortcut="${k}">${navigationIcon(k)}<span>${esc(menus[k][0])}</span></button>`).join("")}</div></section>`;
   if (profile.role === "client")
     return (
       intro +
@@ -934,6 +972,7 @@ function chatMessagePreview(m) {
   if (m.sharedRef) return prefix + "📄 " + (m.sharedRef.title || m.sharedRef.id);
   if (m.text) return prefix + m.text;
   if (m.attachment?.kind === "image") return prefix + "📷 Photo";
+  if (m.attachment?.kind === "video") return prefix + "🎬 Vidéo";
   if (m.attachment?.kind === "audio") return prefix + "🎤 Message vocal";
   return prefix + "📎 " + (m.attachment?.name || "Fichier");
 }
@@ -944,6 +983,8 @@ function chatAttachmentHtml(m) {
     return `<button type="button" class="chat-attachment-link encrypted-attachment" data-encrypted-attachment="${esc(m.id)}">🔐 ${label} · déchiffrement…</button>`;
   if (m.attachment.kind === "image")
     return `<button type="button" class="chat-media-button" data-action="chat-open-attachment" data-id="${esc(m.id)}"><img data-chat-media="${esc(m.id)}" alt="${label}" class="chat-image-preview"><span>📷 ${label}</span></button>`;
+  if (m.attachment.kind === "video")
+    return `<div class="chat-video-wrap"><video controls playsinline preload="metadata" data-chat-media="${esc(m.id)}"></video><button type="button" class="chat-attachment-link" data-action="chat-open-attachment" data-id="${esc(m.id)}">🎬 ${label}</button></div>`;
   if (m.attachment.kind === "audio")
     return `<div class="chat-audio-wrap"><audio controls preload="none" data-chat-media="${esc(m.id)}"></audio><button type="button" class="chat-attachment-link" data-action="chat-open-attachment" data-id="${esc(m.id)}">🎤 ${label}</button></div>`;
   return `<button type="button" class="chat-attachment-link" data-action="chat-open-attachment" data-id="${esc(m.id)}">📎 ${label} · ${Math.ceil((m.attachment.size || 0) / 1024)} Ko</button>`;
@@ -1005,6 +1046,7 @@ async function markChatRead() {
       requestId: crypto.randomUUID(),
     });
     if (Number.isSafeInteger(out.revision)) revision = out.revision;
+    if (messageStats[chatKey()]) messageStats[chatKey()].unread = 0;
     for (const m of state.messages) {
       const belongs = payload.threadId
         ? same(m.threadId, payload.threadId)
@@ -1517,7 +1559,7 @@ function messagesView() {
         subtitle: roles[contact.role] || contact.role,
         messages,
         last: messages.at(-1),
-        unread: messages.filter((m) => !same(m.senderId, profile.id) && !chatRead(m)).length,
+        unread: messageStats["direct:" + contact.id]?.unread ?? messages.filter((m) => !same(m.senderId, profile.id) && !chatRead(m)).length,
       };
     }),
     threadConversations = threads.map((thread) => {
@@ -1534,7 +1576,7 @@ function messagesView() {
           : "Groupe · " + (thread.participants || []).length + " participants",
         messages,
         last: messages.at(-1),
-        unread: messages.filter((m) => !same(m.senderId, profile.id) && !chatRead(m)).length,
+        unread: messageStats["thread:" + thread.id]?.unread ?? messages.filter((m) => !same(m.senderId, profile.id) && !chatRead(m)).length,
       };
     }),
     conversations = [...directConversations, ...threadConversations].sort(
@@ -1555,7 +1597,11 @@ function messagesView() {
     selectedRecipient = String(active.contact.id);
     selectedThreadId = "";
   }
-  const list = active.messages;
+  const fullList = active.messages,
+    messageLimit = chatMessageLimits.get(active.key) || 120,
+    list = fullList.slice(-messageLimit),
+    serverTotal = Number(messageStats[active.key]?.total ?? fullList.length),
+    hiddenMessageCount = Math.max(0, serverTotal - list.length);
   let day = "";
   const bubbles =
     list
@@ -1580,7 +1626,7 @@ function messagesView() {
             ${m.forwardedFromId ? '<span class="message-forwarded">↪ Transféré</span>' : ""}
             ${m.system ? '<span class="message-system-label">⚙ Sousa Group One</span>' : ""}
             ${active.kind === "thread" && !mine && !m.system ? `<b class="message-sender">${esc(m.sender || "Participant")}</b>` : ""}
-            ${m.deletedForAll ? '<p class="message-deleted-text">🚫 Ce message a été supprimé pour tout le monde.</p>' : `${chatReplyHtml(m, list)}${chatAttachmentHtml(m)}${m.encryption ? `<p class="prewrap encrypted-text" data-encrypted-text="${esc(m.id)}">🔐 Déchiffrement…</p>` : m.text ? `<p class="prewrap">${esc(m.text)}</p>` : ""}${m.sharedRef ? `<div class="shared-ref-placeholder" data-shared-ref="${esc(m.id)}"></div>` : ""}`}
+            ${m.deletedForAll ? '<p class="message-deleted-text">🚫 Ce message a été supprimé pour tout le monde.</p>' : `${chatReplyHtml(m, fullList)}${chatAttachmentHtml(m)}${m.encryption ? `<p class="prewrap encrypted-text" data-encrypted-text="${esc(m.id)}">🔐 Déchiffrement…</p>` : m.text ? `<p class="prewrap">${esc(m.text)}</p>` : ""}${m.sharedRef ? `<div class="shared-ref-placeholder" data-shared-ref="${esc(m.id)}"></div>` : ""}`}
             <div class="message-meta"><time datetime="${esc(m.createdAt)}">${esc(chatTime(m.createdAt))}</time>${m.editedAt ? '<span class="message-edited">modifié</span>' : ""}${check}</div>
             <div class="message-actions">
               <button type="button" data-action="chat-reply" data-id="${esc(m.id)}">↩ Répondre</button>
@@ -1618,11 +1664,11 @@ function messagesView() {
         <div class="chat-header-person"><strong>${esc(active.title)}</strong><span>${esc(active.subtitle)}</span></div>${active.kind === "direct" ? `<div class="chat-call-actions"><button type="button" class="chat-call-button" data-action="call-start" data-id="${esc(active.contact.id)}" aria-label="Appeler ${esc(active.title)}" title="Appel audio">📞</button><button type="button" class="chat-call-button" data-action="call-video" data-id="${esc(active.contact.id)}" aria-label="Appel vidéo ${esc(active.title)}" title="Appel vidéo">📹</button></div>` : ""}
       </header>
       <div class="chat-history">
-        <div id="messageThread" class="messages chat-thread" role="log" tabindex="0" aria-live="polite" aria-label="Messages avec ${esc(active.title)}">${bubbles}</div>
+        <div id="messageThread" class="messages chat-thread" role="log" tabindex="0" aria-live="polite" aria-label="Messages avec ${esc(active.title)}">${hiddenMessageCount ? `<button type="button" class="chat-load-older" data-action="chat-load-older" data-id="${esc(list[0]?.id || "")}">↑ Charger ${Math.min(100, hiddenMessageCount)} message(s) précédent(s)</button>` : ""}${bubbles}</div>
         <button type="button" id="chatLatest" class="chat-latest hidden" data-action="chat-latest" aria-controls="messageThread">↓ Derniers messages</button>
       </div>
       <div id="chatReplyBar" class="chat-reply-bar ${chatReplyToId ? "" : "hidden"}">
-        <div><b>Réponse</b><span>${chatReplyToId ? esc((list.find((m) => same(m.id, chatReplyToId))?.text || "Message").slice(0, 100)) : ""}</span></div>
+        <div><b>Réponse</b><span>${chatReplyToId ? esc((fullList.find((m) => same(m.id, chatReplyToId))?.text || "Message").slice(0, 100)) : ""}</span></div>
         <button type="button" data-action="chat-cancel-reply" aria-label="Annuler la réponse">✕</button>
       </div>
       <div id="chatAttachmentBar" class="chat-attachment-bar ${chatAttachmentDraft ? "" : "hidden"}">
@@ -1630,7 +1676,7 @@ function messagesView() {
         <button type="button" data-action="chat-cancel-attachment" aria-label="Retirer la pièce jointe">✕</button>
       </div>
       <form id="messageForm" class="chat-composer" data-conversation="${esc(active.key)}">
-        <input id="chatFile" type="file" hidden accept="image/jpeg,image/png,image/webp,image/gif,application/pdf,text/plain,audio/*">
+        <input id="chatFile" type="file" hidden accept="image/jpeg,image/png,image/webp,image/gif,video/*,application/pdf,text/plain,audio/*">
         <button type="button" class="chat-tool" data-action="chat-file" aria-label="Ajouter une photo ou un fichier" title="Pièce jointe">📎</button>
         <button type="button" class="chat-tool" data-action="chat-voice" aria-label="Enregistrer un message vocal" title="Message vocal">🎤</button>
         <div class="chat-compose-field"><textarea id="messageText" name="text" rows="1" maxlength="5000" placeholder="Écrire un message" aria-label="Écrire un message"></textarea><p id="formError" class="error" role="alert"></p></div>
@@ -1683,6 +1729,9 @@ const views = {
   pilotage: () =>
     heading("Pilotage") +
     '<div id="operationsCenter"><article class="card"><p>Chargement du pilotage…</p></article></div>',
+  pro: () =>
+    heading("Centre de gestion") +
+    '<div id="proStandalone"><article class="card"><p>Chargement du centre de gestion…</p></article></div>',
   advanced: () =>
     heading("P2 · Avancé") +
     '<div id="p2Standalone"><article class="card"><p>Chargement P2…</p></article></div>',
@@ -2274,6 +2323,7 @@ function projectModal(id) {
   if (!p) return;
   modal(
     p.title,
+    `<button type="button" class="btn primary" data-pro-action="project-central" data-id="${esc(id)}">Fiche chantier centrale</button> ` +
     (can([...ops, ...fin])
       ? btn("Chantier terminé → Facturation", "project-finish", id, "primary")
       : "") +
@@ -2853,7 +2903,7 @@ document.addEventListener("click", async (e) => {
     render();
     $("sidebar").classList.remove("open");
     $("backdrop").classList.add("hidden");
-    document.querySelector('[data-action="open-side"]').setAttribute("aria-expanded", "false");
+    document.querySelector('[data-action="open-side"]')?.setAttribute("aria-expanded", "false");
     return;
   }
   const b = e.target.closest("[data-action]");
@@ -2883,6 +2933,39 @@ document.addEventListener("click", async (e) => {
         thread.focus({ preventScroll: true });
       }
       updateChatScrollButton();
+    } else if (a === "chat-load-older") {
+      const key = chatKey(),
+        current = chatMessageLimits.get(key) || 120,
+        anchorId = id,
+        out = await api(
+          "messaging/history?key=" +
+            encodeURIComponent(key) +
+            "&beforeId=" +
+            encodeURIComponent(anchorId) +
+            "&limit=100",
+        );
+      const known = new Set((state.messages || []).map((message) => String(message.id)));
+      const added = [];
+      for (const message of out.messages || [])
+        if (!known.has(String(message.id))) {
+          state.messages.push(message);
+          added.push(message);
+          known.add(String(message.id));
+        }
+      const cached = chatHistoryCache.get(key) || [],
+        cachedIds = new Set(cached.map((message) => String(message.id)));
+      for (const message of added)
+        if (!cachedIds.has(String(message.id))) cached.push(message);
+      chatHistoryCache.set(key, cached);
+      messageStats[key] = {
+        ...(messageStats[key] || {}),
+        total: Number(out.total || messageStats[key]?.total || state.messages.length),
+      };
+      chatMessageLimits.set(key, current + Math.max(added.length, 100));
+      render();
+      requestAnimationFrame(() =>
+        document.getElementById("msg-" + anchorId)?.scrollIntoView({ block: "start" }),
+      );
     } else if (a === "chat-back") {
       mobileChatOpen = false;
       render();
@@ -3056,12 +3139,12 @@ document.addEventListener("click", async (e) => {
     else if (a === "open-side") {
       $("sidebar").classList.add("open");
       $("backdrop").classList.remove("hidden");
-      document.querySelector('[data-action="open-side"]').setAttribute("aria-expanded", "true");
+      document.querySelector('[data-action="open-side"]')?.setAttribute("aria-expanded", "true");
     } else if (a === "close-side") {
       $("sidebar").classList.remove("open");
       $("backdrop").classList.add("hidden");
-      document.querySelector('[data-action="open-side"]').setAttribute("aria-expanded", "false");
-      document.querySelector('[data-action="open-side"]').focus();
+      document.querySelector('[data-action="open-side"]')?.setAttribute("aria-expanded", "false");
+      document.querySelector('[data-action="open-side"]')?.focus();
     } else if (a === "logout") {
       await api("auth/logout", {});
       clearSession();
@@ -3133,18 +3216,27 @@ document.addEventListener("click", async (e) => {
         kind = id.slice(0, split),
         rid = id.slice(split + 1);
       const record = find(kind, rid);
+      const trashable = ["documents", "inventory", "suppliers", "vehicles", "tools", "maintenance"].includes(kind);
       const prompt =
         kind === "messages"
           ? "Masquer ce message pour vous ? Il restera visible pour votre interlocuteur."
-          : `Supprimer définitivement cet élément (${record?.name || record?.title || record?.id || rid}) ? Cette action est irréversible. Les totaux associés seront mis à jour. La suppression peut être bloquée si l’élément est lié à d’autres données.`;
+          : trashable
+            ? `Mettre cet élément (${record?.name || record?.title || record?.id || rid}) dans la corbeille pendant 30 jours ?`
+            : `Supprimer définitivement cet élément (${record?.name || record?.title || record?.id || rid}) ? Cette action est irréversible. Les totaux associés seront mis à jour. La suppression peut être bloquée si l’élément est lié à d’autres données.`;
       if (record && confirm(prompt)) {
-        const result = await mutate("record.delete", { kind, id: rid });
-        if (result)
-          toast(
-            kind === "messages"
-              ? "Message supprimé pour vous."
-              : "Élément supprimé.",
-          );
+        if (trashable) {
+          await api("pro/trash", { kind, id: rid });
+          await refresh();
+          toast("Élément déplacé dans la corbeille.");
+        } else {
+          const result = await mutate("record.delete", { kind, id: rid });
+          if (result)
+            toast(
+              kind === "messages"
+                ? "Message supprimé pour vous."
+                : "Élément supprimé.",
+            );
+        }
       }
     } else if (a === "client-edit") {
       clientEdit(id);
@@ -3153,22 +3245,26 @@ document.addEventListener("click", async (e) => {
       if (
         client &&
         confirm(
-          `Supprimer définitivement le client « ${client.name} » ? Cette action est irréversible. La suppression sera refusée si des données ou un compte de connexion sont liés.`,
+          `Mettre le client « ${client.name} » dans la corbeille pendant 30 jours ? Ses données liées sont conservées.`,
         )
       ) {
-        const result = await mutate("client.delete", { id });
-        if (result) toast("Client supprimé.");
+        await api("pro/trash", { kind: "clients", id });
+        await refresh();
+        closeModal(true);
+        toast("Client déplacé dans la corbeille.");
       }
     } else if (a === "project-delete") {
       const project = find("projects", id);
       if (
         project &&
         confirm(
-          `Supprimer définitivement le chantier « ${project.title} » ? Cette action est irréversible. La suppression sera refusée si des heures, documents ou autres données y sont liés.`,
+          `Mettre le chantier « ${project.title} » dans la corbeille pendant 30 jours ? Les heures, documents, devis et factures liés sont conservés.`,
         )
       ) {
-        const result = await mutate("project.delete", { id });
-        if (result) toast("Chantier supprimé.");
+        await api("pro/trash", { kind: "projects", id });
+        await refresh();
+        closeModal(true);
+        toast("Chantier déplacé dans la corbeille.");
       }
     } else if (a === "project-finish") {
       if (
@@ -3653,8 +3749,9 @@ document.addEventListener("change", async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const mediaGeneration = chatMediaGeneration;
-    if (file.size > 5 * 1024 * 1024) {
-      notice("Pièce jointe de 5 Mo maximum.");
+    const rawLimit = file.type.startsWith("video/") ? 25 * 1024 * 1024 : 5 * 1024 * 1024;
+    if (file.size > rawLimit) {
+      notice(file.type.startsWith("video/") ? "Vidéo de 25 Mo maximum avant compression." : "Pièce jointe de 5 Mo maximum.");
       e.target.value = "";
       return;
     }
@@ -3671,9 +3768,11 @@ document.addEventListener("change", async (e) => {
       content,
       kind: file.type.startsWith("image/")
         ? "image"
-        : file.type.startsWith("audio/")
-          ? "audio"
-          : "file",
+        : file.type.startsWith("video/")
+          ? "video"
+          : file.type.startsWith("audio/")
+            ? "audio"
+            : "file",
     };
     render();
     return;

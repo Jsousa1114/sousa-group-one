@@ -163,15 +163,25 @@
   }
 
   async function renderTime(root){
-    const selectedCompany=cache.timeCompany||companies()[0]?.id||"";
+    const activeClock=(state().clocks||[]).find(x=>!profile().employee_id||String(x.employeeId)===String(profile().employee_id))||null;
+    const activeProject=activeClock?projects().find(x=>String(x.id)===String(activeClock.project)):null;
+    const selectedCompany=activeProject?.company||cache.timeCompany||companies()[0]?.id||"";
     if(!selectedCompany){ root.querySelector("#p1Body").innerHTML=card("Pointage+","<p>Aucune entreprise.</p>");return; }
     const [policy,summary]=await Promise.all([
       api("time/policy?company="+encodeURIComponent(selectedCompany)),
       api("time/summary?month="+encodeURIComponent(new Date().toISOString().slice(0,7)))
     ]);
     cache.timePolicy=policy.policy;
+    const companyProjects=projects().filter(x=>String(x.company)===String(selectedCompany));
+    const otherProjects=companyProjects.filter(x=>!activeClock||String(x.id)!==String(activeClock.project));
+    const fieldClock=profile().employee_id
+      ? activeClock
+        ? `<div class="p1-clock-live"><span class="status neutral">${activeClock.pauseAt?"En pause":"En cours"}</span><h3>${esc(activeProject?.title||activeClock.project)}</h3><p>Depuis ${date(activeClock.startedAt)}</p><div class="p1-actions">${activeClock.pauseAt?btn("Reprendre","field-clock-resume","","primary"):btn("Pause","field-clock-pause")} ${btn("Terminer la journée","field-clock-stop","","danger")}</div>${otherProjects.length?`<label>Changer de chantier<select id="p1ClockSwitchProject"><option value="">— Choisir —</option>${option(otherProjects,"id","title")}</select></label>${btn("Basculer sans couper le pointage","field-clock-switch","","primary")}`:""}</div>`
+        : `<p>Sélectionnez le chantier sur lequel vous commencez à travailler.</p><label>Chantier<select id="p1ClockProject">${option(companyProjects,"id","title")}</select></label><div class="p1-actions">${companyProjects.length?btn("Démarrer le pointage","field-clock-start","","primary"):"<span>Aucun chantier accessible dans cette entreprise.</span>"}</div>`
+      : "<p>Le pointage terrain est disponible sur un compte lié à un salarié.</p>";
     root.querySelector("#p1Body").innerHTML=`
-      <div class="p1-toolbar"><label>Entreprise<select id="p1TimeCompany">${companyOptions(selectedCompany)}</select></label><div>${hr()?btn("Historique salarié","employee-history"):""}</div></div>
+      <div class="p1-toolbar"><label>Entreprise<select id="p1TimeCompany" ${activeClock?"disabled":""}>${companyOptions(selectedCompany)}</select></label><div>${hr()?btn("Historique salarié","employee-history"):""}</div></div>
+      ${card("Pointage terrain",fieldClock)}
       <div class="p1-grid-2">
         ${card("Règles de pointage",`<form id="p1Form" data-kind="time-policy">
           <input type="hidden" name="company" value="${esc(selectedCompany)}">
@@ -213,11 +223,21 @@
 
   async function renderAssets(root){
     const out=await api("assets"); cache.assets=out;
+    const now=new Date(), horizon=new Date(Date.now()+60*86400000);
+    const due=(out.vehicleEvents||[]).filter(x=>x.due_date&&new Date(x.due_date+"T12:00:00")<=horizon&&new Date(x.due_date+"T12:00:00")>=new Date(now.toDateString())).sort((a,b)=>String(a.due_date).localeCompare(String(b.due_date)));
+    const vehicleCards=(out.vehicles||[]).map(v=>{
+      const driver=(state().employees||[]).find(e=>String(e.id)===String(v.employeeId||""));
+      const latest=(out.vehicleEvents||[]).find(e=>String(e.vehicle_id)===String(v.id));
+      const next=due.find(e=>String(e.vehicle_id)===String(v.id));
+      return `<article class="card"><div><span class="status neutral">${esc(v.status||"Disponible")}</span><h3>${esc(v.plate||v.id)}</h3><p>${esc([v.brand,v.model].filter(Boolean).join(" ")||"Véhicule")}</p><small>Conducteur : ${esc(driver?.name||"Non attribué")} · ${esc(v.km||0)} km</small><small>${next?`Prochaine échéance : ${esc(next.event_type)} · ${date(next.due_date)}`:"Aucune échéance dans les 60 jours"}${latest?.metadata?.cost?` · dernier coût CHF ${esc(latest.metadata.cost)}`:""}</small></div></article>`;
+    }).join("");
     root.querySelector("#p1Body").innerHTML=`
-      <div class="p1-actions">${btn("Événement outillage","tool-event","","primary")} ${btn("Événement véhicule / dommage","vehicle-event")}</div>
+      <div class="p1-actions">${btn("Événement outillage","tool-event","","primary")} ${btn("Événement véhicule","vehicle-event")}</div>
+      ${card("Parc véhicules",`<div class="p1-grid-2">${vehicleCards||"<p>Aucun véhicule.</p>"}</div>`)}
+      ${card("Échéances véhicules · 60 jours",`<div class="p1-list">${due.map(x=>`<div><span><b>${esc(vehicles().find(v=>String(v.id)===String(x.vehicle_id))?.plate||x.vehicle_id)} · ${esc(x.event_type)}</b><small>${date(x.due_date)} · ${esc(x.note||"")}</small></span></div>`).join("")||"<p>Aucune échéance proche.</p>"}</div>`)}
       <div class="p1-grid-2">
         ${card("Historique outillage",`<div class="p1-list">${(out.toolEvents||[]).map(x=>`<div><span><b>${esc(tools().find(t=>String(t.id)===String(x.tool_id))?.name||x.tool_id)}</b><small>${esc(x.event_type)} · ${esc(x.note||"")} · ${date(x.created_at)}</small></span></div>`).join("")||"<p>Aucun événement.</p>"}</div>`)}
-        ${card("Historique véhicules",`<div class="p1-list">${(out.vehicleEvents||[]).map(x=>`<div><span><b>${esc(vehicles().find(v=>String(v.id)===String(x.vehicle_id))?.plate||x.vehicle_id)}</b><small>${esc(x.event_type)} · ${esc(x.note||"")} · ${date(x.event_date)}</small></span></div>`).join("")||"<p>Aucun événement.</p>"}</div>`)}
+        ${card("Historique véhicules",`<div class="p1-list">${(out.vehicleEvents||[]).map(x=>`<div><span><b>${esc(vehicles().find(v=>String(v.id)===String(x.vehicle_id))?.plate||x.vehicle_id)}</b><small>${esc(x.event_type)} · ${esc(x.note||"")} · ${date(x.event_date)}${x.metadata?.cost?` · CHF ${esc(x.metadata.cost)}`:""}${x.metadata?.quantity?` · ${esc(x.metadata.quantity)} ${esc(x.metadata.unit||"")}`:""}</small></span></div>`).join("")||"<p>Aucun événement.</p>"}</div>`)}
       </div>`;
   }
 
@@ -281,7 +301,7 @@
     else if(kind==="stock-move") modal("Mouvement / transfert de stock",`<form id="p1Form" data-kind="stock-move"><label>Article<select name="inventoryId">${inventoryOptions()}</select></label><label>Depuis<select name="fromLocationId"><option value="">Entrée externe</option>${option(cache.procurement?.locations||[],"id","name")}</select></label><label>Vers<select name="toLocationId"><option value="">Sortie externe / consommation</option>${option(cache.procurement?.locations||[],"id","name")}</select></label><label>Quantité<input type="number" min="0.001" step="0.001" name="quantity" required></label><label>Chantier<select name="projectId"><option value="">—</option>${projectOptions()}</select></label><label>Note<textarea name="note"></textarea></label><button class="btn primary" type="submit">Enregistrer</button></form>`);
     else if(kind==="barcode") modal("Associer un code article",`<form id="p1Form" data-kind="barcode"><label>Article<select name="inventoryId">${inventoryOptions()}</select></label><label>Code-barres / QR<input name="code" required></label><button class="btn primary" type="submit">Associer</button></form>`);
     else if(kind==="tool-event") modal("Événement outillage",`<form id="p1Form" data-kind="tool-event"><label>Outil<select name="toolId">${toolOptions()}</select></label><label>Événement<select name="eventType"><option value="assignment">Attribution</option><option value="return">Retour</option><option value="lost">Perdu</option><option value="broken">Cassé</option><option value="maintenance">Maintenance</option><option value="inspection">Contrôle</option></select></label><label>Salarié<select name="employeeId">${employeeOptions()}</select></label><label>Échéance<input type="date" name="dueDate"></label><label>Note<textarea name="note"></textarea></label><button class="btn primary" type="submit">Enregistrer</button></form>`);
-    else if(kind==="vehicle-event") modal("Événement véhicule",`<form id="p1Form" data-kind="vehicle-event"><label>Véhicule<select name="vehicleId">${vehicleOptions()}</select></label><label>Type<select name="eventType"><option value="service">Entretien</option><option value="tires">Pneus</option><option value="insurance">Assurance</option><option value="inspection">Expertise</option><option value="damage">Dommage</option><option value="km">Kilométrage</option><option value="assignment">Attribution</option></select></label><label>Date<input type="date" name="eventDate" value="${new Date().toISOString().slice(0,10)}"></label><label>Prochaine échéance<input type="date" name="dueDate"></label><label>Km<input type="number" min="0" name="km"></label><label>Description<textarea name="note"></textarea></label><button class="btn primary" type="submit">Enregistrer</button></form>`);
+    else if(kind==="vehicle-event") modal("Événement véhicule",`<form id="p1Form" data-kind="vehicle-event"><label>Véhicule<select name="vehicleId">${vehicleOptions()}</select></label><label>Type<select name="eventType"><option value="service">Entretien</option><option value="tires">Pneus</option><option value="insurance">Assurance</option><option value="inspection">Expertise</option><option value="damage">Dommage</option><option value="fuel">Carburant</option><option value="charge">Recharge électrique</option><option value="inventory">Matériel embarqué / retiré</option><option value="km">Kilométrage</option><option value="assignment">Attribution</option></select></label><label>Date<input type="date" name="eventDate" value="${new Date().toISOString().slice(0,10)}"></label><label>Prochaine échéance<input type="date" name="dueDate"></label><label>Km<input type="number" min="0" name="km"></label><div class="p1-grid-2"><label>Quantité<input type="number" min="0" step="0.01" name="quantity" placeholder="L, kWh, unités…"></label><label>Unité<input name="unit" maxlength="20" placeholder="L / kWh / pcs"></label></div><label>Coût CHF<input type="number" min="0" step="0.01" name="cost"></label><label>Conducteur / salarié<select name="employeeId">${employeeOptions()}</select></label><label>Matériel / détail<input name="material" maxlength="500" placeholder="Ex. coffret dépannage, 2 escabeaux…"></label><label>Description<textarea name="note"></textarea></label><button class="btn primary" type="submit">Enregistrer</button></form>`);
     else if(kind==="maintenance-plan") modal("Plan de maintenance récurrente",`<form id="p1Form" data-kind="maintenance-plan"><label>Client<select name="clientId">${clientOptions()}</select></label><label>Titre<input name="title" required></label><label>Fréquence<select name="frequency"><option value="monthly">Mensuelle</option><option value="quarterly">Trimestrielle</option><option value="yearly">Annuelle</option><option value="weekly">Hebdomadaire</option></select></label><label>Prochaine intervention<input type="date" name="nextRun" required></label><label>Priorité<select name="priority"><option>normal</option><option>high</option><option>urgent</option><option>low</option></select></label><label>SLA / délai max (heures)<input type="number" min="1" max="720" name="slaHours"></label>${finance()?`<label class="p1-check"><input type="checkbox" name="autoInvoice"> Facturer automatiquement</label><label>Délai paiement<input type="number" name="paymentDays" value="30"></label>${lineEditor()}`:""}<button class="btn primary" type="submit">Créer</button></form>`);
     else if(kind==="template-quote"){
       const tpl=(cache.finance?.templates||[]).find(x=>String(x.id)===String(attrs.id));
@@ -330,12 +350,37 @@
         core().setPage("quotes");
       }
       else if(kind==="tool-event") await api("assets/tool-event",p);
-      else if(kind==="vehicle-event"){if(p.km)p.km=Number(p.km);await api("assets/vehicle-event",p);}
+      else if(kind==="vehicle-event"){if(p.km)p.km=Number(p.km);p.metadata={quantity:p.quantity?Number(p.quantity):null,unit:p.unit||"",cost:p.cost?Number(p.cost):null,material:p.material||"",employeeId:p.employeeId||""};delete p.quantity;delete p.unit;delete p.cost;delete p.material;await api("assets/vehicle-event",p);}
       else if(kind==="maintenance-plan"){p.autoInvoice=fd.get("autoInvoice")==="on";p.paymentDays=Number(p.paymentDays||30);if(p.autoInvoice)p.invoiceLines=singleLine(form);await api("maintenance/plan",p);}
       else if(kind==="integration"){p.enabled=fd.get("enabled")==="on";await api("integrations",p);}
       core().closeModal(true); core().toast("P1 · modification enregistrée.");
       const root=document.getElementById("p1Suite")?.parentElement; if(root) await renderInto(root);
     }catch(e){const el=document.getElementById("formError");if(el)el.textContent=e.message;else core().notice(e.message);}
+  }
+
+  function endOfDayForm(timeEntry){
+    if(!timeEntry?.project) return;
+    const project=projects().find(x=>String(x.id)===String(timeEntry.project))||{};
+    modal("Clôture du pointage",`<form id="p1Form" data-kind="field-end-day" data-project-id="${esc(timeEntry.project)}" data-time-id="${esc(timeEntry.id||"")}">
+      <p><b>${esc(project.title||timeEntry.project)}</b> · ${Number(timeEntry.hours||0).toFixed(2)} h enregistrée(s)</p>
+      <label>Travail réalisé / commentaire<textarea name="summary" required maxlength="5000" placeholder="Décrivez ce qui a été fait aujourd'hui."></textarea></label>
+      <label>Problèmes / points à suivre<textarea name="issues" maxlength="5000"></textarea></label>
+      <label>Matériel utilisé / posé<textarea name="materials" maxlength="5000" placeholder="Matériel, quantités, références…"></textarea></label>
+      <label>Photo de fin (facultatif)<input type="file" name="photo" accept="image/jpeg,image/png,image/webp"></label>
+      <label>Validation du technicien<input name="signature" required maxlength="500" value="${esc(profile().name||"")}" placeholder="Nom du technicien"></label>
+      <label class="p1-check"><input type="checkbox" name="confirmed" required> Je confirme l'exactitude du rapport et du pointage.</label>
+      <p class="muted">Le rapport est lié au chantier et horodaté. La photo, si fournie, est classée dans l'album « pendant » du chantier.</p>
+      <p id="formError" class="error"></p><button class="btn primary" type="submit">Enregistrer la fin de journée</button>
+    </form>`);
+  }
+
+  async function fileBase64(file){
+    return await new Promise((resolve,reject)=>{
+      const reader=new FileReader();
+      reader.onload=()=>resolve(String(reader.result||"").split(",")[1]||"");
+      reader.onerror=()=>reject(new Error("Lecture de la photo impossible."));
+      reader.readAsDataURL(file);
+    });
   }
 
   function currentPosition(){
@@ -349,7 +394,8 @@
     });
   }
   async function clockAction(action, payload={}){
-    const project=action==="clock.start"?payload.project:(state().clocks||[])[0]?.project;
+    const currentClock=(state().clocks||[]).find(x=>!profile().employee_id||String(x.employeeId)===String(profile().employee_id))||(state().clocks||[])[0];
+    const project=["clock.start","clock.switch"].includes(action)?payload.project:currentClock?.project;
     let policy=null;
     const p=projects().find(x=>String(x.id)===String(project));
     if(p) policy=(await api("time/policy?company="+encodeURIComponent(p.company)).catch(()=>null))?.policy;
@@ -360,7 +406,16 @@
     if(geo) await api("time/geolocation",{...geo,action:action==="clock.stop"?"stop":"start",projectId:projectIdValue,timeId:action==="clock.stop"?result.id:null}).catch(()=>{});
     if(action==="clock.stop"&&result.id){
       const applied=await api("time/auto-break",{timeId:result.id}).catch(()=>null);
-      if(applied?.applied){await core().refresh();core().toast("Pause automatique appliquée : "+applied.minutes+" min.");}
+      if(applied?.applied){
+        result.break=applied.minutes;
+        result.hours=applied.hours;
+        await core().refresh();
+        core().toast("Pause automatique appliquée : "+applied.minutes+" min.");
+      }
+    }
+    if(action==="clock.switch"&&result.previousTime?.id){
+      const applied=await api("time/auto-break",{timeId:result.previousTime.id}).catch(()=>null);
+      if(applied?.applied) core().toast("Pause automatique appliquée au chantier précédent.");
     }
     return result;
   }
@@ -391,7 +446,7 @@
       const out=await api("dashboard"), prefs=out.preferences||{};
       const planning=prefs.showPlanning===false?"":`<article class="card"><h3>Prochaines interventions</h3><div class="p1-list">${(out.planning||[]).map(x=>`<div><span><b>${esc(projects().find(p=>String(p.id)===String(x.project))?.title||x.project)}</b><small>${date(x.date)} · ${esc(x.start)}–${esc(x.end)}</small></span></div>`).join("")||"<p>Aucune intervention planifiée.</p>"}</div></article>`;
       const changeOrders = profile().role==="client" && (out.clientActions?.changeOrders||[]).length
-        ? `<article class="card"><h3>Plus-values à valider</h3><div class="p1-list">${out.clientActions.changeOrders.map(x=>`<div><span><b>${esc(x.title)} · ${money(x.amount)}</b><small>${esc(x.description||"")}</small></span>${btn("Approuver","client-change-approve",`data-id="${esc(x.id)}" data-project="${esc(x.project_id)}"`,"primary")}</div>`).join("")}</div></article>`
+        ? `<article class="card"><h3>Plus-values à valider</h3><div class="p1-list">${out.clientActions.changeOrders.map(x=>`<div><span><b>${esc(x.title)} · ${money(x.amount)}</b><small>${esc(x.description||"")}</small></span>${btn("Signer et approuver","client-change-approve",`data-id="${esc(x.id)}" data-project="${esc(x.project_id)}"`,"primary")}</div>`).join("")}</div></article>`
         : "";
       const workToSign = profile().role==="client"
         ? (out.clientActions?.workOrders||[]).filter(x=>!x.customer_signature)
@@ -425,7 +480,32 @@
       else if(a==="delete-milestone"){if(confirm("Supprimer ce jalon ?")){await api("project/"+encodeURIComponent(projectId)+"/milestone/delete",{id:b.dataset.id});const root=document.getElementById("p1Suite")?.parentElement;if(root)await renderInto(root);}}
       else if(a==="project-history"){const out=await api("project/"+encodeURIComponent(projectId)+"/history");modal("Historique · "+out.project.title,`<div class="p1-timeline">${(out.history||[]).map(x=>`<div><i></i><span><b>${esc(x.title)}</b><small>${date(x.at)} · ${esc(x.type)}</small></span></div>`).join("")}</div>`);}
       else if(a==="quick-clock-start")await clockAction("clock.start",{project:b.dataset.project});
-      else if(a==="quick-clock-stop")await clockAction("clock.stop",{});
+      else if(a==="quick-clock-stop"){const ended=await clockAction("clock.stop",{});if(ended?.id)endOfDayForm(ended);}
+      else if(a==="field-clock-start"){
+        const project=document.getElementById("p1ClockProject")?.value;
+        if(!project)throw new Error("Choisissez un chantier.");
+        await clockAction("clock.start",{project});
+        const root=document.getElementById("p1Suite")?.parentElement;if(root)await renderInto(root);
+      }
+      else if(a==="field-clock-pause"){
+        await clockAction("clock.pause",{});
+        const root=document.getElementById("p1Suite")?.parentElement;if(root)await renderInto(root);
+      }
+      else if(a==="field-clock-resume"){
+        await clockAction("clock.resume",{});
+        const root=document.getElementById("p1Suite")?.parentElement;if(root)await renderInto(root);
+      }
+      else if(a==="field-clock-stop"){
+        const ended=await clockAction("clock.stop",{});
+        if(ended?.id) endOfDayForm(ended);
+      }
+      else if(a==="field-clock-switch"){
+        const project=document.getElementById("p1ClockSwitchProject")?.value;
+        if(!project)throw new Error("Choisissez le nouveau chantier.");
+        const switched=await clockAction("clock.switch",{project});
+        if(switched?.switched) core().toast("Pointage basculé sur le nouveau chantier.");
+        const root=document.getElementById("p1Suite")?.parentElement;if(root)await renderInto(root);
+      }
       else if(a==="scan-project")await scanCode(async(code)=>{const p=projects().find(x=>String(x.id)===String(code)||String(code).includes(String(x.id)));if(!p)throw new Error("Chantier non reconnu.");projectId=p.id;area="project";const root=document.getElementById("p1Suite")?.parentElement;if(root)await renderInto(root);});
       else if(a==="finance-template")openForm("finance-template");
       else if(a==="finance-catalog")openForm("finance-catalog");
@@ -454,11 +534,7 @@
       else if(a==="integration")openForm("integration",{provider:b.dataset.provider});
       else if(a==="run-jobs"){const out=await api("run-jobs",{});core().toast(`Jobs terminés : ${out.invoices} facture(s), ${out.maintenance} maintenance(s), ${out.reminders} relance(s).`);}
       else if(a==="client-change-approve"){
-        if(confirm("Approuver cette plus-value ?")){
-          await opsApi("project/"+encodeURIComponent(b.dataset.project)+"/change-order",{action:"approve",id:b.dataset.id});
-          core().toast("Plus-value approuvée.");
-          await core().refresh();
-        }
+        modal("Signer et approuver la plus-value",`<form id="p1Form" data-kind="client-change-sign" data-id="${esc(b.dataset.id)}" data-project="${esc(b.dataset.project)}"><label>Nom du signataire<input name="signature" required maxlength="500" value="${esc(profile().name||"")}"></label><p>La signature valide l'acceptation de la plus-value et sera horodatée dans l'historique du chantier.</p><button class="btn primary" type="submit">Signer et approuver</button></form>`);
       }
       else if(a==="client-work-sign"){
         modal("Signer le bon de travail",`<form id="p1Form" data-kind="client-work-sign" data-id="${esc(b.dataset.id)}"><label>Nom du signataire<input name="signature" required maxlength="500" value="${esc(profile().name||"")}"></label><p>En enregistrant, vous confirmez la validation du bon de travail.</p><button class="btn primary" type="submit">Signer</button></form>`);
@@ -476,6 +552,48 @@
   });
   document.addEventListener("submit",async(e)=>{
     if(e.target.id!=="p1Form")return;e.preventDefault();
+    if(e.target.dataset.kind==="field-end-day"){
+      const fd=new FormData(e.target), projectIdValue=e.target.dataset.projectId, timeId=e.target.dataset.timeId;
+      const photo=fd.get("photo");
+      if(photo?.size){
+        if(photo.size>5*1024*1024) throw new Error("La photo doit faire 5 Mo maximum.");
+        if(!["image/jpeg","image/png","image/webp"].includes(photo.type)) throw new Error("Photo JPG, PNG ou WebP uniquement.");
+      }
+      const project=projects().find(x=>String(x.id)===String(projectIdValue));
+      if(!project) throw new Error("Chantier introuvable.");
+      const localDate=new Intl.DateTimeFormat("en-CA",{timeZone:"Europe/Zurich",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date());
+      await opsApi("project/"+encodeURIComponent(projectIdValue)+"/report",{
+        reportDate:localDate,
+        summary:fd.get("summary"),
+        issues:fd.get("issues"),
+        materials:fd.get("materials"),
+        team:"Technicien : "+String(fd.get("signature")||profile().name||"")+" · Pointage : "+String(timeId||""),
+      });
+      if(photo?.size){
+        const content=await fileBase64(photo);
+        const uploaded=await core().mutate("document",{
+          company:project.company,
+          project:projectIdValue,
+          name:photo.name||("fin-journee-"+localDate+".jpg"),
+          mime:photo.type,
+          content,
+          visibility:"team",
+        },null,"state/documents");
+        if(uploaded?.id){
+          await api("project/"+encodeURIComponent(projectIdValue)+"/photo-meta",{
+            documentId:uploaded.id,
+            album:"pendant",
+            note:"Photo de fin de pointage · "+localDate,
+            annotation:[],
+          });
+        }
+      }
+      core().closeModal(true);
+      core().toast("Fin de journée enregistrée sur le chantier.");
+      await core().refresh();
+      const root=document.getElementById("p1Suite")?.parentElement;if(root)await renderInto(root);
+      return;
+    }
     if(e.target.dataset.kind==="dashboard-settings"){
       const fd=new FormData(e.target);
       await api("dashboard/preferences",{compact:fd.get("compact")==="on",showPlanning:fd.get("showPlanning")==="on",showAlerts:fd.get("showAlerts")==="on"});
@@ -485,6 +603,11 @@
       const fd=new FormData(e.target);
       await api("client/work-order/"+encodeURIComponent(e.target.dataset.id)+"/sign",{signature:fd.get("signature")});
       core().closeModal(true);core().toast("Bon de travail signé.");await core().refresh();return;
+    }
+    if(e.target.dataset.kind==="client-change-sign"){
+      const fd=new FormData(e.target);
+      await opsApi("project/"+encodeURIComponent(e.target.dataset.project)+"/change-order",{action:"approve",id:e.target.dataset.id,signature:fd.get("signature")});
+      core().closeModal(true);core().toast("Plus-value signée et approuvée.");await core().refresh();return;
     }
     await submit(e.target);
   });

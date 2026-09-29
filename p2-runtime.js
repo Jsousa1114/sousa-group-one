@@ -12,7 +12,7 @@
     endpoint === "state/command" &&
     (
       ["time", "documents"].includes(String(collection || "")) ||
-      ["clock.start", "clock.pause", "clock.resume", "clock.stop"].includes(String(action || ""))
+      ["clock.start", "clock.pause", "clock.resume", "clock.stop", "clock.switch"].includes(String(action || ""))
     );
 
   function openDb() {

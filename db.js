@@ -378,6 +378,8 @@ async function migrate(db = pool) {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )`,
   );
+  await db.query("ALTER TABLE project_change_orders ADD COLUMN IF NOT EXISTS client_signature TEXT");
+  await db.query("ALTER TABLE project_change_orders ADD COLUMN IF NOT EXISTS signed_at TIMESTAMPTZ");
   await db.query(
     `CREATE TABLE IF NOT EXISTS crm_opportunities(
       id TEXT PRIMARY KEY,
@@ -399,6 +401,29 @@ async function migrate(db = pool) {
   );
   await db.query(
     `CREATE INDEX IF NOT EXISTS crm_pipeline_idx ON crm_opportunities(company,stage,updated_at DESC)`,
+  );
+  await db.query("ALTER TABLE crm_opportunities ADD COLUMN IF NOT EXISTS email TEXT");
+  await db.query("ALTER TABLE crm_opportunities ADD COLUMN IF NOT EXISTS phone TEXT");
+  await db.query("ALTER TABLE crm_opportunities ADD COLUMN IF NOT EXISTS street TEXT");
+  await db.query("ALTER TABLE crm_opportunities ADD COLUMN IF NOT EXISTS zip TEXT");
+  await db.query("ALTER TABLE crm_opportunities ADD COLUMN IF NOT EXISTS city TEXT");
+  await db.query("ALTER TABLE crm_opportunities ADD COLUMN IF NOT EXISTS country TEXT DEFAULT 'CH'");
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS crm_activities(
+      id TEXT PRIMARY KEY,
+      opportunity_id TEXT NOT NULL,
+      company TEXT NOT NULL,
+      type TEXT NOT NULL,
+      subject TEXT NOT NULL,
+      notes TEXT,
+      occurred_at TIMESTAMPTZ NOT NULL,
+      next_action_at TIMESTAMPTZ,
+      created_by INTEGER NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`,
+  );
+  await db.query(
+    `CREATE INDEX IF NOT EXISTS crm_activities_opportunity_idx ON crm_activities(opportunity_id,occurred_at DESC,created_at DESC)`,
   );
   await db.query(
     `CREATE TABLE IF NOT EXISTS inventory_locations(
