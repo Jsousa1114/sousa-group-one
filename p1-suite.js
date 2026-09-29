@@ -454,10 +454,7 @@
       const signatures = workToSign.length
         ? `<article class="card"><h3>Bons de travail à signer</h3><div class="p1-list">${workToSign.map(x=>`<div><span><b>${esc(x.title)}</b><small>${esc(x.description||"")} · ${date(x.scheduled_at)}</small></span>${btn("Signer","client-work-sign",`data-id="${esc(x.id)}"`,"primary")}</div>`).join("")}</div></article>`
         : "";
-      const receptions = profile().role==="client" && (out.clientActions?.receptions||[]).length
-        ? `<article class="card"><h3>Réceptions de chantier à signer</h3><div class="p1-list">${out.clientActions.receptions.map(x=>`<div><span><b>${esc(x.title||x.id)}</b><small>${esc(x.address||"")} · ${esc(x.status||"Terminé")}</small></span>${btn("Signer la réception","client-reception-sign",`data-id="${esc(x.id)}"`,"primary")}</div>`).join("")}</div></article>`
-        : "";
-      content.insertAdjacentHTML("afterbegin",`<section class="p1-dashboard-extra ${prefs.compact?"compact":""}"><div class="p1-dashboard-head"><span>P1 · Tableau personnalisé</span>${btn("Personnaliser","dashboard-settings")}</div><div class="p1-dashboard-grid"><article class="card"><h3>Notifications</h3><b class="p1-big">${esc(out.kpis?.unread||0)}</b><small>non lues</small></article>${planning}${changeOrders}${signatures}${receptions}</div></section>`);
+      content.insertAdjacentHTML("afterbegin",`<section class="p1-dashboard-extra ${prefs.compact?"compact":""}"><div class="p1-dashboard-head"><span>P1 · Tableau personnalisé</span>${btn("Personnaliser","dashboard-settings")}</div><div class="p1-dashboard-grid"><article class="card"><h3>Notifications</h3><b class="p1-big">${esc(out.kpis?.unread||0)}</b><small>non lues</small></article>${planning}${changeOrders}${signatures}</div></section>`);
     }catch{}
   }
 
@@ -539,9 +536,6 @@
       else if(a==="client-change-approve"){
         modal("Signer et approuver la plus-value",`<form id="p1Form" data-kind="client-change-sign" data-id="${esc(b.dataset.id)}" data-project="${esc(b.dataset.project)}"><label>Nom du signataire<input name="signature" required maxlength="500" value="${esc(profile().name||"")}"></label><p>La signature valide l'acceptation de la plus-value et sera horodatée dans l'historique du chantier.</p><button class="btn primary" type="submit">Signer et approuver</button></form>`);
       }
-      else if(a==="client-reception-sign"){
-        modal("Signer la réception du chantier",`<form id="p1Form" data-kind="client-reception-sign" data-id="${esc(b.dataset.id)}"><label>Nom du signataire<input name="signature" required maxlength="500" value="${esc(profile().name||"")}"></label><label>Remarque de réception<textarea name="note" maxlength="2000" placeholder="Réserves ou remarque éventuelle"></textarea></label><p>La signature confirme la réception du chantier terminé.</p><button class="btn primary" type="submit">Signer la réception</button></form>`);
-      }
       else if(a==="client-work-sign"){
         modal("Signer le bon de travail",`<form id="p1Form" data-kind="client-work-sign" data-id="${esc(b.dataset.id)}"><label>Nom du signataire<input name="signature" required maxlength="500" value="${esc(profile().name||"")}"></label><p>En enregistrant, vous confirmez la validation du bon de travail.</p><button class="btn primary" type="submit">Signer</button></form>`);
       }
@@ -614,11 +608,6 @@
       const fd=new FormData(e.target);
       await opsApi("project/"+encodeURIComponent(e.target.dataset.project)+"/change-order",{action:"approve",id:e.target.dataset.id,signature:fd.get("signature")});
       core().closeModal(true);core().toast("Plus-value signée et approuvée.");await core().refresh();return;
-    }
-    if(e.target.dataset.kind==="client-reception-sign"){
-      const fd=new FormData(e.target);
-      await api("client/project/"+encodeURIComponent(e.target.dataset.id)+"/reception-sign",{signature:fd.get("signature"),note:fd.get("note")});
-      core().closeModal(true);core().toast("Réception du chantier signée.");await core().refresh();return;
     }
     await submit(e.target);
   });
