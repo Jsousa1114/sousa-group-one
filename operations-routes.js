@@ -991,11 +991,12 @@ function routes(db) {
           )
         ).rows[0];
         if (!row) D.fail("Plus-value introuvable.", 404);
+        const isClientApproval = req.user.role === "client" && D.same(req.user.client_id, project.clientId);
+        const approvalSignature = clean(String(p.signature || ""), 500, true) || null;
+        if (isClientApproval && !approvalSignature) D.fail("La signature du client est requise pour approuver la plus-value.");
         await db.query(
-          `UPDATE project_change_orders SET status='approved',
-           approved_by_user_id=$1,approved_at=NOW(),updated_at=NOW()
-           WHERE id=$2`,
-          [req.user.id, id],
+          `UPDATE project_change_orders SET status='approved', approved_by_user_id=$1,approved_at=NOW(),client_signature=$2,signed_at=CASE WHEN $2 IS NULL THEN signed_at ELSE NOW() END,updated_at=NOW() WHERE id=$3`,
+          [req.user.id, approvalSignature, id],
         );
         await emitEvent(db, {
           eventType: "project.change_order.approved",
