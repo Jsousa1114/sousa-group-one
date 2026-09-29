@@ -572,7 +572,7 @@ function routes(db) {
     const todayDate = today();
     const myPlanning = req.user.employee_id ? ctx.view.planning.filter((x)=>D.same(x.employeeId,req.user.employee_id)&&x.date>=todayDate).sort((a,b)=>(a.date+a.start).localeCompare(b.date+b.start)).slice(0,5) : [];
     const unread = Number((await db.query("SELECT COUNT(*)::int n FROM user_notifications WHERE user_id=$1 AND read_at IS NULL",[req.user.id])).rows[0]?.n||0);
-    let clientActions = { changeOrders: [], workOrders: [] };
+    let clientActions = { changeOrders: [], workOrders: [], receptions: [] };
     if (req.user.role === "client" && req.user.client_id) {
       const projectIds = ctx.view.projects.map((x) => String(x.id));
       if (projectIds.length) {
@@ -587,6 +587,12 @@ function routes(db) {
         await db.query(
           "SELECT id,project_id,title,description,status,scheduled_at,customer_signature,signed_at FROM work_orders WHERE client_id=$1 AND status<>'cancelled' ORDER BY scheduled_at DESC NULLS LAST,created_at DESC LIMIT 100",
           [String(req.user.client_id)],
+        )
+      ).rows;
+      clientActions.receptions = (
+        await db.query(
+          "SELECT p.id,p.title,p.address,p.status FROM app_state s, LATERAL jsonb_to_recordset(s.data->'projects') AS p(id text,title text,address text,status text,\"clientId\" text) WHERE s.id=1 AND p.\"clientId\"=$1 AND p.status=ANY($2::text[]) AND NOT EXISTS (SELECT 1 FROM project_receptions r WHERE r.project_id=p.id) ORDER BY p.id DESC LIMIT 100",
+          [String(req.user.client_id), ["Terminé","Payé"]],
         )
       ).rows;
     }
@@ -650,6 +656,41 @@ function routes(db) {
       "?open=projects",
     );
     res.json({ok:true,id:row.id,signedAt:new Date().toISOString()});
+  }));
+
+  r.post("/client/project/:id/reception-sign", wrap(async (req,res) => {
+    if (req.user.role !== "client" || !req.user.client_id)
+      D.fail("Compte client requis.",403);
+    const ctx = await stateContext(db,req.user),
+      project = projectFor(ctx,req.user,req.params.id),
+      signature = clean(String(req.body?.signature || ""),500),
+      note = clean(String(req.body?.note || ""),2000,true) || null;
+    if (!D.same(project.clientId, req.user.client_id))
+      D.fail("Chantier inaccessible.",403);
+    if (!["Terminé","Payé"].includes(String(project.status || "")))
+      D.fail("Le chantier doit être terminé avant la réception.");
+    const existing = (
+      await db.query("SELECT id FROM project_receptions WHERE project_id=$1",[String(project.id)])
+    ).rows[0];
+    if (existing) D.fail("La réception de ce chantier est déjà signée.");
+    const id = randomUUID();
+    await db.query(
+      `INSERT INTO project_receptions(id,project_id,company,client_id,signature,signer_name,note,signed_by_user_id)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [id,String(project.id),project.company,String(req.user.client_id),signature,req.user.name || null,note,req.user.id],
+    );
+    await notify(
+      db,
+      (await db.query(
+        "SELECT id FROM users WHERE disabled=false AND deleted_at IS NULL AND role=ANY($1::text[]) AND (company='group' OR company=$2)",
+        [["admin","direction","manager"], project.company],
+      )).rows.map((x)=>x.id),
+      "project",
+      "Réception de chantier signée",
+      (project.title || project.id) + " · réception client reçue",
+      "?open=projects",
+    );
+    res.json({ok:true,id,signedAt:new Date().toISOString()});
   }));
 
   r.get("/project/:id/full", wrap(async (req,res) => {
