@@ -187,3 +187,30 @@ test("sellable workspace supports reusable custom roles", () => {
   assert.match(suite, /Rôles personnalisés/);
   assert.match(suite, /role-template/);
 });
+
+
+test("workspace redesign keeps professional center navigation and assets", () => {
+  const app = fs.readFileSync("app.js", "utf8");
+  const index = fs.readFileSync("index.html", "utf8");
+  assert.match(app, /navigationGroups/);
+  assert.match(app, /"pro"/);
+  assert.match(app, /data-shortcut/);
+  assert.match(app, /workspace-welcome/);
+  assert.match(index, /visual-refresh\.css\?v=20260928-workspace/);
+  assert.match(index, /pro-suite\.js/);
+  assert.match(index, /pro\.css/);
+  assert.match(index, /sectionLabel/);
+});
+
+test("client change orders require and expose electronic signatures", () => {
+  const db = fs.readFileSync("db.js", "utf8");
+  const operations = fs.readFileSync("operations-routes.js", "utf8");
+  const p1 = fs.readFileSync("p1-suite.js", "utf8");
+  const pro = fs.readFileSync("pro-suite.js", "utf8");
+  assert.match(db, /client_signature TEXT/);
+  assert.match(db, /signed_at TIMESTAMPTZ/);
+  assert.match(operations, /approvalSignature/);
+  assert.match(operations, /signature du client est requise/);
+  assert.match(p1, /Signer et approuver/);
+  assert.match(pro, /client_signature/);
+});
