@@ -46,6 +46,10 @@ test("only the seven explicit logo assets are publicly served", async () => {
     (await fetch(url + "/assets/fonts/LiberationSans-Regular.ttf")).status,
     404,
   );
+  const stylesheet = await fetch(url + "/visual-refresh.css?v=20260928-workspace");
+  assert.equal(stylesheet.status, 200);
+  assert.match(stylesheet.headers.get("content-type"), /text\/css/);
+  assert.match(await stylesheet.text(), /workspace-welcome/);
 });
 test.before(async () => {
   db = await database();
