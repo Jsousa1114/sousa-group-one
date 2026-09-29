@@ -378,6 +378,27 @@ async function migrate(db = pool) {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )`,
   );
+  await db.query("ALTER TABLE project_change_orders ADD COLUMN IF NOT EXISTS client_signature TEXT");
+  await db.query("ALTER TABLE project_change_orders ADD COLUMN IF NOT EXISTS signed_at TIMESTAMPTZ");
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS project_receptions(
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL UNIQUE,
+      company TEXT NOT NULL,
+      client_id TEXT,
+      signature TEXT NOT NULL,
+      signer_name TEXT,
+      note TEXT,
+      signed_by_user_id INTEGER NOT NULL,
+      signed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`,
+  );
+  await db.query(
+    `CREATE INDEX IF NOT EXISTS project_receptions_project_idx
+     ON project_receptions(project_id,signed_at DESC)`,
+  );
+
   await db.query(
     `CREATE TABLE IF NOT EXISTS crm_opportunities(
       id TEXT PRIMARY KEY,
