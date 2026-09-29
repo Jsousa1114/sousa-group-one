@@ -589,12 +589,30 @@ function routes(db) {
           [String(req.user.client_id)],
         )
       ).rows;
-      clientActions.receptions = (
-        await db.query(
-          "SELECT p.id,p.title,p.address,p.status FROM app_state s, LATERAL jsonb_to_recordset(s.data->'projects') AS p(id text,title text,address text,status text,\"clientId\" text) WHERE s.id=1 AND p.\"clientId\"=$1 AND p.status=ANY($2::text[]) AND NOT EXISTS (SELECT 1 FROM project_receptions r WHERE r.project_id=p.id) ORDER BY p.id DESC LIMIT 100",
-          [String(req.user.client_id), ["Terminé","Payé"]],
-        )
-      ).rows;
+      const receivableProjects = ctx.view.projects.filter(
+        (project) =>
+          D.same(project.clientId, req.user.client_id) &&
+          ["Terminé","Payé"].includes(String(project.status || "")),
+      );
+      if (receivableProjects.length) {
+        const signedReceptionIds = new Set(
+          (
+            await db.query(
+              "SELECT project_id FROM project_receptions WHERE project_id=ANY($1::text[])",
+              [receivableProjects.map((project) => String(project.id))],
+            )
+          ).rows.map((row) => String(row.project_id)),
+        );
+        clientActions.receptions = receivableProjects
+          .filter((project) => !signedReceptionIds.has(String(project.id)))
+          .slice(0,100)
+          .map((project) => ({
+            id: project.id,
+            title: project.title,
+            address: project.address,
+            status: project.status,
+          }));
+      }
     }
     res.json({
       preferences: prefs,
