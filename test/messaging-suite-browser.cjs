@@ -287,10 +287,10 @@ async function noOverflow(page, label) {
     await client.page.locator("#suiteSearchResults button").first().waitFor({ timeout: 8000 });
     console.log("STEP 10 search verified");
 
-    const historyProbe = await admin.page.evaluate(async () => {
-      const response = await fetch("/api/messaging/history?key=" + encodeURIComponent("direct:" + clientId) + "&limit=20", { credentials: "same-origin" });
+    const historyProbe = await admin.page.evaluate(async (directUserId) => {
+      const response = await fetch("/api/messaging/history?key=" + encodeURIComponent("direct:" + directUserId) + "&limit=20", { credentials: "same-origin" });
       return { status: response.status, body: await response.json() };
-    });
+    }, String(clientId));
     assert.equal(historyProbe.status, 200, "paginated message history should be accessible");
     assert.ok(Array.isArray(historyProbe.body.messages), "history endpoint must return messages");
     assert.ok(historyProbe.body.total >= historyProbe.body.messages.length, "history total must cover page size");
