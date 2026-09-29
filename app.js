@@ -110,6 +110,39 @@ const menus = {
   audit: ["Journal", hr],
   settings: ["Mon compte", Object.keys(roles)],
 };
+// Presentation-only navigation. Existing role and fine-permission checks remain authoritative.
+const navigationGroups = [
+  ["Vue d’ensemble", ["dashboard", "messages"]],
+  ["Équipe", ["employees", "planning", "time", "absences"]],
+  ["Activité", ["projects", "clients", "maintenance", "documents"]],
+  ["Finances", ["quotes", "invoices", "payments", "expenses"]],
+  ["Ressources", ["inventory", "tools", "vehicles", "suppliers"]],
+  ["Gestion", ["pro", "companies", "reports", "pilotage", "advanced", "audit", "settings"]],
+];
+function navigationIcon(key) {
+  const paths = {
+    dashboard: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
+    messages: '<path d="M21 11a8 8 0 0 1-8 8H7l-4 3V11a8 8 0 0 1 8-8h2a8 8 0 0 1 8 8Z"/><path d="M8 9h8M8 13h5"/>',
+    employees: '<circle cx="9" cy="8" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3M17 5a3 3 0 0 1 0 6M18 14a5 5 0 0 1 3 5v2"/>',
+    planning: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 3v4M17 3v4M3 11h18M7 15h3M14 15h3"/>',
+    time: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+    absences: '<path d="M4 17a8 8 0 0 1 16 0H4ZM12 17v4M12 3v3M4 6l2 2M20 6l-2 2"/>',
+    projects: '<path d="M3 21V6h11v15M14 11h7v10M7 10h3M7 14h3M7 18h3M17 15h1M17 18h1"/>',
+    clients: '<circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/>',
+    documents: '<path d="M4 6h6l2 3h8v11H4V6Z"/>',
+    quotes: '<path d="M6 3h9l4 4v14H6V3ZM14 3v5h5M9 12h7M9 16h5"/>',
+    invoices: '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3ZM9 8h6M9 12h6"/>',
+    payments: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18M7 15h3"/>',
+    expenses: '<path d="M4 8h16v12H4V8ZM7 8V4h10v4M9 14h6"/>',
+    inventory: '<path d="m3 7 9-4 9 4v10l-9 4-9-4V7Zm0 0 9 4 9-4M12 11v10"/>',
+    vehicles: '<path d="M3 7h11v11H3V7Zm11 4h4l3 4v3h-7"/><circle cx="7" cy="18" r="2"/><circle cx="18" cy="18" r="2"/>',
+    reports: '<path d="M4 3v18h17M8 16v-4M13 16V7M18 16v-7"/>',
+    settings: '<circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/>',
+    pro: '<path d="M4 5h16v14H4z"/><path d="M8 9h8M8 13h5"/>',
+  };
+  const aliases = {maintenance:"planning",tools:"settings",suppliers:"inventory",companies:"projects",pilotage:"reports",advanced:"dashboard",audit:"quotes"};
+  return `<svg class="nav-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${paths[key] || paths[aliases[key]] || paths.documents}</svg>`;
+}
 const createRoles = {
   companies: core,
   employees: hr,
@@ -170,7 +203,7 @@ const cards = (items) =>
 function table(headers, rows) {
   return rows.length
     ? `<article class="card"><div class="table"><table><thead><tr>${headers.map((x) => `<th>${esc(x)}</th>`).join("")}</tr></thead><tbody>${rows.map((r) => `<tr>${r.map((x) => `<td>${x ?? ""}</td>`).join("")}</tr>`).join("")}</tbody></table></div></article>`
-    : '<article class="card empty">Aucun élément pour le moment.</article>';
+    : `<article class="card empty">${navigationIcon("documents")}<strong>Aucun élément pour le moment.</strong><span>Les éléments disponibles dans cet espace apparaîtront ici.</span></article>`;
 }
 function heading(title, actions = "") {
   return `<div class="section-head"><h3>${esc(title)}</h3><div class="actions">${actions}</div></div>`;
@@ -452,20 +485,39 @@ function render() {
   );
   if (!can(menus[page]?.[1] || [])) page = "dashboard";
   $("title").textContent = menus[page][0];
+  document.body.dataset.view = page;
+  if ($("sectionLabel"))
+    $("sectionLabel").textContent =
+      navigationGroups.find(([, keys]) => keys.includes(page))?.[0] || "Espace de travail";
+  if ($("userInitials"))
+    $("userInitials").textContent = profile.name
+      .trim()
+      .split(/\s+/)
+      .slice(0, 2)
+      .map((n) => n[0])
+      .join("");
   $("userName").textContent = profile.name + " · " + roles[profile.role];
-  $("nav").innerHTML = Object.entries(menus)
-    .filter(([k, [, rs]]) => can(rs) && k !== "users")
-    .map(([k, [label]]) => {
-      const unread =
-        k === "messages"
-          ? Object.values(messageStats || {}).reduce(
-              (total, stat) => total + Number(stat?.unread || 0),
-              0,
-            )
-          : 0;
-      return `<button class="nav-item ${page === k ? "active" : ""}" data-page="${k}">${esc(label)}${unread ? ` <span class="nav-unread">${unread > 99 ? "99+" : unread}</span>` : ""}</button>`;
+  const navScroll = $("nav").scrollTop;
+  $("nav").innerHTML = navigationGroups
+    .map(([group, keys]) => {
+      const available = keys.filter((k) => menus[k] && can(menus[k][1]) && k !== "users");
+      if (!available.length) return "";
+      return `<div class="nav-section"><p class="nav-group">${esc(group)}</p>${available
+        .map((k) => {
+          const label = menus[k][0];
+          const unread =
+            k === "messages"
+              ? Object.values(messageStats || {}).reduce(
+                  (total, stat) => total + Number(stat?.unread || 0),
+                  0,
+                )
+              : 0;
+          return `<button class="nav-item ${page === k ? "active" : ""}" data-page="${k}" ${page === k ? 'aria-current="page"' : ""}>${navigationIcon(k)}<span>${esc(label)}</span>${unread ? ` <span class="nav-unread">${unread > 99 ? "99+" : unread}</span>` : ""}</button>`;
+        })
+        .join("")}</div>`;
     })
     .join("");
+  $("nav").scrollTop = navScroll;
   $("companyFilter").innerHTML =
     '<option value="">Toutes mes données</option>' +
     state.companies
@@ -536,8 +588,13 @@ function sum(k, field) {
   return visible(k).reduce((n, r) => n + (Number(r[field]) || 0), 0);
 }
 function dashboard() {
+  const shortcutKeys = ["planning", "projects", "messages", "pro"].filter(
+    (k) => menus[k] && can(menus[k][1]),
+  ).slice(0, 3);
+  const intro = `<section class="workspace-welcome"><div><p class="eyebrow">${esc(new Date().toLocaleDateString("fr-CH", {weekday:"long", day:"numeric", month:"long",timeZone:"Europe/Zurich"}))}</p><h1>Bonjour, ${esc(profile.name.split(" ")[0])}.</h1><p>Voici l’essentiel de votre activité.</p></div><div class="workspace-shortcuts">${shortcutKeys.map(k=>`<button type="button" class="workspace-shortcut" data-shortcut="${k}">${navigationIcon(k)}<span>${esc(menus[k][0])}</span></button>`).join("")}</div></section>`;
   if (profile.role === "client")
     return (
+      intro +
       heading("Mes chantiers") +
       cards([
         ["Chantiers", visible("projects").length],
@@ -552,6 +609,7 @@ function dashboard() {
   if (profile.role === "employee") {
     const e = find("employees", profile.employee_id);
     return (
+      intro +
       cards([
         ["Heures enregistrées", sum("time", "hours").toFixed(2) + " h"],
         ["Vacances disponibles", (e?.vacation ?? 0) + " jours"],
@@ -562,6 +620,7 @@ function dashboard() {
     );
   }
   return (
+    intro +
     cards([
       ["Salariés visibles", visible("employees").length],
       [
@@ -2835,15 +2894,16 @@ document.addEventListener("change", (e) => {
   }
 });
 document.addEventListener("click", async (e) => {
-  const nav = e.target.closest("[data-page]");
+  const nav = e.target.closest("[data-page], [data-shortcut]");
   if (nav) {
-    const nextPage = nav.dataset.page;
+    const nextPage = nav.dataset.page || nav.dataset.shortcut;
     if (page === "messages" && nextPage !== "messages") cancelChatRecording();
     page = nextPage;
     if (page === "messages") mobileChatOpen = false;
     render();
     $("sidebar").classList.remove("open");
     $("backdrop").classList.add("hidden");
+    document.querySelector('[data-action="open-side"]')?.setAttribute("aria-expanded", "false");
     return;
   }
   const b = e.target.closest("[data-action]");
@@ -3079,9 +3139,12 @@ document.addEventListener("click", async (e) => {
     else if (a === "open-side") {
       $("sidebar").classList.add("open");
       $("backdrop").classList.remove("hidden");
+      document.querySelector('[data-action="open-side"]')?.setAttribute("aria-expanded", "true");
     } else if (a === "close-side") {
       $("sidebar").classList.remove("open");
       $("backdrop").classList.add("hidden");
+      document.querySelector('[data-action="open-side"]')?.setAttribute("aria-expanded", "false");
+      document.querySelector('[data-action="open-side"]')?.focus();
     } else if (a === "logout") {
       await api("auth/logout", {});
       clearSession();
@@ -3879,7 +3942,7 @@ window.SGOChatCore = {
 
 document.body.classList.toggle(
   "light",
-  localStorage.getItem("sgo_theme") === "light",
+  localStorage.getItem("sgo_theme") !== "dark",
 );
 if (token)
   refresh(false)
