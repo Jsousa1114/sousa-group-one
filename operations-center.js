@@ -383,9 +383,9 @@
     root().querySelector("#opsBody").innerHTML = `
       <article class="card">
         <h3>État des services externes</h3>
-        <p class="muted">Le code de connexion est prêt. Les services payants ou tiers nécessitent leurs propres identifiants.</p>
+        <p class="muted">Ces indicateurs signalent la présence de paramètres. Chaque connexion doit encore être testée avec son fournisseur.</p>
         <div class="ops-integration-grid">
-          ${rows.map(([name, ok]) => `<div class="${ok ? "connected" : "pending"}"><span>${ok ? "✓" : "!"}</span><b>${esc(name)}</b><small>${ok ? "Connecté" : "À configurer"}</small></div>`).join("")}
+          ${rows.map(([name, ok]) => `<div class="${ok ? "connected" : "pending"}"><span>${ok ? "✓" : "!"}</span><b>${esc(name)}</b><small>${ok ? "Paramètres présents — test requis" : "À configurer"}</small></div>`).join("")}
         </div>
       </article>
       <article class="card">

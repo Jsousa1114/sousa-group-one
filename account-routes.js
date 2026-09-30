@@ -413,14 +413,19 @@ function routes(db) {
         ))
       )
         D.fail("Mot de passe actuel incorrect.", 403);
+      if (user.totp_enabled)
+        D.fail("Désactivez d’abord la double authentification avec votre code actuel.", 409);
+      if ((process.env.RENDER || process.env.NODE_ENV === "production") && !process.env.TOTP_ENCRYPTION_KEY)
+        D.fail("Le chiffrement 2FA doit être configuré avant l’activation.", 503);
       const secret = generateTotpSecret();
-      await db.query(
-        "UPDATE users SET totp_secret=$1,totp_enabled=false WHERE id=$2",
-        [encryptTotpSecret(secret), req.user.id],
-      );
-      await db.query("DELETE FROM user_recovery_codes WHERE user_id=$1", [
-        req.user.id,
-      ]);
+      await transaction(db, async (c) => {
+        const updated = await c.query(
+          "UPDATE users SET totp_secret=$1 WHERE id=$2 AND totp_enabled=false RETURNING id",
+          [encryptTotpSecret(secret), req.user.id],
+        );
+        if (!updated.rows.length) D.fail("La double authentification est déjà active.", 409);
+        await c.query("DELETE FROM user_recovery_codes WHERE user_id=$1", [req.user.id]);
+      });
       res.json({
         secret,
         uri: otpauthUri(secret, req.user.email),

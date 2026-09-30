@@ -214,6 +214,12 @@ test("TOTP two-factor authentication can be enabled and is required on later log
   assert.equal(enabled.status, 200);
   assert.equal(enabled.data.recoveryCodes.length, 10);
 
+  const replacement = await call("account/2fa/setup", token, { currentPassword: PASSWORD });
+  assert.equal(replacement.status, 409);
+  const unchanged = (await db.query("SELECT totp_secret,totp_enabled FROM users WHERE email=$1", ["employee-account@test.invalid"])).rows[0];
+  assert.equal(unchanged.totp_enabled, true);
+  assert.equal(decryptTotpSecret(unchanged.totp_secret), setup.data.secret);
+
   const recovery = enabled.data.recoveryCodes[0];
   const recoveryLogin = await login(recovery);
   assert.equal(recoveryLogin.status, 200);

@@ -1,6 +1,6 @@
 "use strict";
 
-const STATIC_CACHE = "sgo-shell-2026-09-28-workspace-v1",
+const STATIC_CACHE = "sgo-shell-2026-09-30-finalization-v1",
   STATIC_ASSETS = [
     "/",
     "/index.html",
@@ -14,6 +14,8 @@ const STATIC_CACHE = "sgo-shell-2026-09-28-workspace-v1",
     "/p2-center.js",
     "/p1.css",
     "/p1-suite.js",
+    "/pro-suite.js",
+    "/pro.css",
     "/passkeys.js",
     "/p2.css",
     "/visual-refresh.css",
@@ -107,6 +109,10 @@ self.addEventListener("fetch", (event) => {
             return response;
           })
           .catch(() => null);
+        // Executable assets must match the latest HTML after a deployment.
+        // Retain the cached copy only when the network is unavailable.
+        if (/\.(?:js|css|webmanifest)$/.test(url.pathname))
+          return (await network) || cached || Response.error();
         return cached || (await network) || Response.error();
       }),
     );

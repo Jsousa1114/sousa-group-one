@@ -2215,11 +2215,8 @@ function routes(db) {
             process.env.RTC_TURN_USERNAME &&
             process.env.RTC_TURN_CREDENTIAL
           ),
-          aiConfigured: !!(process.env.AI_API_URL && process.env.AI_API_KEY),
-          objectStorageConfigured: !!(
-            process.env.OBJECT_STORAGE_ENDPOINT &&
-            process.env.OBJECT_STORAGE_BUCKET
-          ),
+          aiConfigured: !!(process.env.AI_API_URL && (process.env.AI_API_KEY || process.env.OPENAI_API_KEY) && process.env.AI_MODEL),
+          objectStorageConfigured: require("./production-readiness").objectStorageConfigured(),
           errorMonitoringConfigured: !!process.env.ERROR_MONITOR_DSN,
         },
       });
@@ -2230,42 +2227,7 @@ function routes(db) {
   return r;
 }
 
-async function runDueRecurringJobs(db) {
-  const due = (
-    await db.query(
-      `SELECT * FROM recurring_jobs
-       WHERE active=true AND next_run <= CURRENT_DATE
-       ORDER BY next_run LIMIT 100`,
-    )
-  ).rows;
-  for (const job of due) {
-    const id = randomUUID();
-    await db.query(
-      `INSERT INTO work_orders
-       (id,company,maintenance_id,title,status,priority,scheduled_at,created_by)
-       VALUES($1,$2,$3,$4,'planned','normal',$5,$6)`,
-      [
-        id,
-        job.company,
-        job.maintenance_id,
-        job.title,
-        new Date(job.next_run + "T08:00:00Z"),
-        job.created_by,
-      ],
-    );
-    const next = new Date(job.next_run + "T12:00:00Z");
-    if (job.frequency === "weekly") next.setUTCDate(next.getUTCDate() + 7);
-    else if (job.frequency === "quarterly")
-      next.setUTCMonth(next.getUTCMonth() + 3);
-    else if (job.frequency === "yearly") next.setUTCFullYear(next.getUTCFullYear() + 1);
-    else next.setUTCMonth(next.getUTCMonth() + 1);
-    await db.query("UPDATE recurring_jobs SET next_run=$1 WHERE id=$2", [
-      next.toISOString().slice(0, 10),
-      job.id,
-    ]);
-  }
-  return due.length;
-}
+const { runDueRecurringJobs } = require("./recurring");
 
 module.exports = {
   routes,

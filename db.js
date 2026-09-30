@@ -485,6 +485,11 @@ async function migrate(db = pool) {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )`,
   );
+  await db.query("ALTER TABLE recurring_jobs ADD COLUMN IF NOT EXISTS anchor_day INTEGER");
+  await db.query("ALTER TABLE recurring_jobs ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()");
+  await db.query("ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS recurring_job_id TEXT");
+  await db.query("ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS occurrence_date DATE");
+  await db.query("CREATE UNIQUE INDEX IF NOT EXISTS work_orders_recurring_occurrence_idx ON work_orders(recurring_job_id,occurrence_date)");
   await db.query(
     `CREATE TABLE IF NOT EXISTS automation_rules(
       id TEXT PRIMARY KEY,
@@ -778,7 +783,8 @@ async function migrate(db = pool) {
     `INSERT INTO schema_migrations(version) VALUES
       ('2026-09-27-entity-records-mirror'),
       ('2026-09-27-webauthn-passkeys'),
-      ('2026-09-27-external-file-storage')
+      ('2026-09-27-external-file-storage'),
+      ('2026-09-30-reliable-recurrences')
       ON CONFLICT(version) DO NOTHING`,
   );
   // Disable the previously published demo credentials, even on an existing installation.
