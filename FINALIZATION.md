@@ -12,6 +12,8 @@
   unicité par occurrence, fin de mois et heure locale suisse conservées.
 - Les indicateurs des intégrations distinguent paramètres présents et connexion
   réellement vérifiée. Stockage : les quatre paramètres sont requis.
+- Les candidats réseau arrivés après la fin d'un appel sont ignorés sans erreur
+  ni conservation, après contrôle des participants autorisés.
 
 L'ancien brouillon `sousa-completion` n'a pas été fusionné en bloc : il précède
 les modules P1/P2/Pro et possède des modèles de stock concurrents. Les corrections

@@ -1382,6 +1382,12 @@ test("audio call signaling supports ring, answer, ICE exchange, hangup and rejec
   assert.equal(active.data.call.answer.type, "answer");
 
   const ended = await call("state/calls/" + id + "/end", admin, {});
+  const lateCandidate = await call("state/calls/" + id + "/candidates", freshClient, {
+    candidate: { candidate: "candidate:late 1 udp 1 127.0.0.1 5000 typ host" },
+  });
+  assert.equal(lateCandidate.status, 200);
+  assert.equal(lateCandidate.data.ignored, true);
+  assert.equal((await db.query("SELECT 1 FROM rtc_ice_candidates WHERE call_id=$1", [id])).rows.length, 0);
   assert.equal(ended.status, 200);
   assert.equal(ended.data.status, "ended");
 

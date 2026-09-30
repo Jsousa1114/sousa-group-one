@@ -1541,7 +1541,9 @@ function routes(db) {
     wrap(async (req, res) => {
       const call = await callRow(db, req.params.id, req.user.id);
       if (!["ringing", "accepted"].includes(call.status))
-        D.fail("Appel terminé.", 409);
+        // ICE discovery can finish after the other participant hangs up.
+        // Acknowledge the late signal without retaining it or reopening the call.
+        return res.json({ ok: true, ignored: true, status: call.status });
       const candidate = req.body?.candidate;
       if (
         !candidate ||

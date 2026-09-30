@@ -84,6 +84,8 @@ async function make(viewport) {
     if (m.type() === "error") errors.push("console:" + m.text());
   });
   page.on("response", (response) => {
+    if (response.status() >= 400)
+      console.log("MESSAGING HTTP DIAGNOSTIC", response.status(), new URL(response.url()).pathname);
     if (response.status() === 401)
       errors.push("response:401 " + response.url());
   });
