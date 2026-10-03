@@ -5,12 +5,18 @@ const VENDORS = Object.freeze([
     id: "em",
     name: "Electro-Matériel",
     url: "https://www.elektro-material.ch/fr",
+    loginUrl: "https://www.elektro-material.ch/fr",
+    loginHelp: "Sur le site EM, ouvrez la rubrique de connexion à votre compte.",
   },
-  { id: "sonepar", name: "Sonepar Suisse", url: "https://www.sonepar.ch/fr" },
+  { id: "sonepar", name: "Sonepar Suisse", url: "https://www.sonepar.ch/fr",
+    loginUrl: "https://www.sonepar.ch/fr",
+    loginHelp: "Sur le site Sonepar, ouvrez la rubrique de connexion à votre compte." },
   {
     id: "otto-fischer",
     name: "Otto Fischer",
     url: "https://www.ottofischer.ch/fr/",
+    loginUrl: "https://www.ottofischer.ch/fr/account/login/?next=%2Ffr%2F",
+    loginHelp: "Saisissez vos identifiants directement sur la page de connexion Otto Fischer.",
   },
 ]);
 const HEADERS = [
