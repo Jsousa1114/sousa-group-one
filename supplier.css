@@ -1,0 +1,115 @@
+.supplier-suite {
+  display: grid;
+  gap: 20px;
+  margin: 24px 0;
+}
+.supplier-suite .card {
+  padding: 24px;
+}
+.supplier-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+.supplier-heading h2,
+.supplier-heading h4 {
+  margin: 4px 0 12px;
+}
+.supplier-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin: 20px 0;
+}
+.supplier-vendor {
+  border: 1px solid var(--border, #dce3eb);
+  border-radius: 16px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: var(--surface, #fff);
+}
+.supplier-vendor h3,
+.supplier-vendor p {
+  margin: 0;
+}
+.supplier-monogram {
+  width: 48px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+  font-weight: 800;
+  border-radius: 12px;
+  color: #145e78;
+  background: #e9f4f8;
+}
+.supplier-actions {
+  display: flex;
+  gap: 12px;
+  align-items: end;
+  flex-wrap: wrap;
+  margin: 16px 0;
+}
+.supplier-actions label:first-child {
+  flex: 1;
+  min-width: 210px;
+}
+.supplier-actions label {
+  display: grid;
+  gap: 6px;
+}
+.supplier-comparison {
+  margin-top: 20px;
+  border-top: 1px solid var(--border, #dce3eb);
+  padding-top: 18px;
+}
+.supplier-table {
+  overflow-x: auto;
+}
+.supplier-table table {
+  min-width: 650px;
+  width: 100%;
+}
+.supplier-table td {
+  vertical-align: top;
+}
+.supplier-table small {
+  color: var(--muted, #596777);
+}
+.supplier-best td {
+  background: #eaf8f0;
+  color: #174f35;
+}
+.supplier-best td:nth-child(4) span {
+  font-size: 12px;
+  font-weight: 700;
+}
+#supplierImportForm {
+  display: grid;
+  gap: 16px;
+}
+#supplierImportForm label {
+  display: grid;
+  gap: 6px;
+}
+#supplierPreview {
+  overflow-wrap: anywhere;
+}
+@media (max-width: 850px) {
+  .supplier-grid {
+    grid-template-columns: 1fr;
+  }
+  .supplier-suite .card {
+    padding: 16px;
+  }
+  .supplier-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .supplier-heading label {
+    width: 100%;
+  }
+}

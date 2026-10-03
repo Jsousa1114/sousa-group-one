@@ -73,6 +73,7 @@ function createApp(db = pool) {
   app.use("/api/operations", require("./operations-routes").routes(db));
   app.use("/api/p1", require("./p1-routes").routes(db));
   app.use("/api/p2", require("./p2-routes").routes(db));
+  app.use("/api/suppliers", require("./supplier-routes").routes(db));
   app.use("/api/pro", require("./pro-routes").routes(db));
   app.use("/api/public/v1", require("./p2-routes").publicRoutes(db));
   app.get(["/favicon.ico", "/icon.svg"], (req, res) => {
@@ -93,6 +94,8 @@ function createApp(db = pool) {
     "p2-runtime.js",
     "p2-center.js",
     "pro-suite.js",
+    "supplier-suite.js",
+    "supplier.css",
     "styles.css",
     "visual-refresh.css",
     "p1.css",

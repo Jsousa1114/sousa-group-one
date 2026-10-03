@@ -529,6 +529,8 @@ function render() {
   $("activeCompanyLogo").alt =
     name("companies", company || profile.company) || "Sousa Group";
   $("content").innerHTML = views[page] ? views[page]() : genericPage(page);
+  if (page === "suppliers" && window.SGOSuppliers?.render)
+    window.SGOSuppliers.render($("supplierCatalog")).catch((e) => notice(e.message));
   if (page === "advanced" && window.SGOP2Center?.render)
     window.SGOP2Center.render($("p2Standalone")).catch((e) => notice(e.message));
   if (page === "pro" && window.SGOProSuite?.render)
@@ -1871,6 +1873,7 @@ function genericPage(k) {
         ? btn("Ajouter", "new", k, "primary") + " "
         : "") + btn("Exporter CSV", "export", k),
     ) +
+    (k === "suppliers" ? '<div id="supplierCatalog"></div>' : "") +
     table(
       [
         ...cols.map((c) => c[1]),

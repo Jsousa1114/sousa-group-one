@@ -880,7 +880,7 @@ function applyCommand(
         company: company(d, u, p.company),
         name: text(p.name, "Nom"),
         contact: text(p.contact, "Contact", 100, true),
-        email: text(p.email, "E-mail"),
+        email: text(p.email, "E-mail", 200, true),
         phone: text(p.phone, "Téléphone", 40, true),
       };
     } else if (k === "vehicles") {

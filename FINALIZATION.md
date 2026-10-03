@@ -48,3 +48,11 @@ expirant le **14 octobre 2026**, sans stockage objet ni TURN configurés.
 Les tests automatisés et un déploiement réussi ne constituent pas une certification
 globale du cahier des charges P0–P3. Aucun abonnement ni migration destructive de
 production n'est autorisé ou exécuté par cette livraison.
+
+## Fournisseurs électriques — 4 octobre 2026
+
+- Espace Fournisseurs : Electro-Matériel, Sonepar Suisse et Otto Fischer, avec liens officiels ; ajout idempotent des trois fiches pour l'entreprise choisie.
+- Tarifs privés par entreprise, import CSV avec contrôle préalable et confirmation de remplacement, source/date, journal d'audit. Modèle disponible dans l'écran. Limite : 4 Mo / 10 000 articles par fournisseur et entreprise.
+- Comparaison CHF HT par GTIN contrôlé (ou numéro E si GTIN absent), unité et type de tarif identiques ; prix par quantité normalisé et lots arrondis. Tarifs expirés ou de plus de 30 jours exclus du meilleur total. Aucun rapprochement approximatif par désignation.
+- Vérifications : parser, dates/prix/identifiants invalides, lots, tarifs publics/nets, cloisonnement sociétés, permissions, import invalide sans perte, ajout sans doublons, interface DOM et échappement HTML. Suite complète : 155 tests réussis.
+- **Données externes en attente** : aucun catalogue chiffré réel n'a été importé et aucune connexion fournisseur automatique n'est activée. Nécessite les exports autorisés des comptes fournisseurs, adaptés au modèle (prix applicables à toute quantité). Les paliers de remise, frais annexes et disponibilité ne sont pas synchronisés. Une intégration directe OCI/BMEcat/API nécessite les modalités et accès officiels propres à chaque fournisseur ; ne pas présenter les liens catalogue comme une synchronisation.

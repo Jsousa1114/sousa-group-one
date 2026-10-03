@@ -196,8 +196,8 @@ test("workspace redesign keeps professional center navigation and assets", () =>
   assert.match(app, /"pro"/);
   assert.match(app, /data-shortcut/);
   assert.match(app, /workspace-welcome/);
-  assert.match(index, /visual-refresh\.css\?v=20260930-finalization/);
-  assert.match(index, /app\.js\?v=20260930-finalization/);
+  assert.match(index, /visual-refresh\.css\?v=20261004-suppliers/);
+  assert.match(index, /app\.js\?v=20261004-suppliers/);
   assert.match(index, /pro-suite\.js/);
   assert.match(index, /pro\.css/);
   assert.match(index, /sectionLabel/);
