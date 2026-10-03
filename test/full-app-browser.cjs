@@ -95,6 +95,29 @@ async function visitAll(page, expectedPages, mobile=false){
     await login(admin.page,"audit-admin@test.invalid");
     const adminPages=["dashboard","companies","employees","time","planning","absences","projects","clients","quotes","invoices","payments","expenses","inventory","suppliers","vehicles","tools","maintenance","documents","messages","reports","pilotage","audit","settings"];
     await visitAll(admin.page,adminPages,false);
+    await admin.page.locator('[data-page="suppliers"]').click();
+    await admin.page.locator('.supplier-vendor').first().waitFor();
+    assert.equal(await admin.page.locator('.supplier-vendor').count(),3);
+    await admin.page.locator('#supplierCompany').selectOption('home');
+    await admin.page.locator('[data-import="em"]').waitFor();
+    await admin.page.locator('#supplierEnable').click();
+    await admin.page.waitForFunction(() => window.SGOChatCore.getState().suppliers.some(x => x.catalogVendor === 'em'));
+    for (const [vendor,price] of [['em','10'],['sonepar','9']]) {
+      await admin.page.locator('[data-import="'+vendor+'"]').click();
+      await admin.page.locator('#supplierImportForm [name="source"]').fill('Test navigateur uniquement');
+      const csv = 'reference;designation;ean;numero_e;unite;prix_chf_ht;prix_pour;conditionnement;type_prix;date_prix;valable_jusquau\nR1;Article test;4006381333931;;pcs;'+price+';1;1;net;'+new Date().toISOString().slice(0,10)+';\n';
+      await admin.page.locator('#supplierImportForm [name="file"]').setInputFiles({name:'tarifs-test.csv',mimeType:'text/csv',buffer:Buffer.from(csv)});
+      await admin.page.locator('#supplierImportForm [type="submit"]').click();
+      await admin.page.waitForFunction(() => !document.querySelector('#supplierConfirm')?.disabled);
+      await admin.page.locator('#supplierConfirm').click();
+      await admin.page.locator('#supplierImportForm').waitFor({state:'detached'});
+    }
+    await admin.page.locator('.supplier-best').waitFor();
+    assert.match(await admin.page.locator('.supplier-best').innerText(),/Sonepar/);
+    await admin.page.setViewportSize({width:390,height:844});
+    await noOverflow(admin.page,'mobile fournisseurs avec tarifs');
+    await admin.page.setViewportSize({width:1440,height:900});
+
     await admin.page.locator('[data-page="projects"]').click();
     await admin.page.locator('[data-action="project"]').first().click();
     await admin.page.locator("#modalWrap:not(.hidden)").waitFor();

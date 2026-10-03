@@ -26,6 +26,8 @@
   async function render(host) {
     if (!host) return;
     const current = ++sequence;
+    let directory,
+      request = 0;
     const companies = (core().getState().companies || []).filter(
       (x) => x.id !== "group",
     );
@@ -71,7 +73,6 @@
         e.target.disabled = false;
       }
     };
-    let directory;
     try {
       directory = await api("directory");
     } catch (error) {
@@ -108,10 +109,13 @@
         );
       };
     });
-    let request = 0;
     async function load() {
       const id = ++request;
       const results = host.querySelector("#supplierResults");
+      if (!directory) {
+        results.textContent = "Chargement des fournisseurs…";
+        return;
+      }
       if (!chosenCompany) {
         results.textContent =
           "Sélectionnez une entreprise pour consulter ses tarifs.";
