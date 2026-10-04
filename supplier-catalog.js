@@ -4,19 +4,26 @@ const VENDORS = Object.freeze([
   {
     id: "em",
     name: "Electro-Matériel",
-    url: "https://www.elektro-material.ch/fr",
-    loginUrl: "https://www.elektro-material.ch/fr",
-    loginHelp: "Sur le site EM, ouvrez la rubrique de connexion à votre compte.",
+    url: "https://www.elektro-material.ch/fr/shop",
+    loginUrl: "https://www.elektro-material.ch/fr/cms/home",
+    loginHelp:
+      "Sur le site EM, ouvrez la rubrique de connexion à votre compte.",
   },
-  { id: "sonepar", name: "Sonepar Suisse", url: "https://www.sonepar.ch/fr",
+  {
+    id: "sonepar",
+    name: "Sonepar Suisse",
+    url: "https://www.sonepar.ch/fr",
     loginUrl: "https://www.sonepar.ch/fr",
-    loginHelp: "Sur le site Sonepar, ouvrez la rubrique de connexion à votre compte." },
+    loginHelp:
+      "Sur le site Sonepar, ouvrez la rubrique de connexion à votre compte.",
+  },
   {
     id: "otto-fischer",
     name: "Otto Fischer",
     url: "https://www.ottofischer.ch/fr/",
     loginUrl: "https://www.ottofischer.ch/fr/account/login/?next=%2Ffr%2F",
-    loginHelp: "Saisissez vos identifiants directement sur la page de connexion Otto Fischer.",
+    loginHelp:
+      "Saisissez vos identifiants directement sur la page de connexion Otto Fischer.",
   },
 ]);
 const HEADERS = [
@@ -32,6 +39,23 @@ const HEADERS = [
   "date_prix",
   "valable_jusquau",
 ];
+const OPTIONAL_HEADERS = ["image_url", "produit_url", "notes_prix"];
+function supplierURL(value) {
+  if (!value) return "";
+  try {
+    const u = new URL(value);
+    if (
+      u.protocol === "https:" &&
+      !u.username &&
+      !u.password &&
+      !u.port &&
+      (u.hostname === "elektro-material.ch" ||
+        u.hostname.endsWith(".elektro-material.ch"))
+    )
+      return u.href;
+  } catch {}
+  D.fail("Lien article ou image : URL HTTPS Electro-Matériel requise.");
+}
 // Canonical CSV: supplier exports must be mapped to these explicit fields before import.
 function parseCSV(text) {
   if (typeof text !== "string" || Buffer.byteLength(text) > 4 * 1024 * 1024)
@@ -76,8 +100,8 @@ function parseCSV(text) {
   const header = rows.shift()?.map((x) => x.trim().toLowerCase());
   if (
     !header ||
-    header.length !== HEADERS.length ||
-    new Set(header).size !== HEADERS.length ||
+    new Set(header).size !== header.length ||
+    header.some((x) => ![...HEADERS, ...OPTIONAL_HEADERS].includes(x)) ||
     HEADERS.some((x) => !header.includes(x))
   )
     D.fail("Colonnes incorrectes : utilisez le modèle CSV.");
@@ -122,6 +146,10 @@ function validateRows(csv, now = new Date()) {
     if (!["net", "public"].includes(x.type_prix))
       bad("type_prix attendu : net ou public.");
     for (const key of ["prix_chf_ht", "prix_pour", "conditionnement"]) {
+      if (key === "conditionnement" && x[key] === "") {
+        x[key] = null;
+        continue;
+      }
       if (!/^\d+(?:[.,]\d+)?$/.test(x[key]))
         bad(`${key} : nombre positif requis.`);
       x[key] = Number(x[key].replace(",", "."));
@@ -129,7 +157,8 @@ function validateRows(csv, now = new Date()) {
     }
     if (
       x.unite === "pcs" &&
-      (!Number.isInteger(x.prix_pour) || !Number.isInteger(x.conditionnement))
+      (!Number.isInteger(x.prix_pour) ||
+        (x.conditionnement !== null && !Number.isInteger(x.conditionnement)))
     )
       bad("quantités de pièces entières requises.");
     if (!date(x.date_prix) || x.date_prix > today)
@@ -139,6 +168,12 @@ function validateRows(csv, now = new Date()) {
       (!date(x.valable_jusquau) || x.valable_jusquau < x.date_prix)
     )
       bad("date de fin de validité invalide.");
+    for (const key of ["image_url", "produit_url"]) {
+      if ((x[key] || "").length > 2048) bad("lien trop long.");
+      x[key] = supplierURL(x[key]);
+    }
+    x.notes_prix = x.notes_prix || "";
+    if (x.notes_prix.length > 1000) bad("notes de prix trop longues.");
     return x;
   });
 }
@@ -156,10 +191,13 @@ function compare(rows, quantity, now = new Date()) {
     const key = [identity, x.unite, x.type_prix].join("|");
     const stale = now - Date.parse(x.date_prix + "T00:00:00Z") > 30 * 86400000;
     const expired = !!x.valable_jusquau && x.valable_jusquau < today;
-    const ordered =
-      Math.ceil(quantity / x.conditionnement - 1e-10) * x.conditionnement;
+    const ordered = x.conditionnement
+      ? Math.ceil(quantity / x.conditionnement - 1e-10) * x.conditionnement
+      : null;
     const total =
-      Math.round(((ordered * x.prix_chf_ht) / x.prix_pour) * 100) / 100;
+      ordered === null
+        ? null
+        : Math.round(((ordered * x.prix_chf_ht) / x.prix_pour) * 100) / 100;
     const offer = {
       ...x,
       vendor: row.vendor,
@@ -181,8 +219,10 @@ function compare(rows, quantity, now = new Date()) {
     groups.get(key).offers.push(offer);
   }
   return [...groups.values()].map((group) => {
-    group.offers.sort((a, b) => a.total - b.total);
-    const usable = group.offers.filter((x) => !x.stale && !x.expired);
+    group.offers.sort((a, b) => (a.total ?? Infinity) - (b.total ?? Infinity));
+    const usable = group.offers.filter(
+      (x) => !x.stale && !x.expired && x.total !== null && !x.notes_prix,
+    );
     const comparable = new Set(usable.map((x) => x.vendor)).size >= 2;
     return {
       ...group,
@@ -191,4 +231,11 @@ function compare(rows, quantity, now = new Date()) {
     };
   });
 }
-module.exports = { VENDORS, HEADERS, parseCSV, validateRows, compare };
+module.exports = {
+  VENDORS,
+  HEADERS,
+  OPTIONAL_HEADERS,
+  parseCSV,
+  validateRows,
+  compare,
+};

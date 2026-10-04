@@ -215,6 +215,18 @@ test("supplier endpoints enforce scope, preview before import, atomic invalid re
       "accounting",
     );
     assert.equal(catalog.status, 200);
+    const onlyEM = await call("/catalog?company=home&vendor=em");
+    assert.equal(onlyEM.data.groups[0].offers.length, 1);
+    assert.equal(onlyEM.data.groups[0].offers[0].vendor, "em");
+    assert.equal((await call("/catalog?company=home&offset=-1")).status, 400);
+    assert.equal(
+      (await call("/catalog?company=home&offset=200")).data.groups.length,
+      0,
+    );
+    assert.equal(
+      (await call("/catalog?company=home&vendor=invalid")).status,
+      400,
+    );
     assert.equal(catalog.data.groups[0].offers.length, 2);
     assert.equal(catalog.data.groups[0].comparable, true);
     assert.equal(
@@ -230,6 +242,16 @@ test("supplier endpoints enforce scope, preview before import, atomic invalid re
       0,
     );
     assert.equal((await loadState(db)).data.suppliers.length, 3);
+    const many = Array.from({ length: 201 }, (_, i) => valid({ reference: "R" + i, ean: "" }));
+    await db.query("UPDATE supplier_catalogs SET articles=$1 WHERE company='home' AND vendor='em'", [JSON.stringify(many)]);
+    const firstPage = await call("/catalog?company=home&vendor=em");
+    const lastPage = await call("/catalog?company=home&vendor=em&offset=200");
+    assert.equal(firstPage.data.groups.length, 200);
+    assert.equal(firstPage.data.nextOffset, 200);
+    assert.equal(lastPage.data.groups.length, 1);
+    assert.equal(lastPage.data.groups[0].offers[0].reference, "R200");
+    assert.equal(lastPage.data.nextOffset, null);
+
     assert.equal(
       (await call("/enable", "manager", { company: "electricite" })).status,
       403,
@@ -318,4 +340,61 @@ test("supplier UI renders three catalogs, escapes imported text and supports sea
     /remplace tous les articles/,
   );
   dom.window.close();
+});
+
+test("EM media accepts supplier HTTPS only, legacy CSV still works, unknown packs never create totals", () => {
+  const { OPTIONAL_HEADERS } = require("../supplier-catalog");
+  const extended = (values = {}) => {
+    const original = csv({
+      ean: "4006381333931",
+      conditionnement: "",
+      ...values,
+    }).split("\n");
+    return (
+      original[0] +
+      ";" +
+      OPTIONAL_HEADERS.join(";") +
+      "\n" +
+      original[1] +
+      ";" +
+      OPTIONAL_HEADERS.map((k) => values[k] || "").join(";")
+    );
+  };
+  const row = validateRows(
+    extended({
+      image_url: "https://www.elektro-material.ch/media/test.jpg",
+      produit_url: "https://www.elektro-material.ch/fr/shop",
+      notes_prix: "Frais de coupe à confirmer",
+    }),
+    now,
+  )[0];
+  assert.equal(row.conditionnement, null);
+  assert.match(row.image_url, /test.jpg$/);
+  const g = compare(
+    [
+      { vendor: "em", article: row },
+      { vendor: "sonepar", article: valid() },
+    ],
+    2,
+    now,
+  )[0];
+  assert.equal(g.comparable, false);
+  assert.equal(g.offers.find((x) => x.vendor === "em").total, null);
+  for (const image_url of [
+    "javascript:alert(1)",
+    "https://www.elektro-material.ch.evil.invalid/x",
+    "https://user:pass@www.elektro-material.ch/x",
+    "http://www.elektro-material.ch/x",
+    "https://127.0.0.1/x",
+  ])
+    assert.throws(() => validateRows(extended({ image_url }), now));
+  const noted = compare(
+    [
+      { vendor: "em", article: { ...valid(), notes_prix: "Frais non inclus" } },
+      { vendor: "sonepar", article: valid() },
+    ],
+    2,
+    now,
+  )[0];
+  assert.equal(noted.comparable, false);
 });

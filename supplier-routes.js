@@ -6,6 +6,7 @@ const { loadState, persistedState, syncEntityMirror } = require("./db");
 const {
   VENDORS,
   HEADERS,
+  OPTIONAL_HEADERS,
   validateRows,
   compare,
 } = require("./supplier-catalog");
@@ -67,7 +68,7 @@ function routes(db) {
     };
   }
   r.get("/directory", (req, res) =>
-    res.json({ vendors: VENDORS, headers: HEADERS }),
+    res.json({ vendors: VENDORS, headers: [...HEADERS, ...OPTIONAL_HEADERS] }),
   );
   r.get(
     "/catalog",
@@ -80,19 +81,26 @@ function routes(db) {
         .trim()
         .toLowerCase();
       if (q.length > 200) D.fail("Recherche trop longue.");
+      const vendor = String(req.query.vendor || "");
+      if (vendor && !VENDORS.some((x) => x.id === vendor))
+        D.fail("Fournisseur inconnu.");
+      const offset = Number(req.query.offset || 0);
+      if (!Number.isSafeInteger(offset) || offset < 0) D.fail("Page invalide.");
       const catalogs = (
         await db.query(
           "SELECT * FROM supplier_catalogs WHERE company=$1 ORDER BY vendor",
           [c],
         )
       ).rows;
-      const rows = catalogs.flatMap((catalog) =>
-        catalog.articles.map((article) => ({
-          ...catalog,
-          articles: undefined,
-          article,
-        })),
-      );
+      const rows = catalogs
+        .filter((x) => !vendor || x.vendor === vendor)
+        .flatMap((catalog) =>
+          catalog.articles.map((article) => ({
+            ...catalog,
+            articles: undefined,
+            article,
+          })),
+        );
       const matching = rows.filter(
         ({ article: x }) =>
           !q ||
@@ -123,7 +131,9 @@ function routes(db) {
         })),
         quantity,
         totalGroups: groups.length,
-        groups: groups.slice(0, 200),
+        offset,
+        nextOffset: offset + 200 < groups.length ? offset + 200 : null,
+        groups: groups.slice(offset, offset + 200),
       });
     }),
   );
@@ -188,11 +198,18 @@ function routes(db) {
         D.fail("Modification fournisseurs non autorisée.", 403);
       const c = await company(req),
         client = await db.connect();
+      const vendorId = String(req.body.vendor || "");
+      if (vendorId && !VENDORS.some((x) => x.id === vendorId)) {
+        client.release();
+        D.fail("Fournisseur inconnu.");
+      }
       let added = 0;
       try {
         await client.query("BEGIN");
         let { data } = await loadState(client, { forUpdate: true });
-        for (const vendor of VENDORS) {
+        for (const vendor of VENDORS.filter(
+          (x) => !vendorId || x.id === vendorId,
+        )) {
           const norm = (s) =>
             String(s)
               .normalize("NFD")

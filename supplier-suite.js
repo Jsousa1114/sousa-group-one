@@ -10,9 +10,31 @@
       minimumFractionDigits: 2,
       maximumFractionDigits: 4,
     });
+  const productMedia = (o) => {
+    const safe = (value) => {
+      try {
+        const u = new URL(value);
+        return u.protocol === "https:" &&
+          !u.username &&
+          !u.password &&
+          !u.port &&
+          (u.hostname === "elektro-material.ch" ||
+            u.hostname.endsWith(".elektro-material.ch"))
+          ? u.href
+          : "";
+      } catch {
+        return "";
+      }
+    };
+    const image = safe(o.image_url),
+      link = safe(o.produit_url);
+    return `${image ? `<img class="supplier-product-image" src="${esc(image)}" alt="${esc(o.designation)}" loading="lazy" referrerpolicy="no-referrer" width="96" height="96">` : '<span class="supplier-no-image">Photo non disponible</span>'}${link ? `<a href="${esc(link)}" target="_blank" rel="noopener noreferrer">Fiche Electro-Matériel ↗</a>` : ""}`;
+  };
   let chosenCompany = "",
     query = "",
     quantity = 1,
+    selectedVendor = "em",
+    offset = 0,
     sequence = 0;
   function companyOptions(selected) {
     return (core().getState().companies || [])
@@ -37,7 +59,7 @@
       (companies.length === 1 ? companies[0].id : "");
     chosenCompany = companies.some((x) => x.id === c) ? c : "";
     host.className = "supplier-suite";
-    host.innerHTML = `<section class="card"><div class="supplier-heading"><div><p class="muted">ACHATS ÉLECTRIQUES</p><h2>Catalogues & comparaison</h2><p>Vos tarifs fournisseurs, réunis par article.</p></div><label>Entreprise<select id="supplierCompany"><option value="">Choisir une entreprise</option>${companyOptions(chosenCompany)}</select></label></div><div id="supplierDirectory" class="supplier-grid"><p>Chargement des fournisseurs…</p></div><p><strong>Connexion personnelle sur le site du fournisseur.</strong> Le bouton ouvre un nouvel onglet où vous saisissez vous-même vos identifiants. Votre session reste sur ce site ; Sousa Group One ne reçoit pas vos mots de passe et ne synchronise pas les prix par cette connexion.</p><p class="muted">Import de vos exports tarifaires au format CSV du modèle. Aucune synchronisation automatique : les catalogues complets et vos remises nécessitent des données fournies par vos comptes fournisseurs.</p><div class="supplier-actions"><button type="button" class="btn" id="supplierEnable">Ajouter les 3 à mes fournisseurs</button><button type="button" class="btn" id="supplierTemplate">Modèle CSV</button></div><p id="supplierStatus" role="status"></p></section><section class="card"><h3>Comparer les prix</h3><form id="supplierSearch" class="supplier-actions"><label>Article, référence, EAN ou numéro E<input name="q" value="${esc(query)}" placeholder="Rechercher dans les tarifs importés"></label><label>Quantité souhaitée<input name="quantity" type="number" min="0.001" step="any" max="10000000" value="${esc(quantity)}" required></label><button class="btn primary" type="submit">Comparer</button></form><p class="muted">CHF hors TVA et frais de livraison. Tarifs nets et publics séparés. Comparaison par GTIN/EAN identique, ou numéro E lorsque le GTIN est absent. Prix de plus de 30 jours à confirmer. Disponibilité et frais supplémentaires à vérifier auprès du fournisseur.</p><div id="supplierResults" aria-live="polite"></div></section>`;
+    host.innerHTML = `<section class="card"><div class="supplier-heading"><div><p class="muted">ACHATS ÉLECTRIQUES</p><h2>Catalogues & comparaison</h2><p>Vos tarifs fournisseurs, réunis par article.</p></div><label>Entreprise<select id="supplierCompany"><option value="">Choisir une entreprise</option>${companyOptions(chosenCompany)}</select></label></div><div id="supplierDirectory" class="supplier-grid"><p>Chargement des fournisseurs…</p></div><p><strong>Connexion personnelle sur le site du fournisseur.</strong> Le bouton ouvre un nouvel onglet où vous saisissez vous-même vos identifiants. Votre session reste sur ce site ; Sousa Group One ne reçoit pas vos mots de passe et ne synchronise pas les prix par cette connexion.</p><p class="muted">Import de vos exports tarifaires au format CSV du modèle. Aucune synchronisation automatique : les catalogues complets et vos remises nécessitent des données fournies par vos comptes fournisseurs.</p><div class="supplier-actions"><button type="button" class="btn" id="supplierEnable">Ajouter Electro-Matériel à mes fournisseurs</button><button type="button" class="btn" id="supplierTemplate">Modèle CSV</button></div><p id="supplierStatus" role="status"></p></section><section class="card"><h3>Matériel & prix</h3><form id="supplierSearch" class="supplier-actions"><label>Article, référence, EAN ou numéro E<input name="q" value="${esc(query)}" placeholder="Rechercher dans les tarifs importés"></label><label>Catalogue<select name="vendor"><option value="em">Electro-Matériel</option><option value="">Tous les fournisseurs</option><option value="sonepar">Sonepar Suisse</option><option value="otto-fischer">Otto Fischer</option></select></label><label>Quantité souhaitée<input name="quantity" type="number" min="0.001" step="any" max="10000000" value="${esc(quantity)}" required></label><button class="btn primary" type="submit">Rechercher</button></form><p class="muted">CHF hors TVA et frais de livraison. Tarifs nets et publics séparés. Comparaison par GTIN/EAN identique, ou numéro E lorsque le GTIN est absent. Prix de plus de 30 jours à confirmer. Disponibilité et frais supplémentaires à vérifier auprès du fournisseur.</p><div id="supplierResults" aria-live="polite"></div></section>`;
     const status = (message) => {
       if (host.isConnected)
         host.querySelector("#supplierStatus").textContent = message;
@@ -46,11 +68,15 @@
       chosenCompany = e.target.value;
       core().setCompany(chosenCompany);
     };
+    host.querySelector('#supplierSearch [name="vendor"]').value =
+      selectedVendor;
     host.querySelector("#supplierSearch").onsubmit = async (e) => {
       e.preventDefault();
       const f = new FormData(e.target);
       query = String(f.get("q"));
       quantity = Number(f.get("quantity"));
+      selectedVendor = String(f.get("vendor"));
+      offset = 0;
       await load();
     };
     host.querySelector("#supplierEnable").onclick = async (e) => {
@@ -60,7 +86,10 @@
         );
       e.target.disabled = true;
       try {
-        const out = await api("enable", { company: chosenCompany });
+        const out = await api("enable", {
+          company: chosenCompany,
+          vendor: "em",
+        });
         await core().refresh();
         core().toast(
           out.added
@@ -129,6 +158,8 @@
               company: chosenCompany,
               q: query,
               quantity: String(quantity),
+              vendor: selectedVendor,
+              offset: String(offset),
             }),
         );
         if (id !== request || !host.isConnected) return;
@@ -141,7 +172,37 @@
         }
         results.innerHTML = !out.groups.length
           ? `<p>Aucun article trouvé. Importez vos prix depuis une carte fournisseur pour commencer.</p>`
-          : `${out.totalGroups > 200 ? "<p>200 groupes affichés. Précisez votre recherche pour voir les autres articles.</p>" : ""}${out.groups.map((g) => `<article class="supplier-comparison"><div class="supplier-heading"><h4>${esc(g.identity)} · ${esc(g.unit)}</h4><span class="badge">${g.priceType === "net" ? "Tarif négocié" : "Tarif public"}</span></div>${!g.comparable ? '<p class="muted">Comparaison indisponible : au moins deux fournisseurs avec un tarif récent et valide sont nécessaires.</p>' : ""}<div class="supplier-table"><table><thead><tr><th>Fournisseur / article</th><th>Prix unitaire HT</th><th>Quantité facturée</th><th>Total HT</th><th>Date / source</th></tr></thead><tbody>${g.offers.map((o) => `<tr class="${g.comparable && !o.stale && !o.expired && o.total === g.bestTotal ? "supplier-best" : ""}"><td><strong>${esc(directory.vendors.find((v) => v.id === o.vendor)?.name)}</strong><br>${esc(o.designation)}<br><small>${esc(o.reference)}</small></td><td>${money(o.unitPrice)} / ${esc(o.unite)}<br><small>${money(o.prix_chf_ht)} pour ${esc(o.prix_pour)}</small></td><td>${esc(o.ordered)} ${esc(o.unite)}<br><small>Lot de ${esc(o.conditionnement)}</small></td><td><strong>${money(o.total)}</strong>${g.comparable && !o.stale && !o.expired && o.total === g.bestTotal ? "<br><span>Meilleur total comparable</span>" : ""}</td><td>${esc(o.date_prix)}${o.expired ? " · Expiré" : o.stale ? " · À confirmer (> 30 jours)" : ""}<br><small>${esc(o.source)}</small>${o.valable_jusquau ? "<br>Valable jusqu’au " + esc(o.valable_jusquau) : ""}</td></tr>`).join("")}</tbody></table></div></article>`).join("")}`;
+          : `${out.totalGroups > 200 ? `<p>Articles regroupés ${offset + 1}–${offset + out.groups.length} sur ${out.totalGroups}.</p>` : ""}${out.groups.map((g) => `<article class="supplier-comparison"><div class="supplier-heading"><h4>${esc(g.identity)} · ${esc(g.unit)}</h4><span class="badge">${g.priceType === "net" ? "Tarif négocié" : "Tarif public"}</span></div>${!g.comparable && !selectedVendor ? '<p class="muted">Comparaison indisponible : au moins deux fournisseurs avec un tarif récent et valide sont nécessaires.</p>' : ""}<div class="supplier-table"><table><thead><tr><th>Fournisseur / article</th><th>Prix unitaire HT</th><th>Quantité facturée</th><th>Total HT</th><th>Date / source</th></tr></thead><tbody>${g.offers.map((o) => `<tr class="${g.comparable && !o.stale && !o.expired && !o.notes_prix && o.total !== null && o.total === g.bestTotal ? "supplier-best" : ""}"><td>${productMedia(o)}<strong>${esc(directory.vendors.find((v) => v.id === o.vendor)?.name)}</strong><br>${esc(o.designation)}<br><small>${esc(o.reference)}</small></td><td>${money(o.unitPrice)} / ${esc(o.unite)}<br><small>${money(o.prix_chf_ht)} pour ${esc(o.prix_pour)}</small></td><td>${o.ordered === null ? "À confirmer" : `${esc(o.ordered)} ${esc(o.unite)}`}<br><small>${o.conditionnement ? `Lot de ${esc(o.conditionnement)}` : "Conditionnement non relevé"}</small></td><td><strong>${o.total === null ? "Non calculable" : money(o.total)}</strong>${g.comparable && !o.stale && !o.expired && !o.notes_prix && o.total !== null && o.total === g.bestTotal ? "<br><span>Meilleur total comparable</span>" : ""}</td><td>${esc(o.date_prix)}${o.expired ? " · Expiré" : o.stale ? " · À confirmer (> 30 jours)" : ""}<br><small>${esc(o.source)}</small>${o.notes_prix ? `<p class="supplier-price-note">${esc(o.notes_prix)}</p>` : ""}${o.valable_jusquau ? "<br>Valable jusqu’au " + esc(o.valable_jusquau) : ""}</td></tr>`).join("")}</tbody></table></div></article>`).join("")}`;
+        results.querySelectorAll(".supplier-product-image").forEach((img) => {
+          img.onerror = () => {
+            const placeholder = document.createElement("span");
+            placeholder.className = "supplier-no-image";
+            placeholder.textContent = "Photo indisponible";
+            img.replaceWith(placeholder);
+          };
+          if (img.complete && !img.naturalWidth) img.onerror();
+        });
+        if (offset || out.nextOffset != null) {
+          const nav = document.createElement("nav");
+          nav.className = "supplier-actions";
+          nav.setAttribute("aria-label", "Pages du catalogue");
+          for (const [label, next] of [
+            ["Précédent", offset ? Math.max(0, offset - 200) : null],
+            ["Suivant", out.nextOffset],
+          ]) {
+            const button = document.createElement("button");
+            button.type = "button";
+            button.className = "btn";
+            button.textContent = label;
+            button.disabled = next == null;
+            button.onclick = async () => {
+              offset = next;
+              await load();
+            };
+            nav.append(button);
+          }
+          results.append(nav);
+        }
       } catch (error) {
         if (id === request && host.isConnected)
           results.textContent = error.message;
@@ -152,7 +213,7 @@
   function importForm(vendor, company, reload) {
     core().modal(
       "Importer les prix · " + vendor.name,
-      `<form id="supplierImportForm"><p>L’import remplace tous les articles précédemment importés pour ce fournisseur et cette entreprise. Utilisez le modèle CSV ; aucun tarif n’est ajouté sans validation.</p><p><strong>Colonnes :</strong> référence, désignation, EAN et/ou numéro E ; unité <code>pcs, m, kg, l</code> ; prix CHF HT ; nombre d’unités couvertes par ce prix ; conditionnement minimal ; type <code>net</code> ou <code>public</code> ; date du prix et fin de validité facultative au format <code>AAAA-MM-JJ</code>.</p><p>Un fichier correspond à un tarif applicable à toutes les quantités. Les remises par palier, frais cuivre, écocontributions et transport doivent être vérifiés séparément. Sans EAN ni numéro E, l’article reste consultable mais ne sera pas rapproché d’un autre fournisseur.</p><label>Source du tarif<input name="source" maxlength="200" required placeholder="Ex. export de mon compte client du 04.10.2026"></label><label>Fichier CSV (4 Mo, 10 000 articles maximum)<input type="file" name="file" accept=".csv,text/csv" required></label><div id="supplierPreview" role="status"></div><button type="submit" class="btn primary">Vérifier le fichier</button><button type="button" class="btn" id="supplierConfirm" disabled>Confirmer le remplacement</button></form>`,
+      `<form id="supplierImportForm"><p>L’import remplace tous les articles précédemment importés pour ce fournisseur et cette entreprise. Utilisez le modèle CSV ; aucun tarif n’est ajouté sans validation.</p><p><strong>Colonnes :</strong> référence, désignation, EAN et/ou numéro E ; unité <code>pcs, m, kg, l</code> ; prix CHF HT ; nombre d’unités couvertes par ce prix ; conditionnement minimal (laisser vide s’il est inconnu : aucun total ne sera calculé) ; type <code>net</code> ou <code>public</code> ; date du prix et fin de validité facultative au format <code>AAAA-MM-JJ</code>.</p><p>Colonnes facultatives : <code>image_url</code> et <code>produit_url</code> (liens HTTPS Electro-Matériel), <code>notes_prix</code> (frais et réserves ; exclut le tarif du classement du meilleur prix).</p><p>Un fichier correspond à un tarif applicable à toutes les quantités. Les remises par palier, frais cuivre, écocontributions et transport doivent être vérifiés séparément. Sans EAN ni numéro E, l’article reste consultable mais ne sera pas rapproché d’un autre fournisseur.</p><label>Source du tarif<input name="source" maxlength="200" required placeholder="Ex. export de mon compte client du 04.10.2026"></label><label>Fichier CSV (4 Mo, 10 000 articles maximum)<input type="file" name="file" accept=".csv,text/csv" required></label><div id="supplierPreview" role="status"></div><button type="submit" class="btn primary">Vérifier le fichier</button><button type="button" class="btn" id="supplierConfirm" disabled>Confirmer le remplacement</button></form>`,
     );
     const form = document.querySelector("#supplierImportForm"),
       preview = form.querySelector("#supplierPreview"),

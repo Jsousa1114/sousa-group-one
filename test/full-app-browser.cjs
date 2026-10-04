@@ -112,6 +112,8 @@ async function visitAll(page, expectedPages, mobile=false){
       await admin.page.locator('#supplierConfirm').click();
       await admin.page.locator('#supplierImportForm').waitFor({state:'detached'});
     }
+    await admin.page.locator('#supplierSearch [name="vendor"]').selectOption('');
+    await admin.page.locator('#supplierSearch [type="submit"]').click();
     await admin.page.locator('.supplier-best').waitFor();
     assert.match(await admin.page.locator('.supplier-best').innerText(),/Sonepar/);
     await admin.page.setViewportSize({width:390,height:844});

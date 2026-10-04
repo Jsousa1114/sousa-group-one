@@ -113,3 +113,25 @@
     width: 100%;
   }
 }
+
+.supplier-product-image {
+  display: block;
+  object-fit: contain;
+  background: #fff;
+  border-radius: 8px;
+  margin-bottom: 8px;
+}
+.supplier-no-image {
+  display: block;
+  color: var(--muted, #596777);
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+.supplier-table td:first-child > a {
+  display: block;
+  margin-bottom: 8px;
+}
+.supplier-price-note {
+  max-width: 300px;
+  font-size: 12px;
+}
