@@ -370,6 +370,9 @@ test("EM media accepts supplier HTTPS only, legacy CSV still works, unknown pack
   )[0];
   assert.equal(row.conditionnement, null);
   assert.match(row.image_url, /test.jpg$/);
+  assert.match(validateRows(extended({image_url: "https://emagpim-1d1da.kxcdn.com/1053875.jpg"}), now)[0].image_url, /kxcdn/);
+  assert.throws(() => validateRows(extended({image_url: "https://other.kxcdn.com/1053875.jpg"}), now));
+  assert.throws(() => validateRows(extended({produit_url: "https://emagpim-1d1da.kxcdn.com/1053875.jpg"}), now));
   const g = compare(
     [
       { vendor: "em", article: row },

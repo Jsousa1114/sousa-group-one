@@ -1,6 +1,6 @@
 "use strict";
 
-const STATIC_CACHE = "sgo-shell-2026-10-05-em-images",
+const STATIC_CACHE = "sgo-shell-2026-10-05-em-cdn",
   STATIC_ASSETS = [
     "/",
     "/index.html",

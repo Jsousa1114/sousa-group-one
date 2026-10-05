@@ -42,7 +42,7 @@ function createApp(db = pool) {
       "Permissions-Policy":
         "camera=(self), microphone=(self), geolocation=(self), payment=(self)",
       "Content-Security-Policy":
-        "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob: data: https://elektro-material.ch https://*.elektro-material.ch; media-src 'self' blob:; worker-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+        "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob: data: https://elektro-material.ch https://*.elektro-material.ch https://emagpim-1d1da.kxcdn.com; media-src 'self' blob:; worker-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
     });
     if (req.secure || process.env.RENDER)
       res.set(

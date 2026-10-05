@@ -40,7 +40,7 @@ const HEADERS = [
   "valable_jusquau",
 ];
 const OPTIONAL_HEADERS = ["image_url", "produit_url", "notes_prix"];
-function supplierURL(value) {
+function supplierURL(value, image = false) {
   if (!value) return "";
   try {
     const u = new URL(value);
@@ -50,7 +50,8 @@ function supplierURL(value) {
       !u.password &&
       !u.port &&
       (u.hostname === "elektro-material.ch" ||
-        u.hostname.endsWith(".elektro-material.ch"))
+        u.hostname.endsWith(".elektro-material.ch") ||
+        (image && u.hostname === "emagpim-1d1da.kxcdn.com"))
     )
       return u.href;
   } catch {}
@@ -170,7 +171,7 @@ function validateRows(csv, now = new Date()) {
       bad("date de fin de validité invalide.");
     for (const key of ["image_url", "produit_url"]) {
       if ((x[key] || "").length > 2048) bad("lien trop long.");
-      x[key] = supplierURL(x[key]);
+      x[key] = supplierURL(x[key], key === "image_url");
     }
     x.notes_prix = x.notes_prix || "";
     if (x.notes_prix.length > 1000) bad("notes de prix trop longues.");

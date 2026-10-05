@@ -11,7 +11,7 @@
       maximumFractionDigits: 4,
     });
   const productMedia = (o) => {
-    const safe = (value) => {
+    const safe = (value, image = false) => {
       try {
         const u = new URL(value);
         return u.protocol === "https:" &&
@@ -19,14 +19,15 @@
           !u.password &&
           !u.port &&
           (u.hostname === "elektro-material.ch" ||
-            u.hostname.endsWith(".elektro-material.ch"))
+            u.hostname.endsWith(".elektro-material.ch") ||
+            (image && u.hostname === "emagpim-1d1da.kxcdn.com"))
           ? u.href
           : "";
       } catch {
         return "";
       }
     };
-    const image = safe(o.image_url),
+    const image = safe(o.image_url, true),
       link = safe(o.produit_url);
     return `${image ? `<img class="supplier-product-image" src="${esc(image)}" alt="${esc(o.designation)}" loading="lazy" referrerpolicy="no-referrer" width="96" height="96">` : '<span class="supplier-no-image">Photo non disponible</span>'}${link ? `<a href="${esc(link)}" target="_blank" rel="noopener noreferrer">Fiche Electro-Matériel ↗</a>` : ""}`;
   };
