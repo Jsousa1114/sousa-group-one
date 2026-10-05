@@ -185,10 +185,10 @@ function parseJsonText(value) {
   }
 }
 
-async function callAi({ system, user, imageDataUrl = "", json = false }) {
+async function callAi({ system, user, imageDataUrl = "", json = false, timeoutMs = 30000 }) {
   if (!aiConfigured()) D.fail("Le fournisseur IA n'est pas configuré (AI_API_URL, AI_API_KEY/OPENAI_API_KEY et AI_MODEL).", 424);
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 30000);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const userContent = imageDataUrl
       ? [
@@ -771,6 +771,8 @@ function routes(db) {
 }
 
 module.exports = {
+  aiConfigured,
+  callAi,
   routes,
   buildWorkload,
   normalizeQuoteDraft,

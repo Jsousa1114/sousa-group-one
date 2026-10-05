@@ -60,7 +60,7 @@
       (companies.length === 1 ? companies[0].id : "");
     chosenCompany = companies.some((x) => x.id === c) ? c : "";
     host.className = "supplier-suite";
-    host.innerHTML = `<section class="card"><div class="supplier-heading"><div><p class="muted">ACHATS ÉLECTRIQUES</p><h2>Catalogues & comparaison</h2><p>Vos tarifs fournisseurs, réunis par article.</p></div><label>Entreprise<select id="supplierCompany"><option value="">Choisir une entreprise</option>${companyOptions(chosenCompany)}</select></label></div><div id="supplierDirectory" class="supplier-grid"><p>Chargement des fournisseurs…</p></div><p><strong>Connexion personnelle sur le site du fournisseur.</strong> Le bouton ouvre un nouvel onglet où vous saisissez vous-même vos identifiants. Votre session reste sur ce site ; Sousa Group One ne reçoit pas vos mots de passe et ne synchronise pas les prix par cette connexion.</p><p class="muted">Import de vos exports tarifaires au format CSV du modèle. Aucune synchronisation automatique : les catalogues complets et vos remises nécessitent des données fournies par vos comptes fournisseurs.</p><div class="supplier-actions"><button type="button" class="btn" id="supplierEnable">Ajouter Electro-Matériel à mes fournisseurs</button><button type="button" class="btn" id="supplierTemplate">Modèle CSV</button></div><p id="supplierStatus" role="status"></p></section><section class="card"><h3>Matériel & prix</h3><form id="supplierSearch" class="supplier-actions"><label>Article, référence, EAN ou numéro E<input name="q" value="${esc(query)}" placeholder="Rechercher dans les tarifs importés"></label><label>Catalogue<select name="vendor"><option value="em">Electro-Matériel</option><option value="">Tous les fournisseurs</option><option value="sonepar">Sonepar Suisse</option><option value="otto-fischer">Otto Fischer</option></select></label><label>Quantité souhaitée<input name="quantity" type="number" min="0.001" step="any" max="10000000" value="${esc(quantity)}" required></label><button class="btn primary" type="submit">Rechercher</button></form><p class="muted">CHF hors TVA et frais de livraison. Tarifs nets et publics séparés. Comparaison par GTIN/EAN identique, ou numéro E lorsque le GTIN est absent. Prix de plus de 30 jours à confirmer. Disponibilité et frais supplémentaires à vérifier auprès du fournisseur.</p><div id="supplierResults" aria-live="polite"></div></section>`;
+    host.innerHTML = `<section class="card"><div class="supplier-heading"><div><p class="muted">ACHATS ÉLECTRIQUES</p><h2>Catalogues & comparaison</h2><p>Vos tarifs fournisseurs, réunis par article.</p></div><label>Entreprise<select id="supplierCompany"><option value="">Choisir une entreprise</option>${companyOptions(chosenCompany)}</select></label></div><div id="supplierDirectory" class="supplier-grid"><p>Chargement des fournisseurs…</p></div><p><strong>Connexion personnelle sur le site du fournisseur.</strong> Le bouton ouvre un nouvel onglet où vous saisissez vous-même vos identifiants. Votre session reste sur ce site ; Sousa Group One ne reçoit pas vos mots de passe et ne synchronise pas les prix par cette connexion.</p><p class="muted">Import de vos exports tarifaires au format CSV du modèle. Aucune synchronisation automatique : les catalogues complets et vos remises nécessitent des données fournies par vos comptes fournisseurs.</p><div class="supplier-actions"><button type="button" class="btn" id="supplierEnable">Ajouter Electro-Matériel à mes fournisseurs</button><button type="button" class="btn" id="supplierTemplate">Modèle CSV</button></div><p id="supplierStatus" role="status"></p></section><section class="card"><h3>Matériel & prix</h3><form id="supplierSearch" class="supplier-actions"><label>Article, référence, EAN ou numéro E<input name="q" value="${esc(query)}" maxlength="200" placeholder="Ex. cable 3 x 1,5, fil souple, prise triple…"></label><label>Catalogue<select name="vendor"><option value="em">Electro-Matériel</option><option value="">Tous les fournisseurs</option><option value="sonepar">Sonepar Suisse</option><option value="otto-fischer">Otto Fischer</option></select></label><label>Quantité souhaitée<input name="quantity" type="number" min="0.001" step="any" max="10000000" value="${esc(quantity)}" required></label><button class="btn primary" type="submit">Rechercher</button></form><p class="muted">CHF hors TVA et frais de livraison. Tarifs nets et publics séparés. Comparaison par GTIN/EAN identique, ou numéro E lorsque le GTIN est absent. Prix de plus de 30 jours à confirmer. Disponibilité et frais supplémentaires à vérifier auprès du fournisseur.</p><p class="muted">Recherche intelligente : mots courants, synonymes et fautes de frappe. Décrivez le matériel ; précisez sa section ou sa référence si vous la connaissez. Les suggestions ne garantissent pas une équivalence technique.</p><p id="supplierSearchHelp" role="status"></p><div id="supplierResults" aria-live="polite"></div></section>`;
     const status = (message) => {
       if (host.isConnected)
         host.querySelector("#supplierStatus").textContent = message;
@@ -151,7 +151,10 @@
           "Sélectionnez une entreprise pour consulter ses tarifs.";
         return;
       }
-      results.textContent = "Chargement des tarifs…";
+      results.textContent = query
+        ? "Recherche du matériel…"
+        : "Chargement des tarifs…";
+      host.querySelector("#supplierSearchHelp").textContent = "";
       try {
         const out = await api(
           "catalog?" +
@@ -164,6 +167,17 @@
             }),
         );
         if (id !== request || !host.isConnected) return;
+        const help = host.querySelector("#supplierSearchHelp");
+        help.textContent = !query
+          ? ""
+          : out.search?.mode === "ai"
+            ? out.search.alternatives?.length
+              ? "Recherche assistée par IA · Interprétations : " +
+                out.search.alternatives.join(" · ")
+              : "Recherche assistée par IA · Vos termes sont conservés."
+            : out.search?.mode === "fallback"
+              ? "IA momentanément indisponible · Recherche locale avec synonymes et correction des fautes."
+              : "Recherche locale avec synonymes et correction des fautes · IA externe non utilisée.";
         for (const v of directory.vendors) {
           const catalog = out.catalogs.find((x) => x.vendor === v.id);
           host.querySelector(`[data-vendor-status="${v.id}"]`).textContent =
@@ -172,7 +186,7 @@
               : "Aucun tarif chargé";
         }
         results.innerHTML = !out.groups.length
-          ? `<p>Aucun article trouvé. Importez vos prix depuis une carte fournisseur pour commencer.</p>`
+          ? `<p>Aucun article correspondant dans les catalogues importés. Essayez un nom plus court ou une référence. Le catalogue EM importé est encore partiel.</p>`
           : `${out.totalGroups > 200 ? `<p>Articles regroupés ${offset + 1}–${offset + out.groups.length} sur ${out.totalGroups}.</p>` : ""}${out.groups.map((g) => `<article class="supplier-comparison"><div class="supplier-heading"><h4>${esc(g.identity)} · ${esc(g.unit)}</h4><span class="badge">${g.priceType === "net" ? "Tarif négocié" : "Tarif public"}</span></div>${!g.comparable && !selectedVendor ? '<p class="muted">Comparaison indisponible : au moins deux fournisseurs avec un tarif récent et valide sont nécessaires.</p>' : ""}<div class="supplier-table"><table><thead><tr><th>Fournisseur / article</th><th>Prix unitaire HT</th><th>Quantité facturée</th><th>Total HT</th><th>Date / source</th></tr></thead><tbody>${g.offers.map((o) => `<tr class="${g.comparable && !o.stale && !o.expired && !o.notes_prix && o.total !== null && o.total === g.bestTotal ? "supplier-best" : ""}"><td>${productMedia(o)}<strong>${esc(directory.vendors.find((v) => v.id === o.vendor)?.name)}</strong><br>${esc(o.designation)}<br><small>${esc(o.reference)}</small></td><td>${money(o.unitPrice)} / ${esc(o.unite)}<br><small>${money(o.prix_chf_ht)} pour ${esc(o.prix_pour)}</small></td><td>${o.ordered === null ? "À confirmer" : `${esc(o.ordered)} ${esc(o.unite)}`}<br><small>${o.conditionnement ? `Lot de ${esc(o.conditionnement)}` : "Conditionnement non relevé"}</small></td><td><strong>${o.total === null ? "Non calculable" : money(o.total)}</strong>${g.comparable && !o.stale && !o.expired && !o.notes_prix && o.total !== null && o.total === g.bestTotal ? "<br><span>Meilleur total comparable</span>" : ""}</td><td>${esc(o.date_prix)}${o.expired ? " · Expiré" : o.stale ? " · À confirmer (> 30 jours)" : ""}<br><small>${esc(o.source)}</small>${o.notes_prix ? `<p class="supplier-price-note">${esc(o.notes_prix)}</p>` : ""}${o.valable_jusquau ? "<br>Valable jusqu’au " + esc(o.valable_jusquau) : ""}</td></tr>`).join("")}</tbody></table></div></article>`).join("")}`;
         results.querySelectorAll(".supplier-product-image").forEach((img) => {
           img.onerror = () => {

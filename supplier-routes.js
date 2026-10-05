@@ -10,6 +10,7 @@ const {
   validateRows,
   compare,
 } = require("./supplier-catalog");
+const { rankRows, interpret } = require("./supplier-search");
 const schemas = new WeakMap();
 function ensureSchema(db) {
   if (!schemas.has(db))
@@ -101,13 +102,9 @@ function routes(db) {
             article,
           })),
         );
-      const matching = rows.filter(
-        ({ article: x }) =>
-          !q ||
-          [x.reference, x.designation, x.ean, x.numero_e].some((v) =>
-            v.toLowerCase().includes(q),
-          ),
-      );
+      const search = await interpret(q, `${req.user.id}:${c}`);
+      const ranked = rankRows(rows, q, search.alternatives);
+      const matching = ranked.map((x) => x.row);
       // Compare whole matching identities, so a supplier-specific reference still finds competing offers.
       const identity = (x) =>
         x.ean ? "g:" + x.ean : x.numero_e ? "e:" + x.numero_e : "";
@@ -121,7 +118,23 @@ function routes(db) {
         ),
         quantity,
       );
+      const rankByReference = new Map(
+        ranked.map((x) => [
+          x.row.vendor + "|" + x.row.article.reference,
+          x.score,
+        ]),
+      );
+      const groupRank = (g) =>
+        Math.max(
+          0,
+          ...g.offers.map(
+            (o) => rankByReference.get(o.vendor + "|" + o.reference) || 0,
+          ),
+        );
+      groups.sort((a, b) => groupRank(b) - groupRank(a));
       res.json({
+        search,
+
         vendors: VENDORS,
         catalogs: catalogs.map((x) => ({
           vendor: x.vendor,
