@@ -221,12 +221,18 @@ async function callAi({ system, user, imageDataUrl = "", json = false, timeoutMs
       redirect: "error",
     });
     const payload = await response.json().catch(() => ({}));
-    if (!response.ok) D.fail("Le service IA est indisponible.", 502);
+    if (!response.ok) {
+      // Diagnostics contain no prompts, credentials, provider messages or user data.
+      const safeCode = String(payload?.error?.code || "unknown").replace(/[^a-zA-Z0-9_]/g, "").slice(0,60);
+      console.warn("ai.provider.failure", response.status, safeCode);
+      D.fail("Le service IA est indisponible.", 502);
+    }
     const text = providerText(payload);
     if (!text) D.fail("Le service IA n'a renvoyé aucun contenu.", 502);
     return json ? parseJsonText(text) : text.slice(0, 30000);
   } catch (error) {
     if (error?.status) throw error;
+    console.warn("ai.provider.failure", error?.name === "AbortError" ? "timeout" : "network");
     D.fail("Le service IA est indisponible.", 502);
   } finally {
     clearTimeout(timer);
