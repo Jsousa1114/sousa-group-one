@@ -1,11 +1,14 @@
 name: Test navigateur en production
 
+# Manual only: it tests a deployed instance, so editing the test must not trigger it.
+# The target comes from the run input or the PRODUCTION_URL repository variable.
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - .github/workflows/live-browser.yml
-      - test/live-browser.cjs
+    inputs:
+      production_url:
+        description: "Adresse publique à tester (vide = variable de dépôt PRODUCTION_URL)"
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -14,7 +17,16 @@ jobs:
   browser-smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      PRODUCTION_URL: ${{ inputs.production_url || vars.PRODUCTION_URL }}
     steps:
+      # Fail before npm ci / Chromium install so a missing URL costs seconds, not minutes.
+      - name: Check target URL
+        run: |
+          if [ -z "$PRODUCTION_URL" ]; then
+            echo "::error::PRODUCTION_URL absente : renseignez production_url au lancement ou la variable de dépôt PRODUCTION_URL (Settings > Secrets and variables > Actions > Variables)."
+            exit 1
+          fi
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:

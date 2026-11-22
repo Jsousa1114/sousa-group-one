@@ -1,12 +1,14 @@
 name: Surveillance publique Sousa Group One
 
+# Manual only: no schedule, no push trigger. The app is self-hosted (Proxmox),
+# so the target comes from the run input or the PRODUCTION_URL repository variable.
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - .github/workflows/uptime.yml
-  schedule:
-    - cron: '17 * * * *'
+    inputs:
+      production_url:
+        description: "Adresse publique à vérifier (vide = variable de dépôt PRODUCTION_URL)"
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -19,7 +21,18 @@ jobs:
   public-smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 8
+    env:
+      PRODUCTION_URL: ${{ inputs.production_url || vars.PRODUCTION_URL }}
     steps:
+      - name: Check target URL
+        shell: bash
+        run: |
+          if [ -z "$PRODUCTION_URL" ]; then
+            echo "::error::PRODUCTION_URL absente : renseignez production_url au lancement ou la variable de dépôt PRODUCTION_URL (Settings > Secrets and variables > Actions > Variables)."
+            exit 1
+          fi
+          echo "Target: $PRODUCTION_URL"
+
       - name: Verify public home page
         shell: bash
         run: |
@@ -27,7 +40,7 @@ jobs:
           curl --fail --silent --show-error --location \
             --retry 2 --retry-all-errors --retry-delay 8 \
             --connect-timeout 15 --max-time 90 \
-            https://sousa-group-one.onrender.com/ \
+            "${PRODUCTION_URL%/}/" \
             --output /dev/null
           echo "Public home page: HTTP success"
 
@@ -38,7 +51,7 @@ jobs:
           curl --fail --silent --show-error --location \
             --retry 2 --retry-all-errors --retry-delay 8 \
             --connect-timeout 15 --max-time 90 \
-            https://sousa-group-one.onrender.com/healthz \
+            "${PRODUCTION_URL%/}/healthz" \
             --output health-response.json
           node -e "const fs=require('node:fs');const x=JSON.parse(fs.readFileSync('health-response.json','utf8'));if(x.ok!==true){throw new Error('Health endpoint did not confirm database health')} console.log('Health endpoint: OK')"
           rm health-response.json

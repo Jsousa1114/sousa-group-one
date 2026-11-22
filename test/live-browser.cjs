@@ -1,9 +1,10 @@
 "use strict";
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
-const { chromium } = require("playwright");
+const { requireProductionUrl } = require("./production-url.cjs");
 
-const url = "https://sousa-group-one.onrender.com";
+const url = requireProductionUrl();
+const { chromium } = require("playwright");
 const wait = (n) => new Promise((resolve) => setTimeout(resolve, n));
 
 async function check(browser, device, viewport, isMobile) {

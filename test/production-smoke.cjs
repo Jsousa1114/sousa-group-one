@@ -1,8 +1,9 @@
 "use strict";
 const assert = require("node:assert/strict");
-const { chromium } = require("playwright");
+const { requireProductionUrl } = require("./production-url.cjs");
 
-const base = String(process.env.PROD_BASE_URL || "https://sousa-group-one.onrender.com").replace(/\/$/, "");
+const base = requireProductionUrl();
+const { chromium } = require("playwright");
 const email = process.env.E2E_ADMIN_EMAIL || "";
 const password = process.env.E2E_ADMIN_PASSWORD || "";
 
