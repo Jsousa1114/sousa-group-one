@@ -439,7 +439,7 @@
   function ensureTopActions() {
     const top = document.querySelector(".top-actions");
     if (!top || top.querySelector("[data-pro-action='search']")) return;
-    top.insertAdjacentHTML("afterbegin", `<button class="icon" type="button" data-pro-action="search" aria-label="Recherche globale" title="Recherche globale · Ctrl/⌘ K">⌕</button><button class="icon" type="button" data-pro-action="open-activity" aria-label="Notifications et activité" title="Notifications">🔔</button>`);
+    top.insertAdjacentHTML("afterbegin", `<button class="icon" type="button" data-pro-action="search" aria-label="Recherche globale" title="Recherche globale · Ctrl/⌘ K">${window.SGOIcon?.("search") || "⌕"}</button><button class="icon" type="button" data-pro-action="open-activity" aria-label="Notifications et activité" title="Notifications">${window.SGOIcon?.("bell") || "🔔"}</button>`);
   }
 
   async function afterRender() {

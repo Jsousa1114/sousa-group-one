@@ -119,7 +119,7 @@
 
       <div class="account-grid">
         <section class="card account-section">
-          <div class="account-section-head"><div><span class="account-icon">👤</span><h3>Informations personnelles</h3></div></div>
+          <div class="account-section-head"><div><span class="account-icon">${window.SGOIcon?.("user") || ""}</span><h3>Informations personnelles</h3></div></div>
           <div class="account-info-grid">
             ${info("E-mail", summary.account.email)}
             ${info("Téléphone", e?.phone || c?.phone)}
@@ -133,7 +133,7 @@
         </section>
 
         <section class="card account-section">
-          <div class="account-section-head"><div><span class="account-icon">💼</span><h3>Informations professionnelles</h3></div></div>
+          <div class="account-section-head"><div><span class="account-icon">${window.SGOIcon?.("briefcase") || ""}</span><h3>Informations professionnelles</h3></div></div>
           <div class="account-kpis">
             <div><b>${Number(summary.professional.monthHours || 0).toFixed(2)} h</b><span>Heures ce mois</span></div>
             <div><b>${summary.professional.activeProjects}</b><span>Chantiers actifs</span></div>
@@ -154,7 +154,7 @@
         </section>
 
         <section class="card account-section account-security">
-          <div class="account-section-head"><div><span class="account-icon">🔐</span><h3>Sécurité du compte</h3></div><span class="status ${summary.security.twoFactorEnabled ? "ok" : "warning"}">${summary.security.twoFactorEnabled ? "2FA active" : "2FA inactive"}</span></div>
+          <div class="account-section-head"><div><span class="account-icon">${window.SGOIcon?.("lock") || ""}</span><h3>Sécurité du compte</h3></div><span class="status ${summary.security.twoFactorEnabled ? "ok" : "warning"}">${summary.security.twoFactorEnabled ? "2FA active" : "2FA inactive"}</span></div>
           <div class="account-security-actions">
             <button class="btn" data-action="password-form">Changer le mot de passe</button>
             <button class="btn ${summary.security.twoFactorEnabled ? "danger" : "primary"}" data-account-action="${summary.security.twoFactorEnabled ? "2fa-disable" : "2fa-setup"}">${summary.security.twoFactorEnabled ? "Désactiver la 2FA" : "Activer la 2FA"}</button>
@@ -175,7 +175,7 @@
         </section>
 
         <section class="card account-section">
-          <div class="account-section-head"><div><span class="account-icon">🔔</span><h3>Notifications</h3></div></div>
+          <div class="account-section-head"><div><span class="account-icon">${window.SGOIcon?.("bell") || ""}</span><h3>Notifications</h3></div></div>
           <form id="accountNotificationForm">
             ${switchRow("messages", "Messages privés", notif.messages)}
             ${switchRow("groups", "Groupes", notif.groups)}
@@ -192,7 +192,7 @@
         </section>
 
         <section class="card account-section">
-          <div class="account-section-head"><div><span class="account-icon">🛡️</span><h3>Messagerie et confidentialité</h3></div></div>
+          <div class="account-section-head"><div><span class="account-icon">${window.SGOIcon?.("shield") || ""}</span><h3>Messagerie et confidentialité</h3></div></div>
           <label class="account-select">Chiffrement des nouveaux messages
             <select id="accountE2eeMode">
               <option value="auto">Automatique</option>
@@ -211,7 +211,7 @@
         </section>
 
         <section class="card account-section">
-          <div class="account-section-head"><div><span class="account-icon">⚙️</span><h3>Préférences de l’application</h3></div></div>
+          <div class="account-section-head"><div><span class="account-icon">${window.SGOIcon?.("settings") || ""}</span><h3>Préférences de l’application</h3></div></div>
           <form id="accountPreferenceForm" class="account-form-grid">
             <label>Langue<select name="language">
               <option value="fr">Français</option><option value="en">English</option><option value="de">Deutsch</option><option value="it">Italiano</option><option value="pt">Português</option><option value="es">Español</option><option value="sq">Shqip</option>
@@ -226,14 +226,14 @@
         </section>
 
         <section class="card account-section account-documents">
-          <div class="account-section-head"><div><span class="account-icon">📁</span><h3>Mes documents</h3></div>${e ? '<button class="btn primary" data-account-action="upload-document">Ajouter</button>' : ""}</div>
+          <div class="account-section-head"><div><span class="account-icon">${window.SGOIcon?.("folder") || ""}</span><h3>Mes documents</h3></div>${e ? '<button class="btn primary" data-account-action="upload-document">Ajouter</button>' : ""}</div>
           <div class="account-document-list">
             ${docs.length ? docs.map((d) => `<div class="account-document"><div><b>${esc(d.documentType || d.name)}</b><span>${esc(d.name)} · ${esc(dateOnly(String(d.createdAt).slice(0,10)))} ${expiryBadge(d.expiresAt)}</span></div><button class="btn" data-account-action="download-document" data-id="${esc(d.id)}" data-name="${esc(d.name)}">Ouvrir</button></div>`).join("") : '<p class="muted">Aucun document personnel disponible.</p>'}
           </div>
         </section>
 
         <section class="card account-section">
-          <div class="account-section-head"><div><span class="account-icon">🕘</span><h3>Activité de mon compte</h3></div></div>
+          <div class="account-section-head"><div><span class="account-icon">${window.SGOIcon?.("clock") || ""}</span><h3>Activité de mon compte</h3></div></div>
           <div class="account-timeline">
             ${summary.recentUsage?.lastTime ? `<div><i></i><span><b>Dernier pointage · ${esc(summary.recentUsage.lastTime.hours)} h</b><small>${esc(dateOnly(summary.recentUsage.lastTime.date))}${summary.recentUsage.lastTime.project ? " · " + esc(core().getState().projects?.find((p) => String(p.id) === String(summary.recentUsage.lastTime.project))?.title || summary.recentUsage.lastTime.project) : ""}</small></span></div>` : ""}
             ${summary.recentUsage?.lastMessage ? `<div><i></i><span><b>${summary.recentUsage.lastMessage.sentByMe ? "Dernier message envoyé" : "Dernier message reçu"}</b><small>${esc(fmt(summary.recentUsage.lastMessage.createdAt))}</small></span></div>` : ""}
@@ -242,7 +242,7 @@
         </section>
 
         <section class="card account-section account-danger-zone">
-          <div class="account-section-head"><div><span class="account-icon">⚠️</span><h3>Zone sensible</h3></div></div>
+          <div class="account-section-head"><div><span class="account-icon">${window.SGOIcon?.("alert") || ""}</span><h3>Zone sensible</h3></div></div>
           <p class="muted">Ces actions concernent uniquement votre compte. L’historique métier de l’entreprise n’est jamais supprimé automatiquement.</p>
           <div class="account-shortcuts">
             <button class="btn" data-account-action="export-data">Télécharger mes données</button>

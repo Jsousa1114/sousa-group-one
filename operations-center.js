@@ -236,7 +236,7 @@
                       <div class="ops-task-top"><span class="ops-priority ${esc(t.priority)}">${esc(statusLabel(t.priority))}</span><small>${esc(t.project_id)}</small></div>
                       <h4>${esc(t.title)}</h4>
                       ${t.description ? `<p>${esc(t.description)}</p>` : ""}
-                      <div class="ops-task-meta"><span>📅 ${date(t.due_date)}</span><span>👤 ${esc(t.assigned_employee_id || "—")}</span></div>
+                      <div class="ops-task-meta"><span title="Échéance">${window.SGOIcon?.("calendar") || ""}${date(t.due_date)}</span><span title="Assigné à">${window.SGOIcon?.("user") || ""}${esc((state().employees || []).find((e) => String(e.id) === String(t.assigned_employee_id))?.name || t.assigned_employee_id || "—")}</span></div>
                       <div class="ops-task-actions">
                         ${["todo", "in_progress", "blocked", "done"]
                           .filter((x) => x !== status)

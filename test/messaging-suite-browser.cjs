@@ -171,7 +171,7 @@ async function noOverflow(page, label) {
     await adminClient.click();
     await admin.page.locator("#suiteEncryptionBadge").waitFor();
     await admin.page.waitForFunction(() =>
-      document.querySelector("#suiteEncryptionBadge")?.textContent.includes("E2EE actif"),
+      document.querySelector("#suiteEncryptionBadge")?.classList.contains("on"),
     );
     const secret = "Texte E2EE navigateur " + Date.now();
     await admin.page.locator("#messageText").fill(secret);

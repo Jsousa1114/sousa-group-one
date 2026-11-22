@@ -143,6 +143,54 @@ function navigationIcon(key) {
   const aliases = {maintenance:"planning",tools:"settings",suppliers:"inventory",companies:"projects",pilotage:"reports",advanced:"dashboard",audit:"quotes"};
   return `<svg class="nav-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${paths[key] || paths[aliases[key]] || paths.documents}</svg>`;
 }
+// Shared line icons, same drawing style as the navigation. Used instead of emoji in the interface chrome.
+const UI_ICONS = {
+  menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
+  x: '<path d="M6 6l12 12M18 6 6 18"/>',
+  refresh: '<path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/>',
+  contrast: '<circle cx="12" cy="12" r="9"/><path d="M12 3v18a9 9 0 0 0 0-18Z" fill="currentColor" stroke="none"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
+  bell: '<path d="M6 16v-5a6 6 0 0 1 12 0v5l2 2H4l2-2Z"/><path d="M10 20a2 2 0 0 0 4 0"/>',
+  "bell-off": '<path d="M6 16v-5a6 6 0 0 1 9.5-4.9M18 11v5l2 2H4l2-2"/><path d="M10 20a2 2 0 0 0 4 0M3 3l18 18"/>',
+  phone: '<path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2Z"/>',
+  hangup: '<path d="M3 14.5v-2C7.5 8.5 16.5 8.5 21 12.5v2a1.5 1.5 0 0 1-1.8 1.5l-3-.6a1.5 1.5 0 0 1-1.2-1.5V12a10 10 0 0 0-6 0v1.9a1.5 1.5 0 0 1-1.2 1.5l-3 .6A1.5 1.5 0 0 1 3 14.5Z"/>',
+  video: '<rect x="3" y="6" width="13" height="12" rx="2"/><path d="m16 10 5-3v10l-5-3"/>',
+  "video-off": '<path d="M9 6h5a2 2 0 0 1 2 2v3l5-3v9M16 16a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2M3 3l18 18"/>',
+  mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>',
+  "mic-off": '<path d="M15 10V6a3 3 0 0 0-5.7-1.3M9 9v2a3 3 0 0 0 4.6 2.5M5 11a7 7 0 0 0 11.3 5.5M19 11a7 7 0 0 1-.6 2.8M12 18v3M3 3l18 18"/>',
+  volume: '<path d="M4 9h4l5-4v14l-5-4H4V9Z"/><path d="M16 9a4 4 0 0 1 0 6M19 6a8 8 0 0 1 0 12"/>',
+  camera: '<path d="M4 8h3l2-3h6l2 3h3v11H4V8Z"/><circle cx="12" cy="13" r="3.5"/>',
+  file: '<path d="M6 3h9l4 4v14H6V3ZM14 3v5h5M9 12h7M9 16h5"/>',
+  paperclip: '<path d="m20 11-8.5 8.5a5 5 0 0 1-7-7L13 4a3.5 3.5 0 0 1 5 5l-8.5 8.5a2 2 0 0 1-3-3L14 7"/>',
+  send: '<path d="M4 12 20 4l-5 16-3-7-8-1Z"/><path d="m12 13 8-9"/>',
+  "arrow-left": '<path d="M19 12H5M11 6l-6 6 6 6"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  users: '<circle cx="9" cy="8" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3M17 5a3 3 0 0 1 0 6M18 14a5 5 0 0 1 3 5v2"/>',
+  building: '<path d="M3 21V6h11v15M14 11h7v10M7 10h3M7 14h3M7 18h3M17 15h1M17 18h1"/>',
+  message: '<path d="M21 11a8 8 0 0 1-8 8H7l-4 3V11a8 8 0 0 1 8-8h2a8 8 0 0 1 8 8Z"/><path d="M8 9h8M8 13h5"/>',
+  lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
+  unlock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 7.5-2"/>',
+  user: '<circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/>',
+  briefcase: '<rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7V5h6v2M3 12h18"/>',
+  shield: '<path d="M12 3 5 6v6c0 4.5 3 7.5 7 9 4-1.5 7-4.5 7-9V6l-7-3Z"/>',
+  settings: '<circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/>',
+  folder: '<path d="M4 6h6l2 3h8v11H4V6Z"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 3v4M17 3v4M3 11h18"/>',
+  alert: '<path d="M12 4 2.5 20h19L12 4Z"/><path d="M12 10v4M12 17h.01"/>',
+  archive: '<rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9v11h14V9M10 13h4"/>',
+  pin: '<path d="M9 4h6l-1 6 3 3H7l3-3-1-6ZM12 13v8"/>',
+  download: '<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>',
+  trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>',
+  more: '<circle cx="5" cy="12" r="1.4" fill="currentColor"/><circle cx="12" cy="12" r="1.4" fill="currentColor"/><circle cx="19" cy="12" r="1.4" fill="currentColor"/>',
+  "chevron-down": '<path d="m6 9 6 6 6-6"/>',
+  smile: '<circle cx="12" cy="12" r="9"/><path d="M8.5 14a4.5 4.5 0 0 0 7 0M9 9.5h.01M15 9.5h.01"/>',
+  stop: '<rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor"/>',
+};
+function uiIcon(name, cls = "") {
+  return `<svg class="ui-icon${cls ? " " + cls : ""}" aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${UI_ICONS[name] || UI_ICONS.more}</svg>`;
+}
+window.SGOIcon = uiIcon;
 const createRoles = {
   companies: core,
   employees: hr,
@@ -200,10 +248,121 @@ const kpi = (label, value) =>
   `<article class="card kpi"><p class="muted">${esc(label)}</p><b class="kpi-value">${esc(value)}</b></article>`;
 const cards = (items) =>
   `<div class="grid g3 section">${items.map((x) => kpi(...x)).join("")}</div>`;
+// Classifies a table cell so amounts, dates and references never break mid-word,
+// and action buttons can be grouped (see enhanceContent).
+function cellKind(html) {
+  const s = String(html ?? "");
+  if (/class="btn /.test(s)) return "cell-actions";
+  const text = s.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim();
+  if (
+    /^-?[\d\s  '’.,]+\s?(CHF|%|h|j)$/i.test(text) ||
+    /^CHF\s?-?\d/.test(text) ||
+    /^\d{1,2}\.\d{1,2}\.\d{2,4}$/.test(text) ||
+    /^\d{4}-\d{2}-\d{2}$/.test(text) ||
+    /^[A-Z]{1,4}-\d{4}-\d+$/.test(text)
+  )
+    return "cell-nowrap";
+  return "";
+}
 function table(headers, rows) {
   return rows.length
-    ? `<article class="card"><div class="table"><table><thead><tr>${headers.map((x) => `<th>${esc(x)}</th>`).join("")}</tr></thead><tbody>${rows.map((r) => `<tr>${r.map((x) => `<td>${x ?? ""}</td>`).join("")}</tr>`).join("")}</tbody></table></div></article>`
+    ? `<article class="card"><div class="table"><table class="data-table"><thead><tr>${headers.map((x) => `<th>${esc(x)}</th>`).join("")}</tr></thead><tbody>${rows
+        .map(
+          (r) =>
+            `<tr>${r
+              .map((x, i) => {
+                const kind = cellKind(x),
+                  label = headers[i] || "";
+                return `<td${kind ? ` class="${kind}"` : ""}${label ? ` data-label="${esc(label)}"` : ""}>${x ?? ""}</td>`;
+              })
+              .join("")}</tr>`,
+        )
+        .join("")}</tbody></table></div></article>`
     : `<article class="card empty">${navigationIcon("documents")}<strong>Aucun élément pour le moment.</strong><span>Les éléments disponibles dans cet espace apparaîtront ici.</span></article>`;
+}
+const compactLayout = window.matchMedia?.("(max-width: 760px)") || { matches: false, addEventListener() {} };
+// Post-render layout helpers: one primary action per table row with the others
+// (including deletion) in a "⋯" menu, and on phones a "Plus" menu for page header actions.
+function enhanceContent(root) {
+  if (!root) return;
+  for (const cell of root.querySelectorAll("table.data-table td.cell-actions:not([data-enhanced])")) {
+    cell.dataset.enhanced = "1";
+    const buttons = [...cell.querySelectorAll(":scope > button.btn")];
+    const primary = buttons.find((b) => !b.classList.contains("danger"));
+    const rest = buttons.filter((b) => b !== primary);
+    if (!rest.length) continue;
+    const menu = document.createElement("details");
+    menu.className = "row-more";
+    menu.innerHTML = `<summary title="Plus d’actions" aria-label="Plus d’actions">${uiIcon("more")}</summary><div class="row-more-menu"></div>`;
+    const list = menu.querySelector(".row-more-menu");
+    for (const b of rest) list.append(b);
+    menu.addEventListener("toggle", () => {
+      if (!menu.open) return;
+      // Float the menu next to its button so it never stretches the row or gets clipped by the table scroll area.
+      const r = menu.querySelector("summary").getBoundingClientRect();
+      list.style.left = "0px";
+      list.style.top = "0px";
+      const w = list.offsetWidth,
+        h = list.offsetHeight;
+      list.style.left = Math.max(8, Math.min(r.right - w, innerWidth - w - 8)) + "px";
+      list.style.top = (r.bottom + 6 + h > innerHeight - 8 ? Math.max(8, r.top - 6 - h) : r.bottom + 6) + "px";
+    });
+    if (primary) primary.after(menu);
+    else cell.prepend(menu);
+  }
+  if (!compactLayout.matches) return;
+  for (const box of root.querySelectorAll(".section-head > .actions:not([data-enhanced])")) {
+    box.dataset.enhanced = "1";
+    const buttons = [...box.querySelectorAll(":scope > button")];
+    if (buttons.length < 3) continue;
+    const primary = buttons.find((b) => b.classList.contains("primary")) || buttons[0];
+    const menu = document.createElement("details");
+    menu.className = "head-more";
+    menu.innerHTML = `<summary class="btn secondary">Plus ${uiIcon("chevron-down")}</summary><div class="head-more-menu"></div>`;
+    const list = menu.querySelector(".head-more-menu");
+    for (const b of buttons) if (b !== primary) list.append(b);
+    primary.after(menu);
+  }
+}
+{
+  let queued = false;
+  const run = () => {
+    queued = false;
+    enhanceContent($("content"));
+    enhanceContent($("modalBody"));
+  };
+  const observer = window.MutationObserver && new MutationObserver(() => {
+    if (queued) return;
+    queued = true;
+    (window.requestAnimationFrame || setTimeout)(run);
+  });
+  for (const id of ["content", "modalBody"]) {
+    const el = $(id);
+    if (el && observer) observer.observe(el, { childList: true, subtree: true });
+  }
+  // Close any open "⋯" / "Plus" menu when clicking elsewhere or choosing an action in it.
+  document.addEventListener("click", (e) => {
+    for (const menu of document.querySelectorAll("details.row-more[open], details.head-more[open], details.chat-new-menu[open]"))
+      if (!menu.contains(e.target) || e.target.closest("button")) menu.open = false;
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    for (const menu of document.querySelectorAll("details.row-more[open], details.head-more[open], details.chat-new-menu[open]")) menu.open = false;
+  });
+  // A floating row menu would drift away from its button while scrolling: close it.
+  window.addEventListener(
+    "scroll",
+    () => {
+      for (const menu of document.querySelectorAll("details.row-more[open]")) menu.open = false;
+    },
+    true,
+  );
+  window.addEventListener("resize", () => {
+    for (const menu of document.querySelectorAll("details.row-more[open]")) menu.open = false;
+  });
+  compactLayout.addEventListener("change", () => {
+    if (state && profile) render();
+  });
 }
 function heading(title, actions = "") {
   return `<div class="section-head"><h3>${esc(title)}</h3><div class="actions">${actions}</div></div>`;
@@ -1083,7 +1242,7 @@ function ensureCallOverlay() {
   overlay.className = "call-overlay hidden";
   overlay.innerHTML = `
     <div class="call-card">
-      <div class="call-avatar" id="callAvatar">☎</div>
+      <div class="call-avatar" id="callAvatar">${uiIcon("phone")}</div>
       <div id="callVideoStage" class="call-video-stage hidden">
         <video id="remoteCallVideo" autoplay playsinline muted></video>
         <video id="localCallVideo" autoplay playsinline muted></video>
@@ -1092,12 +1251,12 @@ function ensureCallOverlay() {
       <p id="callState">Connexion…</p>
       <div class="call-timer hidden" id="callTimer">00:00</div>
       <div class="call-controls">
-        <button type="button" id="callReject" class="call-control danger hidden" data-action="call-reject" aria-label="Refuser l'appel">✕</button>
-        <button type="button" id="callAccept" class="call-control accept hidden" data-action="call-accept" aria-label="Accepter l'appel">📞</button>
-        <button type="button" id="callMute" class="call-control hidden" data-action="call-mute" aria-label="Couper le micro">🎙</button>
-        <button type="button" id="callCamera" class="call-control hidden" data-action="call-camera" aria-label="Couper la caméra">📹</button>
-        <button type="button" id="callEnableAudio" class="call-control hidden" data-action="call-enable-audio" aria-label="Activer le son">🔊</button>
-        <button type="button" id="callHangup" class="call-control danger hidden" data-action="call-hangup" aria-label="Raccrocher">☎</button>
+        <button type="button" id="callReject" class="call-control danger hidden" data-action="call-reject" aria-label="Refuser l'appel">${uiIcon("hangup")}</button>
+        <button type="button" id="callAccept" class="call-control accept hidden" data-action="call-accept" aria-label="Accepter l'appel">${uiIcon("phone")}</button>
+        <button type="button" id="callMute" class="call-control hidden" data-action="call-mute" aria-label="Couper le micro">${uiIcon("mic")}</button>
+        <button type="button" id="callCamera" class="call-control hidden" data-action="call-camera" aria-label="Couper la caméra">${uiIcon("video")}</button>
+        <button type="button" id="callEnableAudio" class="call-control hidden" data-action="call-enable-audio" aria-label="Activer le son">${uiIcon("volume")}</button>
+        <button type="button" id="callHangup" class="call-control danger hidden" data-action="call-hangup" aria-label="Raccrocher">${uiIcon("hangup")}</button>
       </div>
       <audio id="remoteCallAudio" autoplay playsinline></audio>
     </div>`;
@@ -1161,7 +1320,7 @@ async function playRemoteAudio() {
     callAudioBlocked = true;
     $("callEnableAudio")?.classList.remove("hidden");
     if ($("callState") && activeCall?.peer?.connectionState === "connected")
-      $("callState").textContent = "En appel · touchez 🔊 pour entendre";
+      $("callState").textContent = "En appel · touchez le haut-parleur pour entendre";
   }
 }
 function unlockRingtoneAudio() {
@@ -1638,19 +1797,19 @@ function messagesView() {
         );
       })
       .join("") ||
-    '<div class="chat-empty"><span>💬</span><p>Aucun message dans cette conversation.</p><small>Envoyez le premier message ci-dessous.</small></div>';
+    '<div class="chat-empty"><span>' + uiIcon("message") + '</span><p>Aucun message dans cette conversation.</p><small>Envoyez le premier message ci-dessous.</small></div>';
 
   return `<section class="whatsapp-chat ${mobileChatOpen ? "mobile-chat-open" : ""}">
     <aside class="chat-sidebar">
-      <div class="chat-sidebar-head"><div><h3>Discussions</h3><span>${conversations.length} conversation${conversations.length > 1 ? "s" : ""}</span></div><div class="chat-new-actions"><button type="button" data-action="chat-new-group" title="Nouveau groupe">＋ Groupe</button><button type="button" data-action="chat-new-project" title="Discussion chantier">＋ Chantier</button></div></div>
-      <label class="chat-search" for="conversationSearch"><span aria-hidden="true">⌕</span><input id="conversationSearch" type="search" autocomplete="off" placeholder="Rechercher une discussion" aria-label="Rechercher une discussion"></label>
+      <div class="chat-sidebar-head"><div><h3>Discussions</h3><span>${conversations.length} conversation${conversations.length > 1 ? "s" : ""}</span></div><details class="chat-new-menu"><summary class="chat-new-trigger" title="Nouvelle discussion">${uiIcon("plus")}<span>Nouvelle</span></summary><div class="chat-new-options"><button type="button" data-action="chat-new-group">${uiIcon("users")}Nouveau groupe</button><button type="button" data-action="chat-new-project">${uiIcon("building")}Discussion chantier</button></div></details></div>
+      <label class="chat-search" for="conversationSearch">${uiIcon("search")}<input id="conversationSearch" type="search" autocomplete="off" placeholder="Rechercher une discussion" aria-label="Rechercher une discussion"></label>
       <div id="conversationList" class="chat-conversations">
         ${conversations.map((c) => {
           const preview = chatMessagePreview(c.last),
             search = `${c.title} ${c.subtitle} ${preview}`.toLowerCase(),
             isActive = c.key === active.key;
           return `<button type="button" class="chat-contact ${isActive ? "active" : ""}" data-action="chat-select" data-id="${esc(c.key)}" data-search="${esc(search)}">
-            ${c.kind === "direct" ? chatAvatar(c.contact) : `<span class="chat-avatar chat-avatar-initial chat-group-avatar">${c.thread.type === "project" ? "🏗" : "👥"}</span>`}
+            ${c.kind === "direct" ? chatAvatar(c.contact) : `<span class="chat-avatar chat-avatar-initial chat-group-avatar">${uiIcon(c.thread.type === "project" ? "building" : "users")}</span>`}
             <span class="chat-contact-body">
               <span class="chat-contact-top"><b>${esc(c.title)}</b><time>${c.last ? esc(chatTime(c.last.createdAt)) : ""}</time></span>
               <span class="chat-contact-bottom"><span class="chat-preview">${esc(preview.slice(0, 82))}</span>${c.unread ? `<strong class="chat-unread">${c.unread > 99 ? "99+" : c.unread}</strong>` : `<small>${esc(c.subtitle)}</small>`}</span>
@@ -1661,9 +1820,9 @@ function messagesView() {
     </aside>
     <section class="chat-main-panel">
       <header class="chat-header">
-        <button type="button" class="chat-back" data-action="chat-back" aria-label="Retour aux discussions">←</button>
-        ${active.kind === "direct" ? chatAvatar(active.contact) : `<span class="chat-avatar chat-avatar-initial chat-group-avatar">${active.thread.type === "project" ? "🏗" : "👥"}</span>`}
-        <div class="chat-header-person"><strong>${esc(active.title)}</strong><span>${esc(active.subtitle)}</span></div>${active.kind === "direct" ? `<div class="chat-call-actions"><button type="button" class="chat-call-button" data-action="call-start" data-id="${esc(active.contact.id)}" aria-label="Appeler ${esc(active.title)}" title="Appel audio">📞</button><button type="button" class="chat-call-button" data-action="call-video" data-id="${esc(active.contact.id)}" aria-label="Appel vidéo ${esc(active.title)}" title="Appel vidéo">📹</button></div>` : ""}
+        <button type="button" class="chat-back" data-action="chat-back" aria-label="Retour aux discussions">${uiIcon("arrow-left")}</button>
+        ${active.kind === "direct" ? chatAvatar(active.contact) : `<span class="chat-avatar chat-avatar-initial chat-group-avatar">${uiIcon(active.thread.type === "project" ? "building" : "users")}</span>`}
+        <div class="chat-header-person"><strong>${esc(active.title)}</strong><span>${esc(active.subtitle)}</span></div>${active.kind === "direct" ? `<div class="chat-call-actions"><button type="button" class="chat-call-button" data-action="call-start" data-id="${esc(active.contact.id)}" aria-label="Appeler ${esc(active.title)}" title="Appel audio">${uiIcon("phone")}</button><button type="button" class="chat-call-button" data-action="call-video" data-id="${esc(active.contact.id)}" aria-label="Appel vidéo ${esc(active.title)}" title="Appel vidéo">${uiIcon("video")}</button></div>` : ""}
       </header>
       <div class="chat-history">
         <div id="messageThread" class="messages chat-thread" role="log" tabindex="0" aria-live="polite" aria-label="Messages avec ${esc(active.title)}">${hiddenMessageCount ? `<button type="button" class="chat-load-older" data-action="chat-load-older" data-id="${esc(list[0]?.id || "")}">↑ Charger ${Math.min(100, hiddenMessageCount)} message(s) précédent(s)</button>` : ""}${bubbles}</div>
@@ -1671,18 +1830,18 @@ function messagesView() {
       </div>
       <div id="chatReplyBar" class="chat-reply-bar ${chatReplyToId ? "" : "hidden"}">
         <div><b>Réponse</b><span>${chatReplyToId ? esc((fullList.find((m) => same(m.id, chatReplyToId))?.text || "Message").slice(0, 100)) : ""}</span></div>
-        <button type="button" data-action="chat-cancel-reply" aria-label="Annuler la réponse">✕</button>
+        <button type="button" data-action="chat-cancel-reply" aria-label="Annuler la réponse">${uiIcon("x")}</button>
       </div>
       <div id="chatAttachmentBar" class="chat-attachment-bar ${chatAttachmentDraft ? "" : "hidden"}">
-        <span>${chatAttachmentDraft ? esc((chatAttachmentDraft.kind === "audio" ? "🎤 " : "📎 ") + chatAttachmentDraft.name) : ""}</span>
-        <button type="button" data-action="chat-cancel-attachment" aria-label="Retirer la pièce jointe">✕</button>
+        <span>${chatAttachmentDraft ? uiIcon(chatAttachmentDraft.kind === "audio" ? "mic" : "paperclip") + esc(chatAttachmentDraft.name) : ""}</span>
+        <button type="button" data-action="chat-cancel-attachment" aria-label="Retirer la pièce jointe">${uiIcon("x")}</button>
       </div>
       <form id="messageForm" class="chat-composer" data-conversation="${esc(active.key)}">
         <input id="chatFile" type="file" hidden accept="image/jpeg,image/png,image/webp,image/gif,video/*,application/pdf,text/plain,audio/*">
-        <button type="button" class="chat-tool" data-action="chat-file" aria-label="Ajouter une photo ou un fichier" title="Pièce jointe">📎</button>
-        <button type="button" class="chat-tool" data-action="chat-voice" aria-label="Enregistrer un message vocal" title="Message vocal">🎤</button>
+        <button type="button" class="chat-tool" data-action="chat-file" aria-label="Ajouter une photo ou un fichier" title="Pièce jointe">${uiIcon("paperclip")}</button>
+        <button type="button" class="chat-tool" data-action="chat-voice" aria-label="Enregistrer un message vocal" title="Message vocal">${uiIcon("mic")}</button>
         <div class="chat-compose-field"><textarea id="messageText" name="text" rows="1" maxlength="5000" placeholder="Écrire un message" aria-label="Écrire un message"></textarea><p id="formError" class="error" role="alert"></p></div>
-        <button type="submit" class="chat-send" aria-label="Envoyer le message" title="Envoyer">➤</button>
+        <button type="submit" class="chat-send" aria-label="Envoyer le message" title="Envoyer">${uiIcon("send")}</button>
       </form>
     </section>
   </section>`;
@@ -2984,7 +3143,7 @@ document.addEventListener("click", async (e) => {
         disabled = tracks.length && tracks.every((track) => !track.enabled);
       tracks.forEach((track) => (track.enabled = disabled));
       b.classList.toggle("muted", !disabled);
-      b.textContent = disabled ? "📹" : "🚫";
+      b.innerHTML = uiIcon(disabled ? "video" : "video-off");
       b.title = disabled ? "Couper la caméra" : "Réactiver la caméra";
     } else if (a === "call-mute") {
       if (!activeCall?.stream) return;
@@ -2992,7 +3151,7 @@ document.addEventListener("click", async (e) => {
         muted = tracks.every((track) => !track.enabled);
       tracks.forEach((track) => (track.enabled = muted));
       b.classList.toggle("muted", !muted);
-      b.textContent = muted ? "🎙" : "🔇";
+      b.innerHTML = uiIcon(muted ? "mic" : "mic-off");
       b.title = muted ? "Couper le micro" : "Réactiver le micro";
     } else if (a === "chat-new-group") threadForm("group");
     else if (a === "chat-new-project") threadForm("project");
@@ -3037,7 +3196,7 @@ document.addEventListener("click", async (e) => {
         );
       if (chatRecorder?.state === "recording") {
         chatRecorder.stop();
-        b.textContent = "🎤";
+        b.innerHTML = uiIcon("mic");
         b.classList.remove("recording");
       } else {
         if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder)
@@ -3130,7 +3289,7 @@ document.addEventListener("click", async (e) => {
             render();
           };
           recorder.start(250);
-          b.textContent = "■";
+          b.innerHTML = uiIcon("stop");
           b.classList.add("recording");
         } catch (e) {
           stream?.getTracks().forEach((track) => track.stop());
