@@ -26,7 +26,7 @@ test("P1 is mounted and loaded by the application shell", () => {
   assert.match(server, /\/api\/p1/);
   assert.match(index, /p1-suite\.js/);
   assert.match(index, /p1\.css/);
-  assert.match(operations, /P1 complet/);
+  assert.match(operations, /Suivi opérationnel/);
 });
 
 test("P1 complete schema stays wired", () => {
@@ -145,8 +145,8 @@ test("P1 status exposes a 100 percent internal completion gate", () => {
   ]) assert.ok(api.includes(capability), "missing P1 readiness flag: " + capability);
   assert.match(api, /corePercent/);
   assert.match(api, /coreReady/);
-  assert.match(ui, /Socle P1 interne terminé/);
-  assert.match(ui, /P1 terminé/);
+  assert.match(ui, /Fonctions opérationnelles actives/);
+  assert.match(ui, /Fonctions disponibles/);
 });
 
 test("P1 keeps all requested interface languages", () => {
@@ -155,7 +155,7 @@ test("P1 keeps all requested interface languages", () => {
     assert.match(ui, new RegExp("\\b" + lang + "\\s*:"), "missing P1 language: " + lang);
   }
   for (const key of [
-    "P1 complet",
+    "Suivi opérationnel",
     "Chantier+",
     "Pointage+",
     "Finance+",

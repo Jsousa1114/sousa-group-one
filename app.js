@@ -105,7 +105,7 @@ const menus = {
   reports: ["Rapports", [...core, "hr", "accounting", "manager"]],
   pilotage: ["Pilotage", [...core, "hr", "manager", "accounting", "employee"]],
   pro: ["Centre de gestion", [...core, "hr", "manager", "accounting", "employee"]],
-  advanced: ["P2 · Avancé", Object.keys(roles)],
+  advanced: ["Outils avancés", Object.keys(roles)],
   users: ["Comptes", ["admin"]],
   audit: ["Journal", hr],
   settings: ["Mon compte", Object.keys(roles)],
@@ -519,7 +519,7 @@ function render() {
     .join("");
   $("nav").scrollTop = navScroll;
   $("companyFilter").innerHTML =
-    '<option value="">Toutes mes données</option>' +
+    '<option value="">Vue globale</option>' +
     state.companies
       .filter((c) => c.id !== "group")
       .map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`)
@@ -1735,8 +1735,8 @@ const views = {
     heading("Centre de gestion") +
     '<div id="proStandalone"><article class="card"><p>Chargement du centre de gestion…</p></article></div>',
   advanced: () =>
-    heading("P2 · Avancé") +
-    '<div id="p2Standalone"><article class="card"><p>Chargement P2…</p></article></div>',
+    heading("Outils avancés") +
+    '<div id="p2Standalone"><article class="card"><p>Chargement…</p></article></div>',
   employees: () =>
     genericPage("employees") +
     (profile.role === "admin" && profile.company === "group"
@@ -2334,7 +2334,7 @@ function projectModal(id) {
         .filter((i) => find("invoices", i))
         .map((i) => btn("Ouvrir la facture " + i, "invoice", i))
         .join(" ") +
-      `<p>${esc(p.description)}</p><p>${esc(p.address)}</p><p>${date(p.start)} – ${date(p.end)} · ${esc(p.progress)} %</p><p>Équipe : ${(p.team || []).map((id) => esc(name("employees", id))).join(", ") || "Non affectée"}</p>${p.budget !== undefined ? `<p>Budget ${money(p.budget)} · Coûts ${money(p.cost)}</p>` : ""}${can(ops) ? btn("Modifier le suivi", "project-edit", id) + " " + btn("Supprimer le chantier", "project-delete", id, "danger") : ""} ${(() => { const thread = (state.messageThreads || []).find((t) => same(t.projectId, id)); return thread ? btn("Ouvrir la discussion", "chat-open-project", thread.id, "primary") : can(ops) ? btn("Créer la discussion chantier", "chat-create-project", id) : ""; })()}<h4 class="spaced">Documents et photos</h4>${table(
+      `${p.description ? `<p>${esc(p.description)}</p>` : ""}${p.address ? `<p>${esc(p.address)}</p>` : ""}<p class="project-summary">${[p.clientId ? esc(name("clients", p.clientId)) : "", p.status ? badge(p.status) : "", p.start && p.end ? `${date(p.start)} – ${date(p.end)}` : p.start ? "Début " + date(p.start) : p.end ? "Fin " + date(p.end) : "", "Avancement " + esc(p.progress ?? 0) + " %"].filter(Boolean).join(" · ")}</p><p>Équipe : ${(p.team || []).map((id) => esc(name("employees", id))).join(", ") || "Non affectée"}</p>${p.budget !== undefined ? `<p>Budget ${money(p.budget)} · Coûts ${money(p.cost)}</p>` : ""}${can(ops) ? btn("Modifier le suivi", "project-edit", id) + " " + btn("Supprimer le chantier", "project-delete", id, "danger") : ""} ${(() => { const thread = (state.messageThreads || []).find((t) => same(t.projectId, id)); return thread ? btn("Ouvrir la discussion", "chat-open-project", thread.id, "primary") : can(ops) ? btn("Créer la discussion chantier", "chat-create-project", id) : ""; })()}<h4 class="spaced">Documents et photos</h4>${table(
         ["Fichier", ""],
         state.documents
           .filter((x) => same(x.project, id))

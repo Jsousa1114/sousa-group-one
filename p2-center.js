@@ -30,7 +30,7 @@
   }
   function tabs() {
     const items = [
-      ["overview","État P2"],
+      ["overview","État des outils"],
       ...(staff() ? [["finance","Finance & rentabilité"],["approvals","Approbations"],["appointments","Rendez-vous"],["commercial","Commercial"]] : []),
       ...(direction() ? [["automations","Modèles"],["access","Accès & API"]] : []),
     ];
@@ -43,7 +43,7 @@
     const f = status.features || {}, external = status.external || {};
     host.innerHTML = `
       <div class="p2-kpis">
-        <article><b>${esc(status.completion?.corePercent||0)}%</b><span>Socle P2 interne</span></article>
+        <article><b>${esc(status.completion?.corePercent||0)}%</b><span>Fonctions avancées actives</span></article>
         <article><b>${Object.values(f).filter(Boolean).length}/${Object.keys(f).length}</b><span>Fonctions actives</span></article>
         <article><b>${queue.length}</b><span>Action(s) hors ligne en attente</span></article>
         <article><b>${Object.values(external).filter(Boolean).length}/${Object.keys(external).length}</b><span>Connecteurs externes configurés</span></article>
@@ -60,8 +60,8 @@
         </div>
         <p class="muted">Temps réel SSE, cache PWA, consultation hors ligne, file de synchronisation pour pointages et documents, installation mobile et passkeys biométriques.</p>
       `)}
-      ${card("Connecteurs P2",`<div class="p2-status-grid">${Object.entries(external).map(([k,v])=>`<div class="${v?"ready":"pending"}"><b>${esc(k)}</b><span>${v?"Configuré":"Optionnel · à connecter"}</span></div>`).join("")}</div>`)}
-      ${card("Couverture P2",`<div class="p2-feature-grid">${Object.entries(f).map(([k,v])=>`<span class="${v?"ready":"pending"}">✓ ${esc(k)}</span>`).join("")}</div>`)}
+      ${card("Connecteurs externes",`<div class="p2-status-grid">${Object.entries(external).map(([k,v])=>`<div class="${v?"ready":"pending"}"><b>${esc(k)}</b><span>${v?"Configuré":"Optionnel · à connecter"}</span></div>`).join("")}</div>`)}
+      ${card("Fonctions disponibles",`<div class="p2-feature-grid">${Object.entries(f).map(([k,v])=>`<span class="${v?"ready":"pending"}">✓ ${esc(k)}</span>`).join("")}</div>`)}
     `;
   }
   async function renderFinance() {
@@ -150,7 +150,7 @@
 
   async function renderCurrent() {
     if (!host) return;
-    host.innerHTML='<article class="card"><p>Chargement P2…</p></article>';
+    host.innerHTML='<article class="card"><p>Chargement…</p></article>';
     try {
       if(profile().role==="client") return await renderClient();
       if(active==="overview") await renderOverview();
@@ -161,7 +161,7 @@
       else if(active==="automations") await renderAutomations();
       else if(active==="access") await renderAccess();
     } catch(e) {
-      host.innerHTML=`<article class="card empty"><b>Impossible de charger P2.</b><p>${esc(e.message)}</p></article>`;
+      host.innerHTML=`<article class="card empty"><b>Impossible de charger les outils avancés.</b><p>${esc(e.message)}</p></article>`;
     }
   }
   async function render(root) {
@@ -171,7 +171,7 @@
       host=root.querySelector("#p2Body");
       return renderCurrent();
     }
-    root.innerHTML=`<section class="p2-center"><div class="p2-hero"><div><span>P2 · PERFORMANCE</span><h2>Mobilité, intégrations & pilotage avancé</h2></div></div>${tabs()}<div id="p2Body"></div></section>`;
+    root.innerHTML=`<section class="p2-center"><div class="p2-hero"><div><span>Outils avancés</span><h2>Mobilité, intégrations & pilotage avancé</h2></div></div>${tabs()}<div id="p2Body"></div></section>`;
     host=root.querySelector("#p2Body");
     await renderCurrent();
   }

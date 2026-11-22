@@ -12,3 +12,6 @@ coverage/
 *.sql.gz
 backups/
 **/backups/
+
+# Captures produites par les tests navigateur
+p2-browser-results/

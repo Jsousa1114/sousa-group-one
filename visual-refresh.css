@@ -292,3 +292,32 @@ body[data-view="dashboard"] #content > .grid { order:-2; }
 @media (prefers-reduced-motion:reduce) {
   *,*::before,*::after { transition:none!important; animation:none!important; scroll-behavior:auto!important; }
 }
+
+/* Lisibilité : contraste des étiquettes et taille minimale de 12 px (revue du 22.11.2026). */
+.eyebrow, .pro-hero span { opacity:1; }
+.eyebrow, .topbar .eyebrow, .nav-group, .ops-eyebrow { font-size:.75rem; }
+td, .status, .notif b, .profile span,
+.chat-contact-top time, .chat-contact-bottom small, .suite-shared-card small,
+.account-tags span, .account-info span, .account-kpis span, .account-expiry, .account-session span,
+.account-switch small, .account-document span, .account-timeline small,
+.ops-search-results span, .ops-kpi span, .ops-kpi small, .ops-card-head p, .ops-insight small,
+.ops-severity, .ops-simple-list small, .ops-kanban-title span, .ops-task p, .ops-crm-card p,
+.ops-task-meta, .ops-task-actions .btn, .ops-priority, .ops-crm-card > small, .ops-workorder p,
+.ops-workorder small, .ops-signed, .ops-integration-grid small, .ops-notification-category,
+.ops-notification p { font-size:.75rem; }
+.ops-hero p, .account-secret code, .account-uri, .account-recovery-grid code { font-size:.8125rem; }
+.account-info b, .account-switch b, .account-timeline b, .ops-kanban-title h3 { font-size:.875rem; }
+@media (max-width:760px) { .topbar .eyebrow { font-size:.75rem; } }
+/* Badges d'état lisibles en thème clair (les couleurs d'origine sont pensées pour le thème sombre). */
+body.light .status.ok, body.light .status.success { color:#13623f; background:#e2f4ea; }
+body.light .status.warning { color:#7a4300; background:#fcefd6; }
+body.light .status.danger { color:#a3202d; background:#fde7e9; }
+body.light .status.info { color:#1d4c8c; background:#e6eefb; }
+body.light .ops-severity.high, body.light .ops-priority.high { color:#7a4f00; background:#fcefd6; }
+body.light .ops-severity.medium { color:#1a5f88; background:#e3f0f8; }
+/* Sélecteur d'espace de travail : texte coupé proprement avec des points de suspension. */
+.company-box select { text-overflow:ellipsis; white-space:nowrap; overflow:hidden; }
+/* Fiche chantier : ligne de résumé (client, statut, dates, avancement). */
+.project-summary { display:flex; flex-wrap:wrap; align-items:center; gap:6px 8px; margin:14px 0 4px; color:var(--muted); }
+/* Texte secondaire sur fond mis en évidence (jour courant du planning, discussion sélectionnée). */
+body.light .planning-today .planning-empty, body.light .chat-contact.active .chat-preview { color:#4b5869; }
