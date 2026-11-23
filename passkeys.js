@@ -8,6 +8,28 @@
 
   const core = () => window.SGOChatCore;
   const esc = (v) => core()?.esc?.(v) ?? String(v ?? "");
+  // Browsers report passkey failures as DOMException names with technical English text
+  // (Safari: "The object is in an invalid state."). Explain them in French.
+  function passkeyErrorMessage(e, during) {
+    switch (e?.name) {
+      case "NotAllowedError":
+        return during === "login"
+          ? "Connexion Passkey annulée ou non autorisée sur cet appareil."
+          : "Opération annulée ou non autorisée sur cet appareil.";
+      case "InvalidStateError":
+        return during === "login"
+          ? "Cette passkey ne peut pas être utilisée sur cet appareil. Connectez-vous avec votre mot de passe."
+          : "Une passkey existe déjà pour ce compte sur cet appareil. Vous pouvez l’utiliser avec « Se connecter avec une passkey ».";
+      case "SecurityError":
+        return "Les passkeys ne fonctionnent que sur l’adresse officielle de l’application, en HTTPS.";
+      case "NotSupportedError":
+        return "Cet appareil ou ce navigateur ne prend pas en charge les passkeys.";
+      case "AbortError":
+        return "Opération interrompue. Réessayez.";
+      default:
+        return e?.message || "Erreur Passkey inattendue.";
+    }
+  }
 
   function decodeBase64url(value) {
     const s = String(value || "")
@@ -224,10 +246,7 @@
       location.reload();
     } catch (e) {
       if (error)
-        error.textContent =
-          e?.name === "NotAllowedError"
-            ? "Connexion Passkey annulée ou non autorisée sur cet appareil."
-            : e.message;
+        error.textContent = passkeyErrorMessage(e, "login");
     } finally {
       button.disabled = false;
     }
@@ -269,15 +288,12 @@
       else await remove(form);
     } catch (e) {
       if (err)
-        err.textContent =
-          e?.name === "NotAllowedError"
-            ? "Opération annulée ou non autorisée sur cet appareil."
-            : e.message;
+        err.textContent = passkeyErrorMessage(e, "register");
     } finally {
       if (submit) submit.disabled = false;
     }
   });
 
   installLoginButton();
-  window.SGOPasskeys = { render, supported };
+  window.SGOPasskeys = { render, supported, passkeyErrorMessage };
 })();
