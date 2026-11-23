@@ -1,5 +1,7 @@
 "use strict";
 (() => {
+  // French agreement: singular for 0 and 1, plural above.
+  const plural = (n, one, many) => `${n} ${Number(n) > 1 ? many : one}`;
   let activeTab = "overview",
     loaded = false,
     projectFilter = "",
@@ -165,10 +167,10 @@
     const crmValue = (overview.crm || []).reduce((n, x) => n + Number(x.value || 0), 0);
     const body = `
       ${kpis([
-        ["Tâches ouvertes", overview.tasks.total - overview.tasks.done, overview.tasks.urgent + " urgente(s)"],
-        ["En cours", overview.tasks.inProgress, overview.tasks.blocked + " bloquée(s)"],
-        ["Notifications", overview.unreadNotifications, "non lues"],
-        ["Pipeline CRM", money(crmValue), (overview.crm || []).reduce((n, x) => n + Number(x.count || 0), 0) + " opportunité(s)"],
+        ["Tâches ouvertes", overview.tasks.total - overview.tasks.done, plural(overview.tasks.urgent, "urgente", "urgentes")],
+        ["En cours", overview.tasks.inProgress, plural(overview.tasks.blocked, "bloquée", "bloquées")],
+        ["Notifications", overview.unreadNotifications, Number(overview.unreadNotifications) > 1 ? "non lues" : "non lue"],
+        ["Pipeline CRM", money(crmValue), plural((overview.crm || []).reduce((n, x) => n + Number(x.count || 0), 0), "opportunité", "opportunités")],
       ])}
       <div class="ops-grid-2">
         <article class="card">
@@ -263,7 +265,7 @@
         ["lost", "Perdus"],
       ];
     root().querySelector("#opsBody").innerHTML = `
-      <div class="ops-toolbar"><div><b>Pipeline commercial</b><span class="muted"> ${rows.length} opportunité(s)</span></div>${button("Nouvelle opportunité", "new-crm", "", "primary")}</div>
+      <div class="ops-toolbar"><div><b>Pipeline commercial</b><span class="muted"> ${plural(rows.length, "opportunité", "opportunités")}</span></div>${button("Nouvelle opportunité", "new-crm", "", "primary")}</div>
       <div class="ops-crm-board">
       ${stages
         .map(

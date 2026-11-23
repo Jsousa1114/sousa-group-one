@@ -354,6 +354,8 @@ function routes(db) {
     const quotes = scoped(view.quotes);
     const inventory = scoped(view.inventory);
     const date = today();
+    // A client only sees appointments and work orders of their own account, never those of other clients of the company.
+    const ownClientRow = (x) => req.user.role !== "client" || (req.user.client_id != null && String(x.client_id || "") === String(req.user.client_id));
     const workingNow = (data.clocks || []).filter((clock) => visibleEmployees.has(String(clock.employeeId)) && (!currentCompany || String(clock.company || data.projects?.find((p) => same(p.id, clock.project))?.company || "") === currentCompany));
     const activeProjects = projects.filter((p) => !["Terminé", "Payé", "Archivé"].includes(p.status));
     const overdueProjects = activeProjects.filter((p) => p.end && p.end < date);
@@ -366,10 +368,10 @@ function routes(db) {
     const appointments = (await db.query(
       "SELECT * FROM p2_appointments WHERE starts_at >= $1 AND starts_at < $2 ORDER BY starts_at",
       [new Date(`${date}T00:00:00+02:00`).toISOString(), new Date(`${date}T23:59:59+02:00`).toISOString()],
-    )).rows.filter((x) => (x.status !== "cancelled") && companyAllowed(req.user, x.company) && (!currentCompany || x.company === currentCompany));
+    )).rows.filter((x) => (x.status !== "cancelled") && companyAllowed(req.user, x.company) && ownClientRow(x) && (!currentCompany || x.company === currentCompany));
     const urgentWork = (await db.query(
-      "SELECT id,company,project_id,title,status,priority,scheduled_at FROM work_orders WHERE status NOT IN ('completed','done','cancelled') AND priority='urgent' ORDER BY scheduled_at NULLS LAST,created_at DESC LIMIT 100",
-    )).rows.filter((x) => companyAllowed(req.user, x.company) && (!currentCompany || x.company === currentCompany));
+      "SELECT id,company,client_id,project_id,title,status,priority,scheduled_at FROM work_orders WHERE status NOT IN ('completed','done','cancelled') AND priority='urgent' ORDER BY scheduled_at NULLS LAST,created_at DESC LIMIT 100",
+    )).rows.filter((x) => companyAllowed(req.user, x.company) && ownClientRow(x) && (!currentCompany || x.company === currentCompany));
     const unread = Number((await db.query("SELECT COUNT(*)::int n FROM user_notifications WHERE user_id=$1 AND read_at IS NULL", [req.user.id])).rows[0]?.n || 0);
     const revenue = invoices.filter((x) => x.status !== "Brouillon").reduce((n, x) => n + Number(x.amount || 0), 0);
     const expenses = scoped(view.expenses).reduce((n, x) => n + Number(x.amount || 0), 0);
@@ -425,6 +427,7 @@ function routes(db) {
         pendingAbsences: pendingAbsences.length,
         appointmentsToday: appointments.length,
         overdueInvoices: overdueInvoices.length,
+        unpaidInvoices: unpaid.length,
         pendingQuotes: pendingQuotes.length,
         lowStock: lowStock.length,
         urgentWork: urgentWork.length,
@@ -549,7 +552,10 @@ function routes(db) {
     for (const row of active(view.documents)) add("document", row, row.name, row.category || "Document", "documents");
     for (const row of active(view.vehicles)) add("vehicle", row, row.plate || row.id, [row.brand, row.model].filter(Boolean).join(" "), "vehicles");
     for (const row of active(view.inventory)) add("inventory", row, row.name, row.sku || "Matériel", "inventory");
-    const crm = (await db.query("SELECT id,company,client_id,name,email,phone,street,zip,city,country,stage,value,next_action,source,notes FROM crm_opportunities ORDER BY updated_at DESC LIMIT 1000")).rows;
+    // CRM prospects follow the same rule as the CRM screens: management, managers and accounting only.
+    const crm = D.privileged(req.user, [...D.OPS, "accounting"])
+      ? (await db.query("SELECT id,company,client_id,name,email,phone,street,zip,city,country,stage,value,next_action,source,notes FROM crm_opportunities ORDER BY updated_at DESC LIMIT 1000")).rows
+      : [];
     for (const row of crm.filter((x) => companyAllowed(req.user, x.company))) add("crm", row, row.name, `${row.stage} · ${row.next_action || row.source || ""}`, "advanced");
     const messageMatches = active(view.messages).filter((x) => String(x.text || "").toLowerCase().includes(query)).slice(-30);
     for (const row of messageMatches) results.push({ type: "message", id: String(row.id), title: String(row.text || "Message").slice(0, 90), subtitle: "Message", page: "messages", conversationKey: row.threadId ? `thread:${row.threadId}` : `direct:${same(row.senderId, req.user.id) ? row.recipientId : row.senderId}` });
@@ -1211,6 +1217,7 @@ function routes(db) {
   router.get("/intervention/:id.pdf", wrap(async (req, res) => {
     const order = (await db.query("SELECT * FROM work_orders WHERE id=$1", [String(req.params.id)])).rows[0];
     if (!order || !companyAllowed(req.user, order.company)) D.fail("Rapport inaccessible.", 404);
+    if (req.user.role === "client" && String(order.client_id || "") !== String(req.user.client_id || "")) D.fail("Rapport inaccessible.", 404);
     const { view } = await stateContext(db, req.user);
     const project = active(view.projects).find((x) => same(x.id, order.project_id)) || null;
     const client = active(view.clients).find((x) => same(x.id, order.client_id)) || null;

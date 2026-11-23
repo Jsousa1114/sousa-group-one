@@ -421,3 +421,24 @@ body.light .suite-e2ee.waiting { color:#7a4300 !important; background:#fcefd6; b
 @media (max-width:600px) { .suite-e2ee span { display:none; } .suite-e2ee { padding:0 8px !important; } }
 .account-session span.status { display:inline-flex; width:fit-content; }
 .row-more-menu .btn, .head-more-menu .btn { text-align:left; }
+
+/* ===== Lot 3 de la revue (23.11.2026) ===== */
+/* Texte lu par les lecteurs d'écran mais masqué à l'écran. */
+.sr-only { position:absolute !important; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0; }
+/* Planning : navigation compacte, choix de vue groupé, cases vides sobres. */
+.planning-nav { display:flex; gap:6px; }
+.planning-mode { display:inline-flex; gap:3px; padding:3px; border:1px solid var(--border); border-radius:10px; background:var(--soft); }
+.planning-mode .btn { min-height:34px; border-color:transparent; }
+.planning-mode .btn.secondary { background:transparent; }
+.planning-add { display:grid; place-items:center; width:100%; min-height:34px; margin-top:6px; padding:4px; color:var(--action); opacity:.45; }
+.planning-add .ui-icon { width:18px; height:18px; }
+.planning-add-empty { min-height:44px; margin-top:0; border-color:transparent; }
+.planning-calendar td:hover .planning-add, .planning-add:focus-visible { opacity:1; border-color:var(--border); background:var(--panel); }
+@media (hover:none) { .planning-add { opacity:.8; } }
+@media (max-width:760px) {
+  .planning-nav-label { display:none; }
+  .planning-nav { flex:1 1 100%; }
+  .planning-nav .btn { flex:1 1 0; }
+  .planning-mode { flex:1 1 100%; }
+  .planning-mode .btn { flex:1 1 0; }
+}
