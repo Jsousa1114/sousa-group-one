@@ -84,6 +84,26 @@ const labels = {
     "Original quote",
   ],
 };
+// Plain-French explanations for the QR-bill validation errors a user can actually cause.
+const QR_ERROR_MESSAGES = {
+  ACCOUNT_IS_QR_IBAN_BUT_REFERENCE_IS_MISSING:
+    "L’IBAN enregistré est un QR-IBAN : chaque facture doit alors porter une référence QR de 27 chiffres. Indiquez-la dans « Référence de paiement », ou enregistrez l’IBAN classique du compte dans les paramètres de facturation.",
+  ACCOUNT_IS_QR_IBAN_BUT_REFERENCE_IS_REGULAR:
+    "L’IBAN enregistré est un QR-IBAN : il exige une référence QR de 27 chiffres, pas une référence RF. Corrigez la référence de paiement, ou enregistrez l’IBAN classique du compte dans les paramètres de facturation.",
+  ACCOUNT_IS_REGULAR_IBAN_BUT_REFERENCE_IS_QR:
+    "Une référence QR de 27 chiffres n’est utilisable qu’avec un QR-IBAN. Utilisez une référence RF, ou laissez la référence de paiement vide.",
+  QR_REFERENCE_IS_INVALID:
+    "La référence QR est invalide : son chiffre de contrôle ne correspond pas. Vérifiez les 27 chiffres.",
+  QR_REFERENCE_LENGTH_IS_INVALID: "La référence QR doit compter exactement 27 chiffres.",
+  REGULAR_REFERENCE_LENGTH_IS_INVALID: "La référence de paiement est trop longue : 25 caractères au maximum.",
+  CREDITOR_ACCOUNT_IS_INVALID: "L’IBAN de l’entreprise est invalide. Vérifiez-le dans les paramètres de facturation.",
+  ACCOUNT_LENGTH_IS_INVALID: "L’IBAN de l’entreprise est invalide. Vérifiez-le dans les paramètres de facturation.",
+  CREDITOR_ACCOUNT_COUNTRY_IS_INVALID:
+    "Seuls les IBAN suisses (CH) et liechtensteinois (LI) sont acceptés sur une QR-facture.",
+};
+function qrErrorMessage(e) {
+  return QR_ERROR_MESSAGES[e?.code] || "QR non généré : " + (e?.message || "données invalides.");
+}
 function qrData(r, issuer, customer) {
   const billing = issuer.billing || {};
   if (r.status === "Brouillon" || !r.due || r.amount <= (r.paid || 0))
@@ -188,7 +208,7 @@ async function renderPDF(r, kind, issuer, customer, includeQR = false) {
         language: (r.language || "fr").toUpperCase(),
       });
     } catch (e) {
-      D.fail("QR non généré : " + e.message);
+      D.fail(qrErrorMessage(e));
     }
   }
   const pdf = new PDFDocument({
@@ -553,30 +573,38 @@ async function renderPDF(r, kind, issuer, customer, includeQR = false) {
     y += 25;
     paragraph(t[16] + " : __________________________________");
   }
+  // Swiss QR-bill standard: the payment part (A6, 105 mm high) sits at the very bottom of an A4 page,
+  // on the last invoice page when there is room, otherwise on a page of its own.
+  const slipTop = pdf.page.height - 297.64;
+  let qrPage = -1;
   if (qr) {
-    newPage();
-    pdf.y = 85;
+    if (y > slipTop - 50) newPage();
     pdf.fillColor("#000000");
-    qr.attachTo(pdf, 0, 85);
+    qr.attachTo(pdf, 0, slipTop);
+    const pages = pdf.bufferedPageRange();
+    qrPage = pages.start + pages.count - 1;
   }
   const range = pdf.bufferedPageRange();
   for (let i = 0; i < range.count; i++) {
     pdf.switchToPage(range.start + i);
     const savedBottom = pdf.page.margins.bottom;
     pdf.page.margins.bottom = 0;
-    pdf
-      .save()
-      .undash()
-      .lineWidth(0.5)
-      .strokeColor("#E0E6E9")
-      .moveTo(40, 799)
-      .lineTo(555, 799)
-      .stroke()
-      .restore();
+    // On the page holding the payment part, the page number sits just above the cut line.
+    const onQrPage = range.start + i === qrPage;
+    if (!onQrPage)
+      pdf
+        .save()
+        .undash()
+        .lineWidth(0.5)
+        .strokeColor("#E0E6E9")
+        .moveTo(40, 799)
+        .lineTo(555, 799)
+        .stroke()
+        .restore();
     draw(
       extra[5] + " " + (i + 1) + " " + extra[6] + " " + range.count,
       40,
-      815,
+      onQrPage ? slipTop - 22 : 815,
       515,
       9,
       false,
@@ -587,4 +615,4 @@ async function renderPDF(r, kind, issuer, customer, includeQR = false) {
   pdf.end();
   return done;
 }
-module.exports = { renderPDF, qrData };
+module.exports = { renderPDF, qrData, qrErrorMessage };
