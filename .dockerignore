@@ -1,0 +1,16 @@
+# Keep local configuration and Render exports out of production images.
+.git
+**/node_modules
+node_modules
+.env
+**/.env
+**/.env.*
+!**/.env.example
+**/*.dump
+**/*.sql
+**/*.sql.gz
+**/backups
+**/backups/**
+**/*.log
+coverage
+.nyc_output

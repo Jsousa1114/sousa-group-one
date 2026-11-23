@@ -2,6 +2,7 @@
 
 (() => {
   const $ = (id) => document.getElementById(id),
+    ic = (name) => window.SGOIcon?.(name) || "",
     prefs = new Map(),
     presence = new Map(),
     reactionRows = [],
@@ -252,10 +253,10 @@
     const bar = document.createElement("div");
     bar.className = "suite-chat-toolbar";
     bar.innerHTML = `
-      <button type="button" data-suite-action="push" title="Notifications">🔔</button>
-      <button type="button" data-suite-action="search" title="Rechercher dans tous les messages">🔎</button>
-      <button type="button" data-suite-action="history" title="Historique des appels">📞</button>
-      <button type="button" data-suite-action="archives" title="Archives">🗄</button>
+      <button type="button" data-suite-action="push" title="Notifications" aria-label="Notifications">${ic("bell")}</button>
+      <button type="button" data-suite-action="search" title="Rechercher dans tous les messages" aria-label="Rechercher dans tous les messages">${ic("search")}</button>
+      <button type="button" data-suite-action="history" title="Historique des appels" aria-label="Historique des appels">${ic("phone")}</button>
+      <button type="button" data-suite-action="archives" title="Archives" aria-label="Archives">${ic("archive")}</button>
     `;
     head.appendChild(bar);
   }
@@ -271,11 +272,11 @@
     camera.dataset.suiteAction = "camera";
     camera.title = "Prendre une photo";
     camera.setAttribute("aria-label", "Prendre une photo");
-    camera.textContent = "📷";
+    camera.innerHTML = ic("camera") || "📷";
     share.dataset.suiteAction = "share";
     share.title = "Partager un devis, une facture ou un document";
     share.setAttribute("aria-label", "Partager un élément");
-    share.textContent = "📄";
+    share.innerHTML = ic("file") || "📄";
     form.insertBefore(camera, firstTool);
     form.insertBefore(share, firstTool);
     renderPendingShare();
@@ -295,9 +296,9 @@
       form.parentElement.insertBefore(bar, form);
     }
     bar.innerHTML =
-      "<span>📄 " +
+      "<span>" + ic("file") +
       esc(pendingSharedRef.title || pendingSharedRef.id) +
-      '</span><button type="button" data-suite-action="clear-share">✕</button>';
+      '</span><button type="button" data-suite-action="clear-share" aria-label="Retirer le document partagé">' + ic("x") + "</button>";
   }
 
   function decorateConversationList() {
@@ -318,9 +319,9 @@
       }
       const flags = row.querySelector(".suite-conversation-flags");
       if (flags)
-        flags.textContent =
-          (pref.pinned ? "📌" : "") +
-          (pref.mutedUntil && new Date(pref.mutedUntil) > new Date() ? " 🔕" : "");
+        flags.innerHTML =
+          (pref.pinned ? '<span title="Épinglée">' + ic("pin") + "</span>" : "") +
+          (pref.mutedUntil && new Date(pref.mutedUntil) > new Date() ? '<span title="En sourdine">' + ic("bell-off") + "</span>" : "");
     }
     rows
       .sort((a, b) => Number(!!prefFor(b.dataset.id).pinned) - Number(!!prefFor(a.dataset.id).pinned))
@@ -364,21 +365,22 @@
     const badge = $("suiteEncryptionBadge");
     if (!badge || !conv || !cryptoBox()) return;
     if (mode() === "off") {
-      badge.textContent = "🔓 E2EE désactivé";
+      badge.innerHTML = ic("unlock") + "<span>Non chiffré</span>";
+      badge.title = "Le chiffrement de bout en bout est désactivé sur ce serveur.";
       badge.className = "suite-e2ee off";
       return;
     }
     try {
       const status = await cryptoBox().readiness(core().api, conv.participantIds);
-      badge.textContent = status.ready
-        ? "🔐 E2EE actif"
-        : "🔓 E2EE en attente";
+      badge.innerHTML = status.ready
+        ? ic("lock") + "<span>Chiffré</span>"
+        : ic("unlock") + "<span>Activation du chiffrement</span>";
       badge.className = "suite-e2ee " + (status.ready ? "on" : "waiting");
       badge.title = status.ready
         ? "Les nouveaux messages et pièces jointes sont chiffrés de bout en bout."
         : "Certains participants doivent ouvrir l’application une fois pour enregistrer leur clé.";
     } catch {
-      badge.textContent = "🔓 E2EE indisponible";
+      badge.innerHTML = ic("unlock") + "<span>Chiffrement indisponible</span>";
       badge.className = "suite-e2ee off";
     }
   }
@@ -397,9 +399,9 @@
     }
     const pref = prefFor(conv.key);
     tools.innerHTML = `
-      <button type="button" id="suiteEncryptionBadge" class="suite-e2ee" data-suite-action="e2ee-info">🔐</button>
-      ${conv.type === "thread" ? '<button type="button" data-suite-action="group-audio" title="Appel de groupe">👥📞</button><button type="button" data-suite-action="group-video" title="Appel vidéo de groupe">👥📹</button>' : ""}
-      <button type="button" data-suite-action="chat-options" title="Options de la conversation">⋮</button>
+      <button type="button" id="suiteEncryptionBadge" class="suite-e2ee" data-suite-action="e2ee-info" aria-label="État du chiffrement">${ic("lock")}</button>
+      ${conv.type === "thread" ? '<button type="button" data-suite-action="group-audio" title="Appel de groupe" aria-label="Appel de groupe">' + ic("phone") + '</button><button type="button" data-suite-action="group-video" title="Appel vidéo de groupe" aria-label="Appel vidéo de groupe">' + ic("video") + '</button>' : ""}
+      <button type="button" data-suite-action="chat-options" title="Options de la conversation" aria-label="Options de la conversation">${ic("more")}</button>
     `;
     encryptionStatus(conv);
     header.classList.toggle("suite-muted-chat", !!(pref.mutedUntil && new Date(pref.mutedUntil) > new Date()));
@@ -508,7 +510,7 @@
     placeholder.dataset.ready = "1";
     placeholder.className = "suite-shared-card";
     placeholder.innerHTML = `
-      <span class="suite-shared-icon">📄</span>
+      <span class="suite-shared-icon">${ic("file")}</span>
       <span><b>${esc(kindLabel)}</b><small>${esc(item?.title || item?.name || ref.title || ref.id)}</small></span>
       <button type="button" data-suite-action="open-ref" data-suite-id="${esc(ref.kind + ":" + ref.id)}">Ouvrir</button>
     `;
@@ -540,11 +542,11 @@
         actions.insertAdjacentHTML(
           "beforeend",
           `
-          <button type="button" data-suite-action="react" data-suite-id="${esc(message.id)}">😊</button>
+          <button type="button" data-suite-action="react" data-suite-id="${esc(message.id)}" aria-label="Réagir" title="Réagir">${ic("smile")}</button>
           <button type="button" data-suite-action="favorite" data-suite-id="${esc(message.id)}">${favorites.has(String(message.id)) ? "★" : "☆"}</button>
           <button type="button" data-suite-action="forward" data-suite-id="${esc(message.id)}">↪ Transférer</button>
           ${editAllowed ? '<button type="button" data-suite-action="edit" data-suite-id="' + esc(message.id) + '">✎ Modifier</button>' : ""}
-          ${deleteAllAllowed ? '<button type="button" class="danger-text" data-suite-action="delete-all" data-suite-id="' + esc(message.id) + '">🗑 Pour tous</button>' : ""}
+          ${deleteAllAllowed ? '<button type="button" class="danger-text" data-suite-action="delete-all" data-suite-id="' + esc(message.id) + '">' + ic("trash") + 'Supprimer pour tous</button>' : ""}
         `,
         );
       }
@@ -819,10 +821,10 @@
     core().modal(
       "Options de la conversation",
       `<div class="suite-option-list">
-        <button type="button" data-suite-action="pref-pin">${p.pinned ? "Retirer l’épingle" : "📌 Épingler"}</button>
-        <button type="button" data-suite-action="pref-archive">${p.archived ? "Restaurer des archives" : "🗄 Archiver"}</button>
-        <button type="button" data-suite-action="pref-mute">${muted ? "🔔 Réactiver les notifications" : "🔕 Mettre en sourdine"}</button>
-        <button type="button" data-suite-action="download-files">📦 Télécharger toutes les pièces jointes</button>
+        <button type="button" data-suite-action="pref-pin">${ic("pin")}${p.pinned ? "Retirer l’épingle" : "Épingler"}</button>
+        <button type="button" data-suite-action="pref-archive">${ic("archive")}${p.archived ? "Restaurer des archives" : "Archiver"}</button>
+        <button type="button" data-suite-action="pref-mute">${muted ? ic("bell") + "Réactiver les notifications" : ic("bell-off") + "Mettre en sourdine"}</button>
+        <button type="button" data-suite-action="download-files">${ic("download")}Télécharger toutes les pièces jointes</button>
       </div>`,
     );
   }
@@ -856,12 +858,12 @@
           const incoming = String(c.calleeId) === String(me.id),
             otherId = incoming ? c.callerId : c.calleeId,
             otherName = incoming ? c.callerName : c.calleeName,
-            icon = c.callType === "video" ? "📹" : "📞";
+            icon = ic(c.callType === "video" ? "video" : "phone");
           return `<div class="suite-history-row"><span>${icon}</span><span><b>${esc(otherName)}</b><small>${incoming ? "Entrant" : "Sortant"} · ${esc(c.status)}${c.endedAt ? " · " + esc(callDuration(c.createdAt, c.endedAt)) : ""} · ${new Date(c.createdAt).toLocaleString("fr-CH")}</small></span><button type="button" data-suite-action="history-call" data-suite-id="${esc(otherId)}" data-suite-type="${esc(c.callType || "audio")}">Rappeler</button></div>`;
         }),
         ...(out.groups || []).map((c) => {
           const thread = state()?.messageThreads?.find((t) => String(t.id) === String(c.threadId));
-          return `<div class="suite-history-row"><span>${c.callType === "video" ? "👥📹" : "👥📞"}</span><span><b>${esc(thread?.name || "Appel de groupe")}</b><small>${esc(c.status)}${c.endedAt ? " · " + esc(callDuration(c.createdAt, c.endedAt)) : ""} · ${new Date(c.createdAt).toLocaleString("fr-CH")}</small></span></div>`;
+          return `<div class="suite-history-row"><span>${ic(c.callType === "video" ? "video" : "users")}</span><span><b>${esc(thread?.name || "Appel de groupe")}</b><small>${esc(c.status)}${c.endedAt ? " · " + esc(callDuration(c.createdAt, c.endedAt)) : ""} · ${new Date(c.createdAt).toLocaleString("fr-CH")}</small></span></div>`;
         }),
       ];
     core().modal(
@@ -1421,9 +1423,9 @@
         <header><div><h3 id="groupCallTitle">Appel de groupe</h3><p id="groupCallStatus">Connexion…</p></div></header>
         <div id="groupCallGrid" class="group-call-grid"></div>
         <div class="group-call-controls">
-          <button type="button" data-suite-action="group-mute" id="groupMute">🎙</button>
-          <button type="button" data-suite-action="group-camera" id="groupCamera">📹</button>
-          <button type="button" class="danger" data-suite-action="group-hangup">☎</button>
+          <button type="button" data-suite-action="group-mute" id="groupMute" aria-label="Couper le micro">${ic("mic")}</button>
+          <button type="button" data-suite-action="group-camera" id="groupCamera" aria-label="Couper la caméra">${ic("video")}</button>
+          <button type="button" class="danger" data-suite-action="group-hangup" aria-label="Raccrocher">${ic("hangup")}</button>
         </div>
       </section>`;
     document.body.appendChild(overlay);
@@ -1648,7 +1650,7 @@
     const thread = state()?.messageThreads?.find((t) => String(t.id) === String(room.threadId));
     banner.innerHTML =
       '<div><b>' +
-      (room.callType === "video" ? "📹 Appel vidéo entrant" : "📞 Appel de groupe entrant") +
+      (room.callType === "video" ? "Appel vidéo entrant" : "Appel de groupe entrant") +
       "</b><span>" +
       esc(thread?.name || "Conversation de groupe") +
       '</span></div><button type="button" data-suite-action="group-accept" data-suite-id="' +
@@ -1838,13 +1840,13 @@
           muted = tracks.every((track) => !track.enabled);
         tracks.forEach((track) => (track.enabled = muted));
         button.classList.toggle("muted", !muted);
-        button.textContent = muted ? "🎙" : "🔇";
+        button.innerHTML = ic(muted ? "mic" : "mic-off");
       } else if (action === "group-camera" && groupCall) {
         const tracks = groupCall.stream.getVideoTracks(),
           disabled = tracks.length && tracks.every((track) => !track.enabled);
         tracks.forEach((track) => (track.enabled = disabled));
         button.classList.toggle("muted", !disabled);
-        button.textContent = disabled ? "📹" : "🚫";
+        button.innerHTML = ic(disabled ? "video" : "video-off");
       } else if (action === "group-hangup") await stopGroupCall(true);
       else if (action === "group-accept") {
         const banner = $("groupCallInvite"),

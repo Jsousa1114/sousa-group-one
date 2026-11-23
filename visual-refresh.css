@@ -292,3 +292,132 @@ body[data-view="dashboard"] #content > .grid { order:-2; }
 @media (prefers-reduced-motion:reduce) {
   *,*::before,*::after { transition:none!important; animation:none!important; scroll-behavior:auto!important; }
 }
+
+/* Lisibilité : contraste des étiquettes et taille minimale de 12 px (revue du 22.11.2026). */
+.eyebrow, .pro-hero span { opacity:1; }
+.eyebrow, .topbar .eyebrow, .nav-group, .ops-eyebrow { font-size:.75rem; }
+td, .status, .notif b, .profile span,
+.chat-contact-top time, .chat-contact-bottom small, .suite-shared-card small,
+.account-tags span, .account-info span, .account-kpis span, .account-expiry, .account-session span,
+.account-switch small, .account-document span, .account-timeline small,
+.ops-search-results span, .ops-kpi span, .ops-kpi small, .ops-card-head p, .ops-insight small,
+.ops-severity, .ops-simple-list small, .ops-kanban-title span, .ops-task p, .ops-crm-card p,
+.ops-task-meta, .ops-task-actions .btn, .ops-priority, .ops-crm-card > small, .ops-workorder p,
+.ops-workorder small, .ops-signed, .ops-integration-grid small, .ops-notification-category,
+.ops-notification p { font-size:.75rem; }
+.ops-hero p, .account-secret code, .account-uri, .account-recovery-grid code { font-size:.8125rem; }
+.account-info b, .account-switch b, .account-timeline b, .ops-kanban-title h3 { font-size:.875rem; }
+@media (max-width:760px) { .topbar .eyebrow { font-size:.75rem; } }
+/* Badges d'état lisibles en thème clair (les couleurs d'origine sont pensées pour le thème sombre). */
+body.light .status.ok, body.light .status.success { color:#13623f; background:#e2f4ea; }
+body.light .status.warning { color:#7a4300; background:#fcefd6; }
+body.light .status.danger { color:#a3202d; background:#fde7e9; }
+body.light .status.info { color:#1d4c8c; background:#e6eefb; }
+body.light .ops-severity.high, body.light .ops-priority.high { color:#7a4f00; background:#fcefd6; }
+body.light .ops-severity.medium { color:#1a5f88; background:#e3f0f8; }
+/* Sélecteur d'espace de travail : texte coupé proprement avec des points de suspension. */
+.company-box select { text-overflow:ellipsis; white-space:nowrap; overflow:hidden; }
+/* Fiche chantier : ligne de résumé (client, statut, dates, avancement). */
+.project-summary { display:flex; flex-wrap:wrap; align-items:center; gap:6px 8px; margin:14px 0 4px; color:var(--muted); }
+/* Texte secondaire sur fond mis en évidence (jour courant du planning, discussion sélectionnée). */
+body.light .planning-today .planning-empty, body.light .chat-contact.active .chat-preview { color:#4b5869; }
+
+/* ===== Lot 2 de la revue (22.11.2026) ===== */
+/* Icônes au trait partagées (remplacent les emoji dans l'interface). */
+.ui-icon { width:1.2em; height:1.2em; flex:none; vertical-align:-.22em; }
+.icon .ui-icon { width:20px; height:20px; vertical-align:middle; }
+.account-icon { display:inline-grid; place-items:center; width:32px; height:32px; border-radius:9px; background:var(--panel2); color:var(--action); }
+.account-icon .ui-icon { width:18px; height:18px; }
+.chat-tool .ui-icon, .chat-send .ui-icon, .chat-call-button .ui-icon,
+.suite-chat-toolbar button .ui-icon, .suite-header-tools button .ui-icon { width:20px; height:20px; vertical-align:middle; }
+.chat-group-avatar .ui-icon { width:22px; height:22px; }
+.chat-search .ui-icon { width:18px; height:18px; color:var(--muted); }
+.chat-back .ui-icon { width:22px; height:22px; vertical-align:middle; }
+.chat-empty span .ui-icon { width:40px; height:40px; color:var(--muted); }
+.call-control .ui-icon { width:26px; height:26px; }
+.call-avatar .ui-icon { width:44px; height:44px; }
+.group-call-controls button .ui-icon { width:24px; height:24px; vertical-align:middle; }
+.chat-attachment-bar span .ui-icon, .suite-share-bar span .ui-icon { margin-right:6px; color:var(--muted); }
+.suite-shared-icon .ui-icon { width:22px; height:22px; }
+.suite-conversation-flags { display:inline-flex; gap:4px; color:var(--muted); }
+.suite-conversation-flags .ui-icon { width:14px; height:14px; }
+.suite-option-list button, .suite-message-actions button { display:inline-flex; align-items:center; gap:8px; }
+.ops-task-meta span { display:inline-flex; align-items:center; gap:4px; }
+.ops-task-meta .ui-icon { width:14px; height:14px; color:var(--muted); }
+
+/* Tableaux : plus de mots coupés ; montants, dates et numéros sur une ligne. */
+table.data-table td { overflow-wrap:break-word; word-break:normal; }
+table.data-table td.cell-nowrap { white-space:nowrap; font-variant-numeric:tabular-nums; }
+table.data-table td.cell-actions { white-space:nowrap; }
+table.data-table td.cell-actions .btn { margin-block:2px; }
+table.data-table td.cell-actions > .muted { white-space:normal; margin:4px 0; }
+
+/* Menu « ⋯ » des lignes de tableau : s'ouvre dans la cellule. */
+.row-more { display:inline-block; vertical-align:middle; margin-left:6px; }
+.row-more > summary { list-style:none; display:inline-grid; place-items:center; width:36px; height:36px; border:1px solid var(--border); border-radius:8px; background:var(--panel); color:var(--text); cursor:pointer; }
+.row-more > summary::-webkit-details-marker { display:none; }
+.row-more > summary:hover, .row-more[open] > summary { background:var(--panel2); }
+.row-more-menu { position:fixed; z-index:60; display:grid; gap:6px; min-width:200px; padding:8px; background:var(--panel); border:1px solid var(--border); border-radius:12px; box-shadow:0 14px 34px #0000002e; }
+.row-more-menu .btn { width:100%; justify-content:flex-start; margin:0; }
+
+/* Menu « Plus » des en-têtes de page sur téléphone. */
+.head-more { position:relative; }
+.head-more > summary { list-style:none; display:inline-flex; align-items:center; gap:6px; cursor:pointer; }
+.head-more > summary::-webkit-details-marker { display:none; }
+.head-more-menu { position:absolute; right:0; top:calc(100% + 6px); z-index:30; display:grid; gap:6px; min-width:230px; padding:8px; background:var(--panel); border:1px solid var(--border); border-radius:12px; box-shadow:0 14px 34px #0000002e; }
+.head-more-menu .btn { width:100%; justify-content:flex-start; margin:0; }
+
+@media (max-width:760px) {
+  /* En-têtes de page : bouton principal + « Plus » côte à côte. */
+  .section-head { flex-wrap:wrap; gap:10px; }
+  .section-head > .actions { display:flex; flex-wrap:nowrap; gap:8px; width:100%; }
+  .section-head > .actions > .btn, .section-head > .actions > .head-more { flex:1 1 0; }
+  .section-head > .actions > .head-more > summary { width:100%; justify-content:center; }
+  /* Chiffres clés : deux colonnes au lieu d'une pile de grandes cartes. */
+  .grid.g3.section { grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+  .grid.g3.section .kpi { padding:14px; }
+  .grid.g3.section .kpi-value { font-size:1.45rem; }
+  .grid.g3.section .kpi:last-child:nth-child(odd) { grid-column:1 / -1; }
+
+  /* Tableaux en fiches : une fiche par ligne, l'intitulé de colonne à gauche. */
+  .table:has(> table.data-table) { overflow:visible; border:0; }
+  table.data-table { min-width:0; }
+  table.data-table, table.data-table tbody, table.data-table tr, table.data-table td { display:block; width:100%; }
+  table.data-table thead { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
+  table.data-table tr { padding:14px 4px; border-bottom:1px solid var(--border); }
+  table.data-table tr:last-child { border-bottom:0; }
+  table.data-table tbody tr:hover td { background:transparent; }
+  table.data-table td { display:grid; grid-template-columns:minmax(92px,36%) minmax(0,1fr); gap:10px; align-items:baseline; padding:4px 0; border:0; }
+  table.data-table td::before { content:attr(data-label); color:var(--muted); font-size:.75rem; font-weight:600; letter-spacing:.02em; }
+  table.data-table td:not([data-label])::before { content:none; }
+  table.data-table td:not([data-label]) { grid-template-columns:minmax(0,1fr); }
+  table.data-table td:first-child { grid-template-columns:minmax(0,1fr); font-weight:650; font-size:.95rem; padding-bottom:6px; }
+  table.data-table td:first-child::before { content:none; }
+  table.data-table td:empty { display:none; }
+  table.data-table td.cell-actions { display:flex; flex-wrap:wrap; align-items:flex-start; gap:8px; padding-top:10px; white-space:normal; }
+  table.data-table td.cell-actions::before { content:none; }
+  table.data-table td.cell-actions > .muted { flex-basis:100%; order:-1; margin:0; }
+  table.data-table td.cell-actions .row-more { margin-left:0; }
+}
+
+/* Messagerie : en-tête de la liste sur deux lignes, sans icône coupée. */
+.chat-sidebar-head { flex-wrap:wrap; gap:10px 8px; }
+.chat-sidebar-head > div:first-child { flex:1 1 auto; min-width:0; }
+.chat-new-menu { position:relative; flex:none; }
+.chat-new-trigger { list-style:none; display:inline-flex; align-items:center; gap:6px; min-height:36px; padding:6px 12px; border:1px solid var(--border); border-radius:8px; background:var(--panel); color:var(--text); font-size:.875rem; font-weight:600; cursor:pointer; }
+.chat-new-trigger::-webkit-details-marker { display:none; }
+.chat-new-trigger:hover, .chat-new-menu[open] .chat-new-trigger { background:var(--panel2); }
+.chat-new-options { position:absolute; right:0; top:calc(100% + 6px); z-index:30; display:grid; min-width:210px; padding:6px; background:var(--panel); border:1px solid var(--border); border-radius:10px; box-shadow:0 14px 34px #0000002e; }
+.chat-new-options button { display:flex; align-items:center; gap:10px; padding:10px 12px; border:0; border-radius:6px; background:transparent; color:var(--text); font:inherit; font-size:.875rem; text-align:left; cursor:pointer; }
+.chat-new-options button:hover { background:var(--panel2); }
+.chat-sidebar-head .suite-chat-toolbar { flex-basis:100%; margin-left:0; gap:6px; }
+.suite-chat-toolbar button { display:inline-grid; place-items:center; width:36px; height:36px; border:1px solid var(--border) !important; border-radius:8px; color:var(--text); }
+.suite-header-tools button { display:inline-grid; place-items:center; min-width:36px; min-height:36px; }
+/* Badge de chiffrement lisible, avec icône et texte clair. */
+.suite-e2ee { display:inline-flex !important; align-items:center; gap:6px; padding:0 10px !important; font-size:.75rem !important; font-weight:600; border:1px solid var(--border) !important; border-radius:999px !important; }
+.suite-e2ee .ui-icon { width:15px; height:15px; }
+body.light .suite-e2ee.on { color:#13623f !important; background:#e2f4ea; border-color:#bfe3cf !important; }
+body.light .suite-e2ee.waiting { color:#7a4300 !important; background:#fcefd6; border-color:#f1d9a8 !important; }
+@media (max-width:600px) { .suite-e2ee span { display:none; } .suite-e2ee { padding:0 8px !important; } }
+.account-session span.status { display:inline-flex; width:fit-content; }
+.row-more-menu .btn, .head-more-menu .btn { text-align:left; }

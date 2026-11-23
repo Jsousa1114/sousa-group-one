@@ -50,7 +50,7 @@
   function tabs() {
     const items = [
       ["overview", "Vue d’ensemble"],
-      ["p1", "P1 complet"],
+      ["p1", "Suivi opérationnel"],
       ["tasks", "Tâches / Kanban"],
       ...(commercial() ? [["crm", "CRM"]] : []),
       ...(operational() ? [["stock", "Stock"], ["workorders", "Bons de travail"]] : []),
@@ -61,8 +61,8 @@
       ...(profile()?.role === "admin" || profile()?.role === "direction"
         ? [["automations", "Automatisations"], ["integrations", "Intégrations"]]
         : []),
-      ["p2", "P2 · Avancé"],
-      ["p3", "P3 · Intelligence"],
+      ["p2", "Outils avancés"],
+      ["p3", "Assistant intelligent"],
       ["notifications", "Notifications"],
     ];
     if (!items.some(([id]) => id === activeTab)) activeTab = "overview";
@@ -236,7 +236,7 @@
                       <div class="ops-task-top"><span class="ops-priority ${esc(t.priority)}">${esc(statusLabel(t.priority))}</span><small>${esc(t.project_id)}</small></div>
                       <h4>${esc(t.title)}</h4>
                       ${t.description ? `<p>${esc(t.description)}</p>` : ""}
-                      <div class="ops-task-meta"><span>📅 ${date(t.due_date)}</span><span>👤 ${esc(t.assigned_employee_id || "—")}</span></div>
+                      <div class="ops-task-meta"><span title="Échéance">${window.SGOIcon?.("calendar") || ""}${date(t.due_date)}</span><span title="Assigné à">${window.SGOIcon?.("user") || ""}${esc((state().employees || []).find((e) => String(e.id) === String(t.assigned_employee_id))?.name || t.assigned_employee_id || "—")}</span></div>
                       <div class="ops-task-actions">
                         ${["todo", "in_progress", "blocked", "done"]
                           .filter((x) => x !== status)
@@ -574,7 +574,7 @@
         if (window.SGOP1Suite?.render) await window.SGOP1Suite.render(host);
         else
           host.innerHTML =
-            '<article class="card empty">Module P1 indisponible.</article>';
+            '<article class="card empty">Module de suivi opérationnel indisponible.</article>';
       }
       else if (activeTab === "tasks") await renderTasks();
       else if (activeTab === "crm") await renderCrm();
@@ -586,11 +586,11 @@
       else if (activeTab === "automations") await renderAutomations();
       else if (activeTab === "integrations") await renderIntegrations();
       else if (activeTab === "p2") {
-        if (!window.SGOP2Center) throw new Error("Module P2 indisponible.");
+        if (!window.SGOP2Center) throw new Error("Module des outils avancés indisponible.");
         await window.SGOP2Center.render(root().querySelector("#opsBody"));
       }
       else if (activeTab === "p3") {
-        if (!window.SGOP3Center) throw new Error("Module P3 indisponible.");
+        if (!window.SGOP3Center) throw new Error("Module de l’assistant indisponible.");
         await window.SGOP3Center.render(root().querySelector("#opsBody"));
       }
       else if (activeTab === "notifications") await renderNotifications();

@@ -4,3 +4,14 @@ node_modules/
 !.env.example
 coverage/
 *.log
+
+# Local database exports, temporary backups, and private deployment files
+*.dump
+*.dump.gz
+*.sql
+*.sql.gz
+backups/
+**/backups/
+
+# Captures produites par les tests navigateur
+p2-browser-results/

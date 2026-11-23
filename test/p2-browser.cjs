@@ -83,7 +83,7 @@ async function noOverflow(page,label){
     admin.on("pageerror",e=>errors.push(e.message));
     await login(admin,"p2-admin@test.invalid");
     await openAdvanced(admin,false);
-    assert.match(await admin.locator(".p2-center").innerText(),/Socle P2 interne|Mobilité/);
+    assert.match(await admin.locator(".p2-center").innerText(),/Fonctions avancées actives|Mobilité/);
     await admin.locator('[data-p2-tab="finance"]').click();
     await admin.locator(".p2-chart").waitFor();
     assert.match(await admin.locator("#p2Body").innerText(),/Prévision de trésorerie/);

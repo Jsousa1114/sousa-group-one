@@ -1,0 +1,59 @@
+services:
+  db:
+    image: postgres:16-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-sousa_group_one}
+      POSTGRES_USER: ${POSTGRES_USER:-sgo}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      - sgo_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sgo} -d ${POSTGRES_DB:-sousa_group_one}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - sgo
+
+  app:
+    build:
+      context: ../..
+      dockerfile: deploy/local/Dockerfile
+    image: sousa-group-one:local
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-sgo}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-sousa_group_one}
+      PGSSL: disable
+      PORT: 3000
+      DB_PERSISTENCE_CONFIRMED: "true"
+      BACKUP_DIR: /app/backups
+    ports:
+      - "${APP_BIND:-0.0.0.0}:${APP_PORT:-3000}:3000"
+    volumes:
+      - ./backups:/app/backups
+    networks:
+      - sgo
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    profiles: ["tunnel"]
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+    networks:
+      - sgo
+
+volumes:
+  sgo_postgres:
+
+networks:
+  sgo:
+    driver: bridge

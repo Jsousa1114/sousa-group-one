@@ -570,7 +570,27 @@ function routes(db) {
     const prefs = (await db.query("SELECT data FROM p1_dashboard_preferences WHERE user_id=$1",[req.user.id])).rows[0]?.data || {};
     const outstanding = ctx.view.invoices.reduce((n,x)=>n+Math.max(0,Number(x.amount||0)-Number(x.paid||0)),0);
     const todayDate = today();
-    const myPlanning = req.user.employee_id ? ctx.view.planning.filter((x)=>D.same(x.employeeId,req.user.employee_id)&&x.date>=todayDate).sort((a,b)=>(a.date+a.start).localeCompare(b.date+b.start)).slice(0,5) : [];
+    const upcoming = (rows) => rows
+      .filter((x)=>String(x.date||"")>=todayDate)
+      .sort((a,b)=>(String(a.date||"")+String(a.start||"")).localeCompare(String(b.date||"")+String(b.start||"")))
+      .slice(0,5);
+    let myPlanning;
+    if (req.user.role === "client") {
+      // Clients see upcoming work on their own projects, without internal staffing details.
+      const visibleProjects = new Set(ctx.view.projects.map((p)=>String(p.id)));
+      myPlanning = upcoming(ctx.data.planning.filter((x)=>visibleProjects.has(String(x.project))))
+        .map(({ id, project, date, start, end }) => ({ id, project, date, start, end }));
+    } else if (req.user.role === "employee") {
+      myPlanning = req.user.employee_id
+        ? upcoming(ctx.view.planning.filter((x)=>D.same(x.employeeId,req.user.employee_id)))
+        : [];
+    } else {
+      // Managers see the team planning already scoped to their companies by viewState.
+      myPlanning = upcoming(ctx.view.planning).map((x) => ({
+        ...x,
+        employeeName: ctx.view.employees.find((e)=>D.same(e.id,x.employeeId))?.name || "",
+      }));
+    }
     const unread = Number((await db.query("SELECT COUNT(*)::int n FROM user_notifications WHERE user_id=$1 AND read_at IS NULL",[req.user.id])).rows[0]?.n||0);
     let clientActions = { changeOrders: [], workOrders: [] };
     if (req.user.role === "client" && req.user.client_id) {

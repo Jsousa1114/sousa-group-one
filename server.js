@@ -1,7 +1,8 @@
 "use strict";
 const path = require("node:path"),
   { randomUUID } = require("node:crypto"),
-  express = require("express");
+  express = require("express"),
+  compression = require("compression");
 const { pool, migrate } = require("./db");
 const { readiness } = require("./production-readiness");
 function createApp(db = pool) {
@@ -52,6 +53,13 @@ function createApp(db = pool) {
     if (req.path.startsWith("/api")) res.set("Cache-Control", "no-store");
     next();
   });
+  app.use(
+    compression({
+      filter: (req, res) =>
+        !String(res.getHeader("Content-Type") || "").includes("text/event-stream") &&
+        compression.filter(req, res),
+    }),
+  );
   app.use(express.json({ limit: "8mb" }));
   app.get("/healthz", async (req, res) => {
     try {

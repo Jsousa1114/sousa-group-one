@@ -233,7 +233,7 @@
 
   async function render(container) {
     if (!container) return;
-    container.innerHTML = '<article class="card"><p>Chargement du P3…</p></article>';
+    container.innerHTML = '<article class="card"><p>Chargement de l’assistant…</p></article>';
     try {
       const [status, workload, anomalyPayload] = await Promise.all([
         api("status"),
@@ -247,7 +247,7 @@
       container.innerHTML = `
         <section class="ops-summary">
           <div class="ops-card-head">
-            <div><span class="ops-eyebrow">P3</span><h2>Intelligence & automatisation avancée</h2><p>Assistant, devis, OCR, voix, anomalies, charge équipe et planification assistée.</p></div>
+            <div><span class="ops-eyebrow">Assistant intelligent</span><h2>Intelligence & automatisation avancée</h2><p>Assistant, devis, lecture de documents, dictée vocale, détection d’anomalies, charge de l’équipe et planification assistée.</p></div>
             <div>${badge(status.providerConfigured ? "IA configurée" : "IA externe non configurée", status.providerConfigured)} ${badge(status.transcriptionConfigured ? "Transcription serveur" : "Dictée navigateur", true)}</div>
           </div>
         </section>
@@ -515,7 +515,7 @@
         );
       }
     } catch (error) {
-      core().toast(error.message || "Action P3 impossible.");
+      core().toast(error.message || "Action impossible.");
     }
   });
 
