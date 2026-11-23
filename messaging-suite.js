@@ -152,6 +152,13 @@
     if (!config.available || !config.publicKey)
       throw new Error("Les notifications push ne sont pas encore configurées sur le serveur.");
     let sub = await reg.pushManager.getSubscription();
+    // A subscription made with older server keys can never receive notifications again: renew it.
+    const serverKey = vapidArray(config.publicKey),
+      currentKey = sub?.options?.applicationServerKey ? new Uint8Array(sub.options.applicationServerKey) : null;
+    if (sub && currentKey && (currentKey.length !== serverKey.length || currentKey.some((v, i) => v !== serverKey[i]))) {
+      await sub.unsubscribe().catch(() => {});
+      sub = null;
+    }
     if (!sub)
       sub = await reg.pushManager.subscribe({
         userVisibleOnly: true,
