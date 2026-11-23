@@ -454,7 +454,7 @@
       const signatures = workToSign.length
         ? `<article class="card"><h3>Bons de travail à signer</h3><div class="p1-list">${workToSign.map(x=>`<div><span><b>${esc(x.title)}</b><small>${esc(x.description||"")} · ${date(x.scheduled_at)}</small></span>${btn("Signer","client-work-sign",`data-id="${esc(x.id)}"`,"primary")}</div>`).join("")}</div></article>`
         : "";
-      content.insertAdjacentHTML("afterbegin",`<section class="p1-dashboard-extra ${prefs.compact?"compact":""}"><div class="p1-dashboard-head"><span>Mon tableau de bord</span>${btn("Personnaliser","dashboard-settings")}</div><div class="p1-dashboard-grid"><article class="card"><h3>Notifications</h3><b class="p1-big">${esc(out.kpis?.unread||0)}</b><small>non lues</small></article>${planning}${changeOrders}${signatures}</div></section>`);
+      content.insertAdjacentHTML("afterbegin",`<section class="p1-dashboard-extra ${prefs.compact?"compact":""}"><div class="p1-dashboard-head"><span>Mon tableau de bord</span>${btn("Personnaliser","dashboard-settings")}</div><div class="p1-dashboard-grid"><article class="card"><h3>Notifications</h3><b class="p1-big">${esc(out.kpis?.unread||0)}</b><small>${Number(out.kpis?.unread||0)>1?"non lues":"non lue"}</small></article>${planning}${changeOrders}${signatures}</div></section>`);
     }catch{}
   }
 

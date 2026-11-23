@@ -432,7 +432,29 @@
     try {
       const out = await loadDashboard();
       const a = out.actions || {};
-      content.insertAdjacentHTML("afterbegin", `<section class="pro-action-dashboard card"><div class="pro-card-head"><div><p class="eyebrow">CENTRE D'ACTIONS</p><h3>À traiter maintenant</h3></div>${button("Ouvrir le centre", "open-center", "", "primary")}</div><div class="pro-mini-kpis"><span><b>${esc(a.workingNow || 0)}</b> au travail</span><span class="${a.overdueProjects ? "attention" : ""}"><b>${esc(a.overdueProjects || 0)}</b> chantiers en retard</span><span class="${a.pendingTime ? "attention" : ""}"><b>${esc(a.pendingTime || 0)}</b> heures à valider</span><span class="${a.overdueInvoices ? "attention" : ""}"><b>${esc(a.overdueInvoices || 0)}</b> factures échues</span><span><b>${esc(a.unreadNotifications || 0)}</b> notifications</span></div></section>`);
+      const role = profile()?.role;
+      // Singular for 0 and 1, plural above, as in French; highlighted when something needs attention.
+      const count = (value, one, many, alert = false) => {
+        const n = Number(value || 0);
+        return `<span class="${alert && n ? "attention" : ""}"><b>${esc(n)}</b> ${n > 1 ? many : one}</span>`;
+      };
+      const items = role === "client"
+        ? [
+            count(a.unpaidInvoices, "facture à payer", "factures à payer", true),
+            count(a.overdueInvoices, "facture échue", "factures échues", true),
+            count(a.unreadNotifications, "notification non lue", "notifications non lues"),
+          ]
+        : [
+            `<span><b>${esc(a.workingNow || 0)}</b> au travail</span>`,
+            count(a.overdueProjects, "chantier en retard", "chantiers en retard", true),
+            count(a.pendingTime, "saisie d’heures à valider", "saisies d’heures à valider", true),
+            ...(role === "employee" ? [] : [count(a.overdueInvoices, "facture échue", "factures échues", true)]),
+            count(a.unreadNotifications, "notification", "notifications"),
+          ];
+      const primary = role === "client"
+        ? button("Voir mes factures", "goto-invoices", "", "primary")
+        : button("Ouvrir le centre", "open-center", "", "primary");
+      content.insertAdjacentHTML("afterbegin", `<section class="pro-action-dashboard card"><div class="pro-card-head"><div><p class="eyebrow">CENTRE D'ACTIONS</p><h3>À traiter maintenant</h3></div>${primary}</div><div class="pro-mini-kpis">${items.join("")}</div></section>`);
     } catch {}
   }
 
@@ -468,6 +490,7 @@
       else if (action === "open-activity") { activeTab = "activity"; core().setPage("pro"); }
       else if (action === "tab-activity") { activeTab = "activity"; await renderCurrent(); }
       else if (action === "goto-time") core().setPage("time");
+      else if (action === "goto-invoices") core().setPage("invoices");
       else if (action === "goto-projects") { activeTab = "projects"; if (core().getPage() === "pro") await renderCurrent(); else core().setPage("pro"); }
       else if (action === "goto-absences") core().setPage("absences");
       else if (action === "goto-planning") core().setPage("planning");

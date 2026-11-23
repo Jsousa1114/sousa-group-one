@@ -840,7 +840,8 @@ function timeView() {
   );
 }
 let planningDate = today(),
-  planningMode = "week",
+  // "" = automatic: list on phones, weekly grid elsewhere, until the user picks a view.
+  planningMode = "",
   planningEmployee = "";
 function manualTimeForm() {
   formShell(
@@ -929,7 +930,12 @@ function planningView() {
         return sum + (minutes(p.end) - minutes(p.start)) / 60;
       }, 0)
       .toLocaleString("fr-CH", { maximumFractionDigits: 2 });
-  const controls = `<div class="planning-controls">${btn("‹ Semaine précédente", "planning-nav", "-7")}${btn("Aujourd’hui", "planning-nav", "today")}${btn("Semaine suivante ›", "planning-nav", "7")}<label>Date<input id="planningDate" type="date" value="${planningDate}"></label><label>Salarié<select id="planningEmployee"><option value="">Toute l’équipe</option>${staff.map((e) => `<option value="${esc(e.id)}" ${same(e.id, planningEmployee) ? "selected" : ""}>${esc(e.name)}</option>`).join("")}</select></label>${btn("Semaine par salarié", "planning-mode", "week", planningMode === "week" ? "primary" : "")}${btn("Liste de la semaine", "planning-mode", "list", planningMode === "list" ? "primary" : "")}</div><p class="muted">Du ${date(days[0])} au ${date(days[6])} · ${selected.length} salarié(s) · ${hours(entries)} h planifiées, pauses non déduites.</p>`;
+  const mode = planningMode || (compactLayout.matches ? "list" : "week");
+  const navButton = (id, label, html) =>
+    `<button type="button" class="btn secondary planning-nav-btn" data-action="planning-nav" data-id="${id}" aria-label="${label}" title="${label}">${html}</button>`;
+  const modeButton = (id, label) =>
+    `<button type="button" class="btn ${mode === id ? "primary" : "secondary"}" data-action="planning-mode" data-id="${id}" aria-pressed="${mode === id}">${label}</button>`;
+  const controls = `<div class="planning-controls"><div class="planning-nav">${navButton("-7", "Semaine précédente", '‹<span class="planning-nav-label"> Semaine précédente</span>')}${btn("Aujourd’hui", "planning-nav", "today")}${navButton("7", "Semaine suivante", '<span class="planning-nav-label">Semaine suivante </span>›')}</div><label>Date<input id="planningDate" type="date" value="${planningDate}"></label><label>Salarié<select id="planningEmployee"><option value="">Toute l’équipe</option>${staff.map((e) => `<option value="${esc(e.id)}" ${same(e.id, planningEmployee) ? "selected" : ""}>${esc(e.name)}</option>`).join("")}</select></label><div class="planning-mode" role="group" aria-label="Affichage du planning">${modeButton("week", "Par salarié")}${modeButton("list", "Liste")}</div></div><p class="muted">Du ${date(days[0])} au ${date(days[6])} · ${selected.length} ${selected.length > 1 ? "salariés" : "salarié"} · ${hours(entries)} h planifiées, pauses non déduites.</p>`;
   const calendar = `<div class="planning-scroll" role="region" aria-label="Calendrier hebdomadaire par salarié" tabindex="0"><table class="planning-calendar"><caption>Planning du ${date(days[0])} au ${date(days[6])}</caption><thead><tr><th scope="col">Salarié / heures</th>${days.map((d, i) => `<th scope="col" class="${d === today() ? "planning-today" : ""}">${["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"][i]} ${date(d)}</th>`).join("")}</tr></thead><tbody>${selected
     .map(
       (e) =>
@@ -945,7 +951,7 @@ function planningView() {
                 a.from <= d &&
                 a.to >= d,
             );
-            return `<td class="${d === today() ? "planning-today" : ""}">${absent ? '<div class="planning-absence">Absent · validé</div>' : ""}${shifts.map((p) => `<button class="planning-shift" data-action="planning-detail" data-id="${esc(p.id)}"><b>${esc(p.start)}–${esc(p.end)}</b><span>${esc(name("projects", p.project))}</span>${p.location ? `<small>${esc(p.location)}</small>` : ""}</button>`).join("")}${!shifts.length && !absent ? '<span class="planning-empty">Sans affectation</span>' : ""}${can(ops) && !absent ? `<button class="planning-add" data-action="planning-slot" data-employee="${esc(e.id)}" data-date="${d}" aria-label="Planifier ${esc(e.name)} le ${date(d)}">+ Planifier</button>` : ""}</td>`;
+            return `<td class="${d === today() ? "planning-today" : ""}">${absent ? '<div class="planning-absence">Absent · validé</div>' : ""}${shifts.map((p) => `<button class="planning-shift" data-action="planning-detail" data-id="${esc(p.id)}"><b>${esc(p.start)}–${esc(p.end)}</b><span>${esc(name("projects", p.project))}</span>${p.location ? `<small>${esc(p.location)}</small>` : ""}</button>`).join("")}${!shifts.length && !absent ? '<span class="sr-only">Sans affectation</span>' : ""}${can(ops) && !absent ? `<button class="planning-add${shifts.length ? "" : " planning-add-empty"}" data-action="planning-slot" data-employee="${esc(e.id)}" data-date="${d}" aria-label="Planifier ${esc(e.name)} le ${date(d)}" title="Planifier">${uiIcon("plus")}</button>` : ""}</td>`;
           })
           .join("")}</tr>`,
     )
@@ -958,9 +964,11 @@ function planningView() {
     ) +
     controls +
     (selected.length
-      ? planningMode === "week"
+      ? mode === "week"
         ? calendar
-        : table(
+        : !entries.length
+          ? '<article class="card empty">' + uiIcon("calendar") + '<strong>Aucune intervention planifiée cette semaine.</strong><span>Changez de semaine ou ajoutez une affectation avec « Planifier ».</span></article>'
+          : table(
             ["Date", "Début", "Fin", "Salarié", "Chantier", "Lieu", ""],
             entries.map((p) => [
               date(p.date),
@@ -973,7 +981,7 @@ function planningView() {
             ]),
           )
       : '<p class="empty">Aucun salarié dans cette vue.</p>') +
-    '<p class="muted">Une ligne par salarié. Cliquez sur un créneau pour ses détails ou sur + Planifier pour ajouter une affectation. Sur téléphone, faites défiler le calendrier horizontalement ou utilisez la liste. Les absences validées et les chevauchements sont bloqués à l’enregistrement.</p>'
+    '<p class="muted">Vue « Par salarié » : une ligne par salarié ; cliquez sur un créneau pour voir ses détails, ou sur + pour ajouter une affectation. Sur téléphone, la liste s’affiche par défaut. Les absences validées et les chevauchements sont bloqués à l’enregistrement.</p>'
   );
 }
 function absenceView() {
