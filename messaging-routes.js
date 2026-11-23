@@ -988,8 +988,26 @@ async function notifyUsers(db, userIds, payload) {
       );
       sent++;
     } catch (e) {
-      if (e.statusCode === 404 || e.statusCode === 410)
+      // 404/410: the device unsubscribed. "Do not correspond" (Google) / VapidPkHashMismatch (Apple):
+      // the subscription was made with older server keys and can never be used again.
+      // Other 403s (e.g. a bad VAPID subject) are configuration problems: keep the subscriptions.
+      const staleKeys = e.statusCode === 403 && /do not correspond|VapidPkHashMismatch/i.test(String(e.body || ""));
+      if (e.statusCode === 404 || e.statusCode === 410 || staleKeys)
         await db.query("DELETE FROM push_subscriptions WHERE id=$1", [row.id]);
+      else
+        // Keep a trace instead of failing silently. status 0 keeps push failures out of the
+        // HTTP error-rate used by /readyz; the push service status is kept in metadata.
+        await db
+          .query(
+            `INSERT INTO application_errors(method,path,status,message,metadata)
+             VALUES('PUSH',$1,0,$2,$3)`,
+            [
+              (() => { try { return new URL(row.endpoint).host; } catch { return "push"; } })(),
+              String(e.body || e.message || "Échec d'envoi de la notification").slice(0, 1000),
+              JSON.stringify({ pushStatus: e.statusCode || null, userId: row.user_id }),
+            ],
+          )
+          .catch(() => {});
     }
   }
   return { sent, stored };
