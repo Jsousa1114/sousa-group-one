@@ -430,6 +430,14 @@ function selectChat(key) {
     selectedThreadId = "";
   }
 }
+function markVoiceButtons(recording) {
+  for (const button of document.querySelectorAll('[data-action="chat-voice"]')) {
+    button.classList.toggle("recording", recording);
+    button.innerHTML = uiIcon(recording ? "stop" : "mic");
+    button.setAttribute("aria-label", recording ? "Arrêter l’enregistrement" : "Enregistrer un message vocal");
+    button.title = recording ? "Arrêter l’enregistrement" : "Message vocal";
+  }
+}
 function cancelChatRecording() {
   chatMediaGeneration++;
   if (!chatRecorder) return;
@@ -1104,7 +1112,9 @@ function financeView(k) {
               r.status !== "Payée" &&
               r.due < today()
               ? "En retard"
-              : r.status,
+              : quote && r.status === "Émise" && r.valid && r.valid < today()
+                ? "Expiré"
+                : r.status,
           ),
           btn("Ouvrir", quote ? "quote" : "invoice", r.id) +
             (r.archivedAt ? " · Archivé" : "") +
@@ -1116,12 +1126,17 @@ function financeView(k) {
                       r.archivedAt ? "Restaurer" : "Archiver",
                       "finance-archive",
                       k + ":" + r.id,
-                    ))
+                    ) +
+                    (quoteDeletable(k, r)
+                      ? " " + btn("Supprimer", "finance-delete", k + ":" + r.id, "danger")
+                      : ""))
               : ""),
         ]),
     )
   );
 }
+// Issued, expired or refused quotes can be deleted; accepted ones are linked to a project.
+const quoteDeletable = (k, r) => k === "quotes" && !["Brouillon", "Accepté"].includes(r.status);
 function documentsView() {
   return (
     heading(
@@ -1892,7 +1907,11 @@ function messagesView() {
       <form id="messageForm" class="chat-composer" data-conversation="${esc(active.key)}">
         <input id="chatFile" type="file" hidden accept="image/jpeg,image/png,image/webp,image/gif,video/*,application/pdf,text/plain,audio/*">
         <button type="button" class="chat-tool" data-action="chat-file" aria-label="Ajouter une photo ou un fichier" title="Pièce jointe">${uiIcon("paperclip")}</button>
-        <button type="button" class="chat-tool" data-action="chat-voice" aria-label="Enregistrer un message vocal" title="Message vocal">${uiIcon("mic")}</button>
+        ${(() => {
+          // A screen refresh during a recording keeps the button in its "stop" state.
+          const recording = chatRecorder?.state === "recording";
+          return `<button type="button" class="chat-tool${recording ? " recording" : ""}" data-action="chat-voice" aria-label="${recording ? "Arrêter l’enregistrement" : "Enregistrer un message vocal"}" title="${recording ? "Arrêter l’enregistrement" : "Message vocal"}">${uiIcon(recording ? "stop" : "mic")}</button>`;
+        })()}
         <div class="chat-compose-field"><textarea id="messageText" name="text" rows="1" maxlength="5000" placeholder="Écrire un message" aria-label="Écrire un message"></textarea><p id="formError" class="error" role="alert"></p></div>
         <button type="submit" class="chat-send" aria-label="Envoyer le message" title="Envoyer">${uiIcon("send")}</button>
       </form>
@@ -2635,7 +2654,7 @@ function documentModal(k, id) {
           )}<p>Les pièces originales et le suivi restent consultables depuis le chantier. Les heures et dépenses ne sont pas ajoutées automatiquement au prix du devis.</p>`
         : "") +
       (can(fin)
-        ? `<div class="actions spaced">${k === "quotes" && r.status === "Accepté" ? btn(r.project ? "Ouvrir le chantier" : "Créer le chantier", "quote-project", id, "primary") : ""} ${r.status === "Brouillon" ? btn("Supprimer le brouillon", "finance-delete", k + ":" + id, "danger") : btn(r.archivedAt ? "Restaurer" : "Archiver", "finance-archive", k + ":" + id)}</div>`
+        ? `<div class="actions spaced">${k === "quotes" && r.status === "Accepté" ? btn(r.project ? "Ouvrir le chantier" : "Créer le chantier", "quote-project", id, "primary") : ""} ${r.status === "Brouillon" ? btn("Supprimer le brouillon", "finance-delete", k + ":" + id, "danger") : btn(r.archivedAt ? "Restaurer" : "Archiver", "finance-archive", k + ":" + id) + (quoteDeletable(k, r) ? " " + btn("Supprimer le devis", "finance-delete", k + ":" + id, "danger") : "")}</div>`
         : ""),
   );
 }
@@ -3251,8 +3270,7 @@ document.addEventListener("click", async (e) => {
         );
       if (chatRecorder?.state === "recording") {
         chatRecorder.stop();
-        b.innerHTML = uiIcon("mic");
-        b.classList.remove("recording");
+        markVoiceButtons(false);
       } else {
         if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder)
           throw new Error(
@@ -3344,8 +3362,8 @@ document.addEventListener("click", async (e) => {
             render();
           };
           recorder.start(250);
-          b.innerHTML = uiIcon("stop");
-          b.classList.add("recording");
+          // The screen may have been redrawn while the microphone was being opened.
+          markVoiceButtons(true);
         } catch (e) {
           stream?.getTracks().forEach((track) => track.stop());
           chatRecorder = null;
@@ -3406,7 +3424,9 @@ document.addEventListener("click", async (e) => {
       if (
         confirm(
           a === "finance-delete"
-            ? `Supprimer le brouillon ${rid} ?`
+            ? r.status === "Brouillon"
+              ? `Supprimer le brouillon ${rid} ?`
+              : `Supprimer définitivement le devis ${rid} ? Il disparaîtra des listes et le client ne pourra plus le consulter ni l’accepter.`
             : r.archivedAt
               ? `Restaurer ${rid} ?`
               : `Archiver ${rid} ? Les montants, paiements et l’historique restent conservés.`,
@@ -3539,10 +3559,12 @@ document.addEventListener("click", async (e) => {
         "Convertir en facture",
       );
     } else if (a === "quote-decision") {
+      const q = find("quotes", id);
+      const expired = q?.valid && q.valid < today();
       formShell(
         [["note", "Référence de la réponse du client", "textarea"]],
         "quote.decide",
-        `<input type="hidden" name="id" value="${esc(id)}"><label>Réponse<select name="status"><option>Accepté</option><option>Refusé</option></select></label>`,
+        `<input type="hidden" name="id" value="${esc(id)}">${expired ? `<p class="notice warning">Ce devis est expiré depuis le ${date(q.valid)}. Vous pouvez quand même enregistrer la réponse du client ; s’il accepte, vérifiez que les prix sont toujours valables.</p>` : ""}<label>Réponse<select name="status"><option>Accepté</option><option>Refusé</option></select></label>`,
         "Enregistrer la réponse reçue",
       );
     } else if (a === "invoice-payment") {

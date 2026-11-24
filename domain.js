@@ -925,7 +925,12 @@ function applyCommand(
     const r = ref(d, p.kind, p.id);
     if (!privileged(u, FIN) || !canFinance(d, u, r)) fail("Accès refusé.", 403);
     if (action === "finance.delete") {
-      if (r.status !== "Brouillon") fail("Archivez les documents déjà émis.");
+      // Quotes are not accounting records: an issued, expired or refused quote can be removed.
+      // An accepted quote has created a project, and an issued invoice must be kept (archive them).
+      if (p.kind === "quotes" && r.status === "Accepté")
+        fail("Un devis accepté est lié à un chantier : archivez-le plutôt.");
+      if (p.kind === "invoices" && r.status !== "Brouillon")
+        fail("Archivez les documents déjà émis.");
       if (
         p.kind === "invoices" &&
         d.payments.some((pay) => same(pay.invoice, r.id))
@@ -1379,8 +1384,8 @@ function applyCommand(
   } else if (action === "quote.decide") {
     const q = ref(d, "quotes", p.id);
     if (!privileged(u, FIN) || !canFinance(d, u, q)) fail("Accès refusé.", 403);
-    if (q.status !== "Émise" || q.valid < now.slice(0, 10))
-      fail("Devis non émis ou expiré.");
+    // The answer received from the client can be recorded even after the validity date.
+    if (q.status !== "Émise") fail("Devis non émis.");
     if (!["Accepté", "Refusé"].includes(p.status)) fail("Décision invalide.");
     const note = text(p.note, "Justificatif de la décision", 1000);
     q.status = p.status;
