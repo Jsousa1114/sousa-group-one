@@ -1321,3 +1321,44 @@ test("conversation search and focus survive background refresh", async () => {
     assert.equal(d.querySelector(".chat-contact").hidden, true);
   } finally { h.close(); }
 });
+
+test("automatic refresh keeps the AI assistant page and anything being typed", async () => {
+  const h = await setup();
+  try {
+    const d = h.w.document;
+    const mark = () => {
+      const el = d.createElement("div");
+      el.id = "keep-me";
+      d.getElementById("content").append(el);
+    };
+    // Pilotage hosts the AI assistant: a background refresh must not rebuild it.
+    click(h, '[data-page="pilotage"]');
+    mark();
+    await h.w.SGOChatCore.backgroundRefresh();
+    await flush();
+    assert.ok(d.getElementById("keep-me"), "pilotage was rebuilt by a background refresh");
+
+    // A data page is still refreshed in the background...
+    click(h, '[data-page="invoices"]');
+    mark();
+    await h.w.SGOChatCore.backgroundRefresh();
+    await flush();
+    assert.equal(d.getElementById("keep-me"), null, "invoices should be refreshed");
+
+    // ...unless the user is typing in it.
+    mark();
+    const input = d.createElement("input");
+    d.getElementById("content").append(input);
+    input.focus();
+    await h.w.SGOChatCore.backgroundRefresh();
+    await flush();
+    assert.ok(d.getElementById("keep-me"), "a page being typed in was rebuilt");
+
+    // An explicit refresh (button or after an action) still rebuilds the page.
+    await h.w.SGOChatCore.refresh();
+    await flush();
+    assert.equal(d.getElementById("keep-me"), null);
+  } finally {
+    h.close();
+  }
+});

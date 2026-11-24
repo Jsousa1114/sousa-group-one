@@ -511,6 +511,25 @@ async function refresh(renderNow = true) {
   }
   if (renderNow) render();
 }
+// Pages that load their own data and hold user input or results: Pilotage (with the AI assistant),
+// advanced tools, management centre, account and supplier catalogue. An automatic refresh updates
+// the data but must not rebuild them, which scrolls back to the top and wipes answers and drafts.
+const SELF_MANAGED_PAGES = new Set(["pilotage", "advanced", "pro", "settings", "suppliers"]);
+function userIsTypingInContent() {
+  const active = document.activeElement;
+  return !!(
+    active &&
+    $("content")?.contains(active) &&
+    active.matches("input, textarea, select, [contenteditable='true']")
+  );
+}
+// Used by the 30-second timer and real-time events. The messages page keeps its own draft
+// and scroll handling, so it is rebuilt as before.
+async function backgroundRefresh() {
+  const keepPage =
+    SELF_MANAGED_PAGES.has(page) || (page !== "messages" && userIsTypingInContent());
+  await refresh(!keepPage);
+}
 async function mutate(
   action,
   payload = {},
@@ -4000,6 +4019,7 @@ window.SGOChatCore = {
   api,
   mutate,
   refresh,
+  backgroundRefresh,
   render,
   modal,
   closeModal,
@@ -4143,7 +4163,7 @@ setInterval(() => {
     document.visibilityState === "visible" &&
     !$("messageText")?.value
   )
-    refresh().catch((e) => notice(e.message));
+    backgroundRefresh().catch((e) => notice(e.message));
 }, 30000);
 // Sensitive application data is never cached. The service worker is retained for push notifications.
 if ("caches" in window)
