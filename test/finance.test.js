@@ -420,3 +420,31 @@ test("completion reuses legacy quote invoices and requires pricing without a quo
   cmd(d, "invoice.issue", { id: unquoted.id });
   assert.equal(unquoted.status, "Émise");
 });
+test("issued, expired or refused quotes can be deleted; accepted quotes and issued invoices cannot", () => {
+  const d = fixture();
+  const issued = cmd(d, "create", payload(), "quotes");
+  cmd(d, "quote.issue", { id: issued.id });
+  cmd(d, "finance.delete", { kind: "quotes", id: issued.id });
+  assert.ok(issued.deletedAt);
+  assert.equal(D.viewState(d, admin).quotes.some((q) => q.id === issued.id), false);
+  assert.equal(
+    D.viewState(d, { role: "client", company: "home", client_id: "c1" }).quotes.some((q) => q.id === issued.id),
+    false,
+    "the client no longer sees it",
+  );
+
+  // An expired quote: the client's answer can still be recorded, and it can be deleted.
+  const expired = cmd(d, "create", payload(), "quotes");
+  cmd(d, "quote.issue", { id: expired.id });
+  expired.valid = "2020-01-31";
+  cmd(d, "quote.decide", { id: expired.id, status: "Refusé", note: "Le client a renoncé" });
+  assert.equal(expired.status, "Refusé");
+  cmd(d, "finance.delete", { kind: "quotes", id: expired.id });
+  assert.ok(expired.deletedAt);
+
+  const accepted = cmd(d, "create", payload(), "quotes");
+  cmd(d, "quote.issue", { id: accepted.id });
+  cmd(d, "quote.decide", { id: accepted.id, status: "Accepté", note: "Accord" });
+  assert.throws(() => cmd(d, "finance.delete", { kind: "quotes", id: accepted.id }), /archivez-le/);
+  assert.equal(accepted.deletedAt, undefined);
+});
