@@ -11,7 +11,7 @@ const { createApp } = require("../server");
 const D = require("../domain");
 
 process.env.JWT_SECRET = "test-only-secret-with-at-least-32-characters";
-const ENV = ["SMTP_HOST", "SMTP_PORT", "SMTP_SECURE", "SMTP_USER", "SMTP_PASS", "MAIL_FROM_NAME", "MAIL_REPLY_TO", "AI_API_URL", "AI_API_KEY"];
+const ENV = ["SMTP_HOST", "SMTP_PORT", "SMTP_SECURE", "SMTP_USER", "SMTP_PASS", "SMTP_USER_HOME", "SMTP_PASS_HOME", "MAIL_FROM_NAME", "MAIL_REPLY_TO", "AI_API_URL", "AI_API_KEY"];
 const saved = Object.fromEntries(ENV.map((k) => [k, process.env[k]]));
 let db, server, smtp, url;
 const tokens = {};
@@ -160,7 +160,7 @@ test("without configuration, the application says so and sends nothing", async (
   assert.equal(status.data.configured, false);
   const out = await call("mail/finance/invoices/" + ids.recent, "admin", {});
   assert.equal(out.status, 503);
-  assert.match(out.data.error, /pas configuré/);
+  assert.match(out.data.error, /Aucune adresse Gmail n’est configurée pour Sousa Home Service/);
   assert.equal((await call("mail/status", "client")).status, 403);
 });
 
@@ -168,7 +168,7 @@ test("an issued invoice is sent with its PDF, and the sending is recorded", asyn
   configure();
   const status = await call("mail/status", "admin");
   assert.equal(status.data.configured, true);
-  assert.equal(status.data.address, "sousagroup.test@example.invalid");
+  assert.equal(status.data.companies.find((c) => c.id === "home").address, "sousagroup.test@example.invalid");
   const before = messages.length;
   const out = await call("mail/finance/invoices/" + ids.recent, "admin", { subject: "Votre facture", text: "Bonjour,\n\nVoici la facture." });
   assert.equal(out.status, 200, JSON.stringify(out.data));
@@ -178,7 +178,7 @@ test("an issued invoice is sent with its PDF, and the sending is recorded", asyn
   assert.match(message.raw, /Subject: Votre facture/);
   assert.match(message.raw, /Reply-To: factures@sousa\.invalid/);
   assert.match(message.raw, /Content-Type: application\/pdf; name=.?F-2026-\d+\.pdf/);
-  assert.match(message.raw, /From: Sousa Group One <sousagroup\.test@example\.invalid>/);
+  assert.match(message.raw, /From: Sousa Home Service <sousagroup\.test@example\.invalid>/, "the company name is shown");
   const log = await call(`mail/log?entityType=invoices&entityId=${ids.recent}`, "admin");
   assert.equal(log.data.emails[0].status, "sent");
   assert.equal(log.data.emails[0].kind, "invoice");
@@ -187,6 +187,32 @@ test("an issued invoice is sent with its PDF, and the sending is recorded", asyn
   assert.equal((await call("mail/finance/invoices/" + ids.draft, "admin", {})).status, 400);
   assert.equal((await call("mail/finance/invoices/" + ids.recent, "manager", {})).status, 403);
   assert.equal((await call("mail/finance/invoices/" + ids.recent, "client", {})).status, 403);
+});
+
+test("each company sends from its own Gmail account, with its own name", async () => {
+  configure();
+  Object.assign(process.env, { SMTP_USER_HOME: "sousa.home@example.invalid", SMTP_PASS_HOME: "home-app-pass" });
+  smtpPassword = "home-app-pass";
+  try {
+    const status = await call("mail/status", "admin");
+    const home = status.data.companies.find((c) => c.id === "home");
+    const tech = status.data.companies.find((c) => c.id === "tech");
+    assert.deepEqual([home.address, home.own], ["sousa.home@example.invalid", true]);
+    assert.deepEqual([tech.address, tech.own], ["sousagroup.test@example.invalid", false], "the default account covers the others");
+    const before = messages.length;
+    const out = await call("mail/finance/invoices/" + ids.recent, "admin", {});
+    assert.equal(out.status, 200, JSON.stringify(out.data));
+    assert.equal(out.data.from, "sousa.home@example.invalid");
+    assert.match(messages[before].raw, /From: Sousa Home Service <sousa\.home@example\.invalid>/);
+    assert.match(messages[before].from, /sousa\.home@example\.invalid/);
+    const test = await call("mail/test", "admin", { company: "home" });
+    assert.equal(test.data.from, "sousa.home@example.invalid");
+    assert.equal((await call("mail/test", "admin", { company: "unknown" })).status, 403);
+  } finally {
+    delete process.env.SMTP_USER_HOME;
+    delete process.env.SMTP_PASS_HOME;
+    smtpPassword = "app-password-16c";
+  }
 });
 
 test("a refused Gmail login is explained in plain words and recorded as failed", async () => {

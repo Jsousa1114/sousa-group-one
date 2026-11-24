@@ -231,6 +231,13 @@
   }
 
   const mailReady = () => !!window.SGOMailCenter?.status?.()?.configured;
+  // The Gmail address of the company the message is about.
+  const mailFrom = (kind) => {
+    const id = document.getElementById("p3MailTarget")?.value || "";
+    const list = kind === "invoice_reminder" ? state().invoices : kind === "quote_followup" ? state().quotes : state().projects;
+    const record = (list || []).find((x) => String(x.id) === String(id));
+    return window.SGOMailCenter?.addressFor?.(record?.company) || "";
+  };
   const canStock = () => ["admin", "direction", "manager"].includes(profile().role);
 
   function renderOcrResult(payload) {
@@ -784,7 +791,7 @@
             </div>
             ${mailReady() && kind !== "project_update" ? `<label class="mail-check"><input type="checkbox" id="p3MailAttach" checked> Joindre ${kind === "invoice_reminder" ? "la facture (PDF avec bulletin QR)" : "le devis (PDF)"}</label>` : ""}
             <div class="form-actions">${button("Copier le texte", "copy-mail")}${mailReady() ? button("Ouvrir dans ma messagerie", "open-mail") + button("Envoyer", "send-mail", "primary") : button("Ouvrir dans ma messagerie", "open-mail", "primary")}</div>
-            ${mailReady() ? `<p class="muted">Envoyé depuis ${esc(window.SGOMailCenter.status().address)}.</p>` : ""}
+            ${mailReady() && mailFrom(kind) ? `<p class="muted">Envoyé depuis ${esc(mailFrom(kind))}.</p>` : ""}
           </div>`;
         } finally {
           buttonNode.disabled = false;

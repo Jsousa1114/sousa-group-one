@@ -502,8 +502,8 @@ function routes(db) {
         metadata:{quoteId:quote.id,clientId:client.id,company:quote.company||null}
       };
       // E-mail goes through Gmail/SMTP when it is configured, otherwise through the HTTP adapter.
-      if(channel==="email"&&require("./mailer").configured())
-        await require("./mailer").sendMail({to:payload.to,subject:payload.subject,text:payload.text});
+      if(channel==="email"&&require("./mailer").configured(String(quote.company||"")))
+        await require("./mailer").sendMail({to:payload.to,subject:payload.subject,text:payload.text,company:String(quote.company||"")});
       else{
         const url=channel==="email"?process.env.EMAIL_API_URL:process.env.SMS_API_URL;
         const key=channel==="email"?process.env.EMAIL_API_KEY:process.env.SMS_API_KEY;
@@ -568,7 +568,7 @@ function routes(db) {
     if(!companyAllowed(req.user,company)) D.fail("Entreprise non autorisée.",403);
     const recipient=provider==="email"?client.email:client.phone;
     if(!recipient) D.fail("Coordonnée client manquante.");
-    const smtp=provider==="email"&&require("./mailer").configured();
+    const smtp=provider==="email"&&require("./mailer").configured(company);
     const url=provider==="email"?process.env.EMAIL_API_URL:process.env.SMS_API_URL;
     const key=provider==="email"?process.env.EMAIL_API_KEY:process.env.SMS_API_KEY;
     if(!smtp&&(!url||!key)) D.fail("Connecteur "+provider+" non configuré.",503);
@@ -581,7 +581,7 @@ function routes(db) {
     await db.query("INSERT INTO p2_connector_jobs(id,company,provider,kind,recipient,payload,created_by) VALUES($1,$2,$3,$4,$5,$6,$7)",
       [id,company,provider,"message",recipient,JSON.stringify(payload),req.user.id]);
     try{
-      if(smtp) await require("./mailer").sendMail({to:payload.to,subject:payload.subject,text:payload.text});
+      if(smtp) await require("./mailer").sendMail({to:payload.to,subject:payload.subject,text:payload.text,company});
       else await callConnector(url,key,payload);
       await db.query("UPDATE p2_connector_jobs SET status='sent',sent_at=NOW() WHERE id=$1",[id]);
       res.json({ok:true,id,status:"sent"});

@@ -27,6 +27,9 @@
     return statusRequest;
   }
 
+  // The Gmail address a company sends from (its own account, or the default one).
+  const addressFor = (company) => (status?.companies || []).find((c) => String(c.id) === String(company))?.address || "";
+
   const KIND_LABELS = {
     invoice: "Facture envoyée",
     quote: "Devis envoyé",
@@ -71,7 +74,7 @@
     core().modal(
       `Envoyer ${kind === "quotes" ? "le devis" : "la facture"} ${doc.id}`,
       `<form id="mailSendForm" class="mail-form" data-kind="${esc(kind)}" data-id="${esc(doc.id)}">
-        <p class="muted">Envoyé depuis ${esc(status?.address || "l’adresse configurée")}, avec le PDF en pièce jointe${unpaid ? " (et le bulletin QR)" : ""}.</p>
+        <p class="muted">Envoyé depuis ${esc(addressFor(doc.company) || "l’adresse configurée")}, avec le PDF en pièce jointe${unpaid ? " (et le bulletin QR)" : ""}.</p>
         <label>Destinataire<input name="to" type="email" required value="${esc(customer.email || "")}" placeholder="adresse@client.ch"></label>
         <label>Objet<input name="subject" maxlength="200" required value="${esc(`${kind === "quotes" ? "Devis" : "Facture"} ${doc.id} — ${company}`)}"></label>
         <label>Message<textarea name="text" rows="9" maxlength="8000">${esc(doc.message ? doc.message + "\n\nMeilleures salutations\n" + company : defaultMessage(kind, doc))}</textarea></label>
@@ -86,9 +89,11 @@
     if (!draftButton || draftButton.dataset.mailEnhanced) return;
     draftButton.dataset.mailEnhanced = "1";
     if (!isFinance()) return;
-    const s = await loadStatus();
-    if (!s?.configured || !draftButton.isConnected) return;
+    await loadStatus();
     const [kind, id] = draftButton.dataset.id.split(":");
+    const doc = (state()[kind] || []).find((x) => String(x.id) === String(id));
+    // Only when this company has a Gmail account; otherwise the .eml draft stays available.
+    if (!doc || !addressFor(doc.company) || !draftButton.isConnected) return;
     // With e-mail configured, the application sends directly instead of preparing an .eml file.
     draftButton.insertAdjacentHTML("beforebegin", `<button type="button" class="btn primary mail-send" data-mail-send="${esc(kind + ":" + id)}">${ic("mail")}<span>Envoyer au client</span></button> `);
     draftButton.remove();
@@ -117,13 +122,20 @@
     const box = document.querySelector("#modalBody .mail-center");
     if (!box) return;
     const canToggle = ["admin", "direction", "accounting"].includes(profile().role);
+    const companies = (s?.companies || []).filter((c) => c.id !== "group" || c.address);
     box.innerHTML = `
       <section class="card mail-status">
-        <h3>${ic("mail")}<span>Envoi des e-mails</span></h3>
-        ${s?.configured
-          ? `<p>Les e-mails partent de <b>${esc(s.address)}</b> (nom affiché : ${esc(s.name)}). Les réponses des clients arrivent sur l’e-mail de facturation de l’entreprise s’il est renseigné, sinon sur cette adresse.</p>
-             <form id="mailTestForm" class="mail-inline"><input name="to" type="email" placeholder="${esc(s.address)}" aria-label="Adresse du test"><button type="submit" class="btn secondary">Envoyer un e-mail de test</button></form>`
-          : '<p class="notice warning">L’envoi d’e-mails n’est pas encore configuré sur le serveur (adresse Gmail et mot de passe d’application). En attendant, le bouton « Préparer e-mail » télécharge un brouillon à ouvrir dans votre messagerie.</p>'}
+        <h3>${ic("mail")}<span>Adresses d’envoi</span></h3>
+        <p>Chaque entreprise envoie depuis son propre Gmail, avec son nom. Les réponses des clients arrivent sur l’e-mail de facturation de l’entreprise s’il est renseigné, sinon sur cette adresse.</p>
+        ${companies.length
+          ? `<div class="table"><table><thead><tr><th>Entreprise</th><th>Envoie depuis</th><th></th></tr></thead><tbody>${companies
+              .map(
+                (c) =>
+                  `<tr><td>${esc(c.name)}</td><td>${c.address ? `${esc(c.address)}${c.own ? "" : ' <small class="muted">(adresse par défaut)</small>'}` : '<span class="muted">Pas encore configurée</span>'}</td><td>${c.address ? `<button type="button" class="btn secondary" data-mail-test="${esc(c.id)}">Tester</button>` : ""}</td></tr>`,
+              )
+              .join("")}</tbody></table></div>`
+          : ""}
+        ${s?.configured ? "" : '<p class="notice warning">Aucune adresse Gmail n’est encore configurée sur le serveur. En attendant, le bouton « Préparer e-mail » télécharge un brouillon à ouvrir dans votre messagerie.</p>'}
       </section>
       ${reminders
         ? `<section class="card">
@@ -162,7 +174,20 @@
     if (modalBody && window.MutationObserver) new MutationObserver(() => enhanceDocumentModal()).observe(modalBody, { childList: true });
   }
 
-  document.addEventListener("click", (event) => {
+  document.addEventListener("click", async (event) => {
+    const testButton = event.target.closest("[data-mail-test]");
+    if (testButton) {
+      testButton.disabled = true;
+      try {
+        const out = await core().api("mail/test", { company: testButton.dataset.mailTest });
+        core().toast(`E-mail de test envoyé depuis ${out.from} à ${out.to}.`);
+        openCenter();
+      } catch (error) {
+        core().toast(error.message || "Envoi impossible.");
+        testButton.disabled = false;
+      }
+      return;
+    }
     const send = event.target.closest("[data-mail-send]");
     if (send) {
       const [kind, id] = send.dataset.mailSend.split(":");
@@ -190,21 +215,6 @@
   });
   document.addEventListener("submit", async (event) => {
     const form = event.target;
-    if (form.id === "mailTestForm") {
-      event.preventDefault();
-      const button = form.querySelector("button");
-      button.disabled = true;
-      try {
-        const out = await core().api("mail/test", { to: form.elements.to.value.trim() });
-        core().toast("E-mail de test envoyé à " + out.to + ".");
-        openCenter();
-      } catch (error) {
-        core().toast(error.message || "Envoi impossible.");
-      } finally {
-        button.disabled = false;
-      }
-      return;
-    }
     if (form.id !== "mailSendForm") return;
     event.preventDefault();
     const button = form.querySelector("button[type=submit]");
@@ -227,5 +237,5 @@
     }
   });
 
-  window.SGOMailCenter = { afterRender, status: () => status, loadStatus, openCenter };
+  window.SGOMailCenter = { afterRender, status: () => status, loadStatus, openCenter, addressFor };
 })();

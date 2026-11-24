@@ -141,8 +141,10 @@ async function processEmailReminders(db, now = new Date()) {
   const enabledDay = String(settings.enabledAt).slice(0, 10);
   const state = (await loadState(db)).data;
   let sent = 0;
+  const refused = new Set();
   for (const invoice of state.invoices || []) {
     if (sent >= 20) break;
+    if (refused.has(invoice.company)) continue;
     const stage = dueStage(invoice, today, enabledDay);
     if (!stage) continue;
     const kind = "reminder-" + stage;
@@ -156,6 +158,8 @@ async function processEmailReminders(db, now = new Date()) {
     } catch {
       continue;
     }
+    // No Gmail account for this company (nor a default one): wait until there is one.
+    if (!mailer.configured(invoice.company)) continue;
     const message = reminderMessage(stage, invoice, issuer, customer);
     const entry = { company: invoice.company, kind, entityType: "invoices", entityId: invoice.id };
     if (!mailer.validEmail(customer?.email || "")) {
@@ -168,14 +172,16 @@ async function processEmailReminders(db, now = new Date()) {
         to: customer.email,
         subject: message.subject,
         text: message.text,
+        company: invoice.company,
+        fromName: issuer?.name,
         replyTo: replyToFor(issuer),
         attachments: [{ filename: `${invoice.id}.pdf`, content: pdf, contentType: "application/pdf" }],
       });
       sent++;
     } catch (error) {
       console.warn("mail.reminder.failed", invoice.id, error?.status || "");
-      // A refused login stops the run: every other e-mail would fail the same way.
-      if (/refusé la connexion/.test(error.message)) break;
+      // A refused login: the other invoices of this company would fail the same way.
+      if (/refusé la connexion/.test(error.message)) refused.add(invoice.company);
     }
   }
   return { sent };
@@ -192,11 +198,15 @@ function routes(db) {
     "/status",
     wrap(async (req, res) => {
       if (!staff(req.user)) D.fail("Accès non autorisé.", 403);
-      const from = mailer.sender();
+      const state = D.viewState((await loadState(db)).data, req.user);
+      // Each company sends from its own Gmail account, or from the default one.
+      const companies = (state.companies || []).map((c) => {
+        const from = mailer.sender(c.id);
+        return { id: String(c.id), name: c.name || String(c.id), address: from?.address || "", own: from?.source === "company" };
+      });
       res.json({
         configured: mailer.configured(),
-        address: from?.address || "",
-        name: from?.name || "",
+        companies,
         reminders: finance(req.user) ? await reminderSettings(db) : undefined,
       });
     }),
@@ -206,17 +216,25 @@ function routes(db) {
     "/test",
     wrap(async (req, res) => {
       if (!finance(req.user)) D.fail("Accès non autorisé.", 403);
-      const to = text(req.body?.to, 254) || mailer.sender()?.address || "";
+      const company = text(req.body?.company, 80);
+      const state = D.viewState((await loadState(db)).data, req.user);
+      const co = company ? (state.companies || []).find((c) => D.same(c.id, company)) : null;
+      if (company && !co) D.fail("Entreprise non autorisée.", 403);
+      const from = mailer.sender(company);
+      if (!from) D.fail(`Aucune adresse Gmail n’est configurée pour ${co?.name || "l’envoi"}.`, 503);
+      const to = text(req.body?.to, 254) || from.address;
       await sendLogged(
         db,
-        { kind: "test", createdBy: req.user.id },
+        { kind: "test", company: company || null, createdBy: req.user.id },
         {
           to,
-          subject: "Test d’envoi · Sousa Group One",
-          text: `Bonjour,\n\nCet e-mail confirme que l’application Sousa Group One peut envoyer des e-mails.\n\nEnvoyé par ${req.user.name || "un utilisateur"} le ${new Date().toLocaleString("fr-CH", { timeZone: "Europe/Zurich" })}.`,
+          company,
+          fromName: co?.name,
+          subject: `Test d’envoi · ${co?.name || "Sousa Group One"}`,
+          text: `Bonjour,\n\nCet e-mail confirme que l’application Sousa Group One peut envoyer des e-mails${co ? " pour " + co.name : ""} depuis ${from.address}.\n\nEnvoyé par ${req.user.name || "un utilisateur"} le ${new Date().toLocaleString("fr-CH", { timeZone: "Europe/Zurich" })}.`,
         },
       );
-      res.json({ ok: true, to });
+      res.json({ ok: true, to, from: from.address });
     }),
   );
 
@@ -253,6 +271,7 @@ function routes(db) {
       if (!document) D.fail("Document introuvable.", 404);
       if (document.status === "Brouillon") D.fail("Émettez le document avant de l’envoyer.");
       const { issuer, customer } = financeParts(state, kind, document);
+      if (!mailer.configured(document.company)) D.fail(`Aucune adresse Gmail n’est configurée pour ${issuer?.name || document.company}.`, 503);
       const to = text(req.body?.to, 254) || customer?.email || "";
       if (!mailer.validEmail(to)) D.fail("Indiquez une adresse e-mail valide pour le client.");
       const qr = kind === "invoices" && req.body?.qr !== false && document.status !== "Payée";
@@ -262,9 +281,9 @@ function routes(db) {
       await sendLogged(
         db,
         { company: document.company, kind: kind === "quotes" ? "quote" : "invoice", entityType: kind, entityId: document.id, createdBy: req.user.id },
-        { to, subject, text: body, replyTo: replyToFor(issuer), attachments: [{ filename: `${document.id}.pdf`, content: pdf, contentType: "application/pdf" }] },
+        { to, subject, text: body, company: document.company, fromName: issuer?.name, replyTo: replyToFor(issuer), attachments: [{ filename: `${document.id}.pdf`, content: pdf, contentType: "application/pdf" }] },
       );
-      res.json({ ok: true, to });
+      res.json({ ok: true, to, from: mailer.sender(document.company)?.address || "" });
     }),
   );
 
@@ -289,6 +308,8 @@ function routes(db) {
       const record = ctx.view[entityType].find((x) => D.same(x.id, id));
       const attachments = [];
       let replyTo = "";
+      const companyName = (ctx.view.companies || []).find((c) => D.same(c.id, record?.company))?.name || "";
+      if (!mailer.configured(record?.company || "")) D.fail(`Aucune adresse Gmail n’est configurée pour ${companyName || "cette entreprise"}.`, 503);
       if (entityType !== "projects") {
         const { issuer, customer } = financeParts(ctx.view, entityType, record);
         replyTo = replyToFor(issuer);
@@ -302,7 +323,7 @@ function routes(db) {
       await sendLogged(
         db,
         { company: record?.company || null, kind: "message-" + kind, entityType, entityId: id, createdBy: req.user.id },
-        { to, subject, text: body, replyTo, attachments },
+        { to, subject, text: body, replyTo, attachments, company: record?.company || "", fromName: companyName },
       );
       res.json({ ok: true, to, attached: attachments.length > 0, facts: { client: facts.client } });
     }),
