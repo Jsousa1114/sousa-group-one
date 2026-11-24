@@ -37,6 +37,8 @@ async function call(path, who, body) {
 }
 
 function kindOf(system) {
+  if (/point du jour/i.test(system)) return "briefing";
+  if (/comprendre un document/i.test(system)) return "document";
   if (/assistant interne/i.test(system)) return "assistant";
   if (/brouillon de devis/i.test(system)) return "quote";
   if (/facture fournisseur/i.test(system)) return "invoice";
@@ -57,6 +59,14 @@ test.before(async () => {
         requests.push({ kind, body });
         const answer = answers[kind];
         const content = typeof answer === "string" ? answer : JSON.stringify(answer || {});
+        if (body.stream) {
+          // OpenAI-style streaming: the answer in a few pieces, then [DONE].
+          res.setHeader("Content-Type", "text/event-stream");
+          const pieces = content.match(/.{1,12}/gs) || [""];
+          for (const piece of pieces) res.write("data: " + JSON.stringify({ choices: [{ delta: { content: piece } }] }) + "\n\n");
+          res.end("data: [DONE]\n\n");
+          return;
+        }
         res.setHeader("Content-Type", "application/json");
         res.end(JSON.stringify({ choices: [{ message: { content } }] }));
       });
@@ -103,6 +113,10 @@ test.before(async () => {
   d.expenses = [{ id: "x1", company: "home", project: "", supplier: "Grossiste Électro SA", reference: "GE-118", amount: 432.4, date: day(-5), status: "Enregistrée" }];
   d.suppliers = [{ id: "s1", company: "home", name: "Grossiste Électro SA" }];
   d.inventory = [{ id: "i1", company: "home", sku: "MCN116", name: "Disjoncteur 16A Hager", stock: 4, min: 2, unit: "pce", buy: 9, sell: 18 }];
+  d.documents = [
+    { id: "doc-home", company: "home", project: "HOME-2026-0001", name: "Contrat.pdf", category: "Contrat", visibility: "team", size: 10, createdAt: day(-2) },
+    { id: "doc-tech", company: "tech", name: "Autre.pdf", category: "Contrat", visibility: "team", size: 10, createdAt: day(-2) },
+  ];
   await db.query("UPDATE app_state SET data=$1 WHERE id=1", [JSON.stringify(d)]);
   await db.query(
     "CREATE TABLE IF NOT EXISTS supplier_catalogs (company TEXT NOT NULL, vendor TEXT NOT NULL, articles JSONB NOT NULL, source TEXT NOT NULL, imported_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), imported_by INTEGER NOT NULL, PRIMARY KEY(company,vendor))",
@@ -285,4 +299,125 @@ test("each person has a daily limit, and the administration sees the usage", asy
   const employee = usage.data.rows.filter((r) => r.name === "Utilisateur employee");
   assert.equal(employee.reduce((n, r) => n + r.calls, 0), 3);
   assert.ok(usage.data.rows.every((r) => !("question" in r)));
+});
+
+// Reads a server-sent events response into its messages.
+async function streamCall(path, who, body) {
+  const response = await fetch(url + "/api/" + path, {
+    method: "POST",
+    headers: { Authorization: "Bearer " + tokens[who], "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const type = response.headers.get("content-type") || "";
+  if (!type.includes("text/event-stream")) return { status: response.status, type, data: await response.json().catch(() => ({})) };
+  const text = await response.text();
+  const events = text
+    .split("\n\n")
+    .filter((b) => b.startsWith("data:"))
+    .map((b) => JSON.parse(b.slice(5)));
+  return { status: response.status, type, events };
+}
+
+test("answers can arrive piece by piece, and the daily limit is checked before streaming", async () => {
+  answers.assistant = "Le chantier [[HOME-2026-0001]] a 3 jours de retard et dépasse son budget.";
+  const before = (await db.query("SELECT COALESCE(SUM(calls),0)::int AS n FROM ai_usage WHERE feature='assistant'")).rows[0].n;
+  const out = await streamCall("operations/p3/assistant", "admin", { question: "Où en est la salle de bain ?", stream: true });
+  assert.equal(out.status, 200);
+  assert.match(out.type, /text\/event-stream/);
+  const deltas = out.events.filter((e) => e.delta).map((e) => e.delta);
+  assert.ok(deltas.length > 3, "several pieces");
+  assert.equal(deltas.join(""), answers.assistant);
+  assert.deepEqual(out.events.at(-1), { done: true, mode: "ai" });
+  assert.equal(lastRequest("assistant").stream, true);
+  const after = (await db.query("SELECT COALESCE(SUM(calls),0)::int AS n FROM ai_usage WHERE feature='assistant'")).rows[0].n;
+  assert.equal(after, before + 1);
+  process.env.AI_DAILY_LIMIT = "1";
+  try {
+    const refused = await streamCall("operations/p3/assistant", "admin", { question: "Encore ?", stream: true });
+    assert.equal(refused.status, 429);
+    assert.match(refused.data.error, /Limite quotidienne/);
+  } finally {
+    delete process.env.AI_DAILY_LIMIT;
+  }
+});
+
+test("the assistant may propose only the actions the role allows, with the ids it needs", async () => {
+  answers.assistant = "Je propose d'ajouter la tâche.";
+  await call("operations/p3/assistant", "employee", { question: "J'ai travaillé de 7h à 16h hier sur la salle de bain" });
+  const employeePrompt = lastRequest("assistant").messages[0].content;
+  assert.match(employeePrompt, /time\.add/);
+  assert.match(employeePrompt, /absence\.request/);
+  assert.doesNotMatch(employeePrompt, /planning\.create/);
+  const context = lastRequest("assistant").messages.at(-1).content;
+  assert.match(context, /"salarieId":"e1"/);
+  assert.match(context, /"calendrier":\["\d{4}-\d{2}-\d{2} \w+/);
+  await call("operations/p3/assistant", "manager", { question: "Affecte Lucas demain" });
+  assert.match(lastRequest("assistant").messages[0].content, /planning\.create/);
+  assert.match(lastRequest("assistant").messages.at(-1).content, /"id":"e1","nom":"Lucas Martin"/);
+});
+
+test("the daily briefing is prepared once a day, then served from the cache", async () => {
+  answers.briefing = "- La facture [[F-2026-0001]] est échue depuis 10 jours.";
+  const calls = () => requests.filter((r) => r.kind === "briefing").length;
+  const before = calls();
+  const first = await call("operations/p3/briefing", "admin");
+  assert.equal(first.status, 200, JSON.stringify(first.data));
+  assert.equal(first.data.text, answers.briefing);
+  assert.equal(first.data.mode, "ai");
+  const again = await call("operations/p3/briefing", "admin");
+  assert.equal(again.data.text, answers.briefing);
+  assert.equal(calls(), before + 1, "served from the cache");
+  answers.briefing = "- Rien d'urgent.";
+  const refreshed = await call("operations/p3/briefing?refresh=1", "admin");
+  assert.equal(refreshed.data.text, "- Rien d'urgent.");
+  assert.equal(calls(), before + 2);
+  const key = process.env.AI_API_KEY;
+  delete process.env.AI_API_KEY;
+  try {
+    const local = await call("operations/p3/briefing", "manager");
+    assert.equal(local.data.mode, "local");
+    assert.match(local.data.text, /chantier en retard/);
+  } finally {
+    process.env.AI_API_KEY = key;
+  }
+});
+
+test("weekday mornings, the briefing is sent once to people with notifications", async () => {
+  const { runDailyBriefings } = require("../p3-intelligence-routes");
+  const ids = Object.fromEntries((await db.query("SELECT id,role FROM users")).rows.map((u) => [u.role, u.id]));
+  for (const role of ["admin", "manager", "employee"])
+    await db.query("INSERT INTO push_subscriptions(user_id,endpoint,p256dh,auth) VALUES($1,$2,'k','a')", [ids[role], "https://push.invalid/" + role]);
+  await db.query("INSERT INTO account_preferences(user_id,data) VALUES($1,$2) ON CONFLICT(user_id) DO UPDATE SET data=EXCLUDED.data", [ids.manager, JSON.stringify({ notifications: { assistant: false } })]);
+  await db.query("DELETE FROM ai_briefings");
+  answers.briefing = "- Bonne journée : **2** points à suivre.";
+  // Saturday 7:00 in Zurich: nothing.
+  assert.equal((await runDailyBriefings(db, new Date("2026-11-28T06:00:00Z"))).sent, 0);
+  // Monday 7:00 in Zurich (06:00 UTC in winter).
+  const monday = new Date("2026-11-30T06:00:00Z");
+  const first = await runDailyBriefings(db, monday);
+  assert.equal(first.sent, 2, "admin and employee; the manager turned it off");
+  const stored = (await db.query("SELECT user_id,title,body FROM user_notifications WHERE category='assistant'")).rows;
+  assert.equal(stored.length, 2);
+  assert.ok(!stored.some((n) => n.user_id === ids.manager));
+  assert.equal(stored[0].title, "Votre point du jour");
+  assert.doesNotMatch(stored[0].body, /\*\*/, "plain text in the notification");
+  assert.equal((await runDailyBriefings(db, new Date("2026-11-30T07:30:00Z"))).sent, 0, "only once a day");
+});
+
+test("documents are summarised for people allowed to open them", async () => {
+  answers.document = "- **Contrat** de rénovation, délai de 30 jours.";
+  const ok = await call("operations/p3/document", "admin", { documentId: "doc-home", text: "Contrat de rénovation. Délai d'exécution : 30 jours." });
+  assert.equal(ok.status, 200, JSON.stringify(ok.data));
+  assert.equal(ok.data.answer, answers.document);
+  assert.match(lastRequest("document").messages.at(-1).content, /Délai d'exécution/);
+  const question = await call("operations/p3/document", "admin", {
+    documentId: "doc-home",
+    text: "Contrat. Délai 30 jours.",
+    question: "Quel est le délai ?",
+    history: [{ role: "assistant", content: "Résumé précédent" }],
+  });
+  assert.equal(question.status, 200);
+  assert.equal(lastRequest("document").messages.length, 3);
+  assert.equal((await call("operations/p3/document", "manager", { documentId: "doc-tech", text: "x" })).status, 403);
+  assert.equal((await call("operations/p3/document", "admin", { documentId: "doc-home", text: " " })).status, 400);
 });

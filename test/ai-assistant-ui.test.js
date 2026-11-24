@@ -9,22 +9,38 @@ const html = fs.readFileSync(require.resolve("../index.html"), "utf8");
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
 // Loads the real application shell with the AI module and a fake API.
-async function setup(role = "admin") {
+async function setup(role = "admin", options = {}) {
   const dom = new JSDOM(html, { url: "http://localhost", runScripts: "outside-only" });
   const w = dom.window;
   const d = D.emptyState();
   d.clients = [{ id: "c1", name: "Client", company: "home" }];
   d.projects = [{ id: "p1", title: "Chantier", clientId: "c1", company: "home", team: [], status: "En cours" }];
+  d.documents = [{ id: "doc1", company: "home", project: "p1", name: "Contrat.txt", category: "Contrat", visibility: "team", size: 40, createdAt: "2026-11-20" }];
   const profile = { id: 7, name: "Marc Dupont", role, company: role === "client" ? "home" : "group", client_id: role === "client" ? "c1" : null };
   const calls = [];
   w.sessionStorage.setItem("sgo_session", "unit-test-session");
   w.setInterval = () => 0;
+  if (options.voice) {
+    // A minimal speech synthesis, recording what is read aloud.
+    w.spoken = [];
+    w.SpeechSynthesisUtterance = class {
+      constructor(text) {
+        this.text = text;
+      }
+    };
+    w.speechSynthesis = { getVoices: () => [], cancel() {}, speak: (u) => (w.spoken.push(u.text), u.onend && setTimeout(u.onend, 0)) };
+    w.localStorage.setItem("sgo_ai_voice", "1");
+  }
   w.fetch = async (url, opts = {}) => {
     calls.push({ url: String(url), body: opts.body ? JSON.parse(opts.body) : null });
     const json = (payload) => ({ ok: true, status: 200, json: async () => payload });
     if (String(url).includes("/operations/p3/status")) return json({ providerConfigured: true, provider: "Google Gemini", usage: { today: 0, limit: 150 }, transcriptionConfigured: false, features: {} });
     if (String(url).includes("/operations/p3/assistant"))
-      return json({ mode: "ai", answer: calls.filter((c) => c.url.includes("/assistant")).length > 1 ? "**Deux chantiers** sont en retard :\n- [[p1]] (35 %)\n- [[X-404]]" : "Deux chantiers sont en retard." });
+      return json({ mode: "ai", answer: options.answer || (calls.filter((c) => c.url.includes("/assistant")).length > 1 ? "**Deux chantiers** sont en retard :\n- [[p1]] (35 %)\n- [[X-404]]" : "Deux chantiers sont en retard.") });
+    if (String(url).includes("/operations/p3/briefing")) return json({ day: "2026-11-24", text: "- Le chantier [[p1]] est en retard.", mode: "ai", createdAt: "2026-11-24T05:45:00Z" });
+    if (String(url).includes("/operations/p3/document")) return json({ answer: "- **Délai** : 30 jours." });
+    if (String(url).includes("/operations/tasks")) return json({ ok: true, id: "t1" });
+    if (String(url).includes("/api/state/documents/doc1")) return { ok: true, status: 200, blob: async () => new w.Blob(["Contrat. Délai d'exécution : 30 jours."]) };
     if (String(url).endsWith("/api/state")) return json({ data: D.viewState(d, profile), revision: 1, profile, contacts: [] });
     return json({});
   };
@@ -96,7 +112,7 @@ test("answers are formatted, cite records as links, remember the conversation an
     assert.equal(ref.textContent, "Chantier", "a known project is shown by its title");
     assert.match(answer.textContent, /X-404/, "an unknown reference stays plain text");
     assert.equal(answer.querySelectorAll(".ai-ref").length, 1);
-    assert.ok(h.d.querySelector(".ai-msg.ai-answer .ai-copy"));
+    assert.ok(h.d.querySelector(".ai-msg.ai-answer [data-p3-copy]"));
     ref.click();
     assert.equal(h.d.getElementById("aiPanel").hidden, true, "the panel closes to show the record");
     assert.equal(h.d.getElementById("modalWrap").classList.contains("hidden"), false, "the project opens");
@@ -141,6 +157,73 @@ test("clients get no AI assistant", async () => {
   const h = await setup("client");
   try {
     assert.equal(h.d.querySelector("[data-p3-panel='toggle']"), null);
+  } finally {
+    h.close();
+  }
+});
+
+test("actions proposed by the assistant are recorded only once confirmed", async () => {
+  const action = '```action\n{"type":"task.create","projectId":"p1","title":"Commander 2 disjoncteurs","dueDate":"2026-11-28","priority":"high"}\n```';
+  const h = await setup("admin", { answer: "Je propose cette tâche :\n" + action });
+  try {
+    click(h, ".top-actions [data-p3-panel='toggle']");
+    h.d.getElementById("aiQuestion").value = "Ajoute une tâche commander 2 disjoncteurs pour vendredi";
+    h.d.getElementById("aiComposer").dispatchEvent(new h.w.Event("submit", { bubbles: true, cancelable: true }));
+    for (let i = 0; i < 5; i++) await flush();
+    const card = h.d.querySelector(".ai-action-card");
+    assert.ok(card, "a confirmation card is shown");
+    assert.doesNotMatch(h.d.querySelector(".ai-msg.ai-answer .ai-rich").textContent, /```|task\.create/, "the raw block is hidden");
+    assert.match(card.textContent, /Nouvelle tâche/);
+    assert.match(card.textContent, /Chantier/);
+    assert.match(card.textContent, /28\.11\.2026/);
+    assert.match(card.textContent, /Haute/);
+    assert.equal(h.calls.filter((c) => c.url.includes("/operations/tasks")).length, 0, "nothing is recorded before confirmation");
+    click(h, "[data-p3-act='confirm']");
+    for (let i = 0; i < 5; i++) await flush();
+    const sent = h.calls.find((c) => c.url.includes("/operations/tasks"));
+    assert.deepEqual(sent.body, { projectId: "p1", title: "Commander 2 disjoncteurs", priority: "high", dueDate: "2026-11-28", assignedEmployeeId: null, status: "todo" });
+    assert.match(h.d.querySelector(".ai-action-card").textContent, /Enregistré/);
+    // The next question tells the AI the action was confirmed.
+    h.d.getElementById("aiQuestion").value = "Merci";
+    h.d.getElementById("aiComposer").dispatchEvent(new h.w.Event("submit", { bubbles: true, cancelable: true }));
+    for (let i = 0; i < 5; i++) await flush();
+    const history = h.calls.filter((c) => c.url.includes("/operations/p3/assistant")).at(-1).body.history;
+    assert.match(history.at(-1).content, /task\.create proposée : confirmée/);
+  } finally {
+    h.close();
+  }
+});
+
+test("the dashboard shows the point du jour, and documents can be summarised", async () => {
+  const h = await setup("admin");
+  try {
+    for (let i = 0; i < 5; i++) await flush();
+    const card = h.d.getElementById("aiBriefing");
+    assert.ok(card, "the briefing card is on the dashboard");
+    assert.match(card.textContent, /Point du jour/);
+    assert.equal(card.querySelector(".ai-ref").textContent, "Chantier");
+    click(h, '[data-page="documents"]');
+    for (let i = 0; i < 5; i++) await flush();
+    click(h, "#content [data-p3-doc='doc1']");
+    for (let i = 0; i < 8; i++) await flush();
+    const request = h.calls.find((c) => c.url.includes("/operations/p3/document"));
+    assert.equal(request.body.documentId, "doc1");
+    assert.match(request.body.text, /Délai d'exécution/);
+    assert.match(h.d.getElementById("p3DocThread").textContent, /Délai : 30 jours/);
+  } finally {
+    h.close();
+  }
+});
+
+test("in conversation mode, answers are read aloud", async () => {
+  const h = await setup("admin", { voice: true, answer: "**Deux chantiers** sont en retard. Le premier est [[p1]]." });
+  try {
+    click(h, ".top-actions [data-p3-panel='toggle']");
+    assert.equal(h.d.querySelector("[data-p3-panel='voice-mode']").getAttribute("aria-pressed"), "true");
+    h.d.getElementById("aiQuestion").value = "Quels chantiers sont en retard ?";
+    h.d.getElementById("aiComposer").dispatchEvent(new h.w.Event("submit", { bubbles: true, cancelable: true }));
+    for (let i = 0; i < 6; i++) await flush();
+    assert.deepEqual(h.w.spoken, ["Deux chantiers sont en retard.", "Le premier est Chantier."]);
   } finally {
     h.close();
   }

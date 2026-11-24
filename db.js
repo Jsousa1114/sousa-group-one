@@ -753,6 +753,18 @@ async function migrate(db = pool) {
       PRIMARY KEY(day,user_id,feature)
     )`,
   );
+  // One "point du jour" per person and per day (Zurich date), kept to avoid regenerating it.
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS ai_briefings(
+      user_id INTEGER NOT NULL,
+      day DATE NOT NULL,
+      text TEXT NOT NULL,
+      mode VARCHAR(10) NOT NULL DEFAULT 'ai',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      pushed_at TIMESTAMPTZ,
+      PRIMARY KEY(user_id,day)
+    )`,
+  );
 
   await db.query(
     "INSERT INTO app_state(id,data) VALUES(1,$1) ON CONFLICT(id) DO NOTHING",
@@ -796,7 +808,8 @@ async function migrate(db = pool) {
       ('2026-09-27-webauthn-passkeys'),
       ('2026-09-27-external-file-storage'),
       ('2026-09-30-reliable-recurrences'),
-      ('2026-11-24-ai-usage')
+      ('2026-11-24-ai-usage'),
+      ('2026-11-24-ai-briefings')
       ON CONFLICT(version) DO NOTHING`,
   );
   // Disable the previously published demo credentials, even on an existing installation.

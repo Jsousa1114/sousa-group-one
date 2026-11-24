@@ -861,37 +861,63 @@
   // PDF invoices are turned into page images in the browser (pdf.js, loaded only when needed),
   // so any AI provider able to read photos can read them.
   let pdfLibrary = null;
-  async function pdfPages(file, max, maxSide) {
+  async function openPdf(file) {
     if (file.size > 20 * 1024 * 1024) throw new Error("PDF trop volumineux (20 Mo max).");
     if (!pdfLibrary) {
       pdfLibrary = await import("/vendor/pdfjs/pdf.min.mjs");
       pdfLibrary.GlobalWorkerOptions.workerSrc = "/vendor/pdfjs/pdf.worker.min.mjs";
     }
     const task = pdfLibrary.getDocument({ data: new Uint8Array(await file.arrayBuffer()), isEvalSupported: false, enableXfa: false });
-    let doc;
     try {
-      doc = await task.promise;
+      return { task, doc: await task.promise };
     } catch (error) {
       task.destroy?.();
       throw new Error(error?.name === "PasswordException" ? "Ce PDF est protégé par un mot de passe." : "Ce PDF ne peut pas être ouvert.");
     }
+  }
+  async function renderPdfPages(doc, max, maxSide) {
+    const pages = [];
+    for (let n = 1; n <= Math.min(doc.numPages, max); n++) {
+      const page = await doc.getPage(n);
+      const base = page.getViewport({ scale: 1 });
+      const viewport = page.getViewport({ scale: Math.min(3, maxSide / Math.max(base.width, base.height)) });
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(viewport.width);
+      canvas.height = Math.round(viewport.height);
+      await page.render({ canvas, viewport, background: "#ffffff" }).promise;
+      pages.push(canvas.toDataURL("image/jpeg", 0.85));
+      page.cleanup();
+    }
+    return pages;
+  }
+  async function pdfPages(file, max, maxSide) {
+    const { task, doc } = await openPdf(file);
     try {
       if (doc.numPages > max) core().toast(`Seules les ${max} premières pages du PDF sont lues.`);
-      const pages = [];
-      for (let n = 1; n <= Math.min(doc.numPages, max); n++) {
-        const page = await doc.getPage(n);
-        const base = page.getViewport({ scale: 1 });
-        const viewport = page.getViewport({ scale: Math.min(3, maxSide / Math.max(base.width, base.height)) });
-        const canvas = document.createElement("canvas");
-        canvas.width = Math.round(viewport.width);
-        canvas.height = Math.round(viewport.height);
-        await page.render({ canvas, viewport, background: "#ffffff" }).promise;
-        pages.push(canvas.toDataURL("image/jpeg", 0.85));
-        page.cleanup();
-      }
-      return pages;
+      return await renderPdfPages(doc, max, maxSide);
     } finally {
       // Frees the PDF worker and its memory.
+      task.destroy?.();
+    }
+  }
+  // Documents: the text of the PDF when it has one (cheap, and long contracts fit), otherwise
+  // the first pages as images (scanned documents).
+  async function pdfContent(file) {
+    const { task, doc } = await openPdf(file);
+    try {
+      const parts = [];
+      const max = Math.min(doc.numPages, 40);
+      for (let n = 1; n <= max; n++) {
+        const page = await doc.getPage(n);
+        const content = await page.getTextContent();
+        parts.push(`--- Page ${n} ---\n` + content.items.map((i) => (i.str || "") + (i.hasEOL ? "\n" : " ")).join("").replace(/[ \t]+/g, " ").trim());
+        page.cleanup();
+      }
+      const text = parts.join("\n\n");
+      const letters = text.replace(/--- Page \d+ ---|\s/g, "").length;
+      if (letters >= max * 80) return { text: text.slice(0, 80000), pages: doc.numPages };
+      return { images: await renderPdfPages(doc, 6, 1500), pages: doc.numPages };
+    } finally {
       task.destroy?.();
     }
   }
@@ -930,6 +956,7 @@
     out = esc(out)
       .replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")
       .replace(/(^|[\s(])\*([^*\s][^*]*?)\*(?=[\s).,;:!?]|$)/g, "$1<i>$2</i>")
+      .replace(/(^|[\s(])_([^_\s][^_]*?)_(?=[\s).,;:!?]|$)/g, "$1<i>$2</i>")
       .replace(/`([^`]+)`/g, "<code>$1</code>");
     return out.replace(/\u0000(\d+)\u0000/g, (_, i) => referenceButton(refs[Number(i)]));
   }
@@ -1066,6 +1093,7 @@
         <header class="ai-panel-head">
           <div><h2 id="aiPanelTitle">${ic("sparkle")}<span>Assistant</span></h2><p>Répond à partir des données auxquelles vous avez accès.</p></div>
           <div class="ai-panel-actions">
+            ${ttsSupported() ? `<button type="button" class="ai-icon-btn" data-p3-panel="voice-mode" title="Conversation vocale : les réponses sont lues à voix haute" aria-label="Conversation vocale" aria-pressed="false">${ic("speaker")}</button>` : ""}
             <button type="button" class="ai-icon-btn" data-p3-panel="clear" title="Nouvelle discussion" aria-label="Nouvelle discussion">${ic("refresh")}</button>
             <button type="button" class="ai-icon-btn" data-p3-panel="close" title="Fermer" aria-label="Fermer l’assistant">${ic("x")}</button>
           </div>
@@ -1074,7 +1102,7 @@
         <div id="aiMessages" class="ai-messages" aria-live="polite"></div>
         <div id="aiSuggestions" class="ai-suggestions"></div>
         <form id="aiComposer" class="ai-composer">
-          <textarea id="aiQuestion" rows="2" maxlength="2500" placeholder="Posez votre question…" aria-label="Votre question"></textarea>
+          <textarea id="aiQuestion" rows="2" maxlength="2500" placeholder="Posez une question ou demandez une action…" aria-label="Votre question"></textarea>
           ${speechSupported() ? `<button type="button" class="ai-mic" data-p3-panel="mic" aria-label="Poser la question à voix haute" title="Poser la question à voix haute" aria-pressed="false">${ic("mic")}</button>` : ""}
           <button type="submit" class="ai-send" aria-label="Envoyer">${ic("send")}</button>
         </form>
@@ -1082,6 +1110,201 @@
       </aside>`,
     );
     return document.getElementById("aiPanel");
+  }
+
+  // ----- Actions proposed by the AI, carried out only once the person confirms -----
+  const ACTION_TITLES = {
+    "task.create": "Nouvelle tâche",
+    "punch.create": "Nouvelle réserve",
+    "report.create": "Compte rendu de chantier",
+    "time.add": "Heures travaillées",
+    "planning.create": "Affectation au planning",
+    "absence.request": "Demande d’absence",
+  };
+  const ABSENCE_TYPES = ["Vacances", "Maladie", "Autre"];
+  const PRIORITY = { low: "Basse", normal: "Normale", high: "Haute", urgent: "Urgente", critical: "Critique" };
+  const ACTION_BLOCK = /```action\s*([\s\S]*?)```/g;
+  // The text shown to the person: action blocks are replaced by their confirmation cards
+  // (an unfinished block, while the answer is still arriving, is hidden too).
+  const visibleText = (text) => String(text || "").replace(ACTION_BLOCK, "").replace(/```action[\s\S]*$/, "").trim();
+  function parseActions(text) {
+    const actions = [];
+    for (const match of String(text || "").matchAll(ACTION_BLOCK)) {
+      try {
+        const a = JSON.parse(match[1]);
+        if (a && ACTION_TITLES[a.type] && actions.length < 3) actions.push({ ...a, status: "pending" });
+      } catch {
+        // A malformed block is ignored rather than guessed.
+      }
+    }
+    return actions;
+  }
+  const projectOf = (id) => (state().projects || []).find((p) => String(p.id) === String(id));
+  const employeeOf = (id) => (state().employees || []).find((e) => String(e.id) === String(id));
+  function describeAction(a) {
+    const rows = [];
+    const project = a.projectId ? projectOf(a.projectId) : null;
+    const missing = [];
+    const need = (value, label) => {
+      if (value == null || String(value).trim() === "") missing.push(label);
+    };
+    if (["task.create", "punch.create", "report.create", "time.add", "planning.create"].includes(a.type)) {
+      if (!project) missing.push("chantier");
+      else rows.push(["Chantier", project.title || project.id]);
+    }
+    if (a.type === "task.create" || a.type === "punch.create") {
+      need(a.title, "titre");
+      rows.push([a.type === "task.create" ? "Tâche" : "Réserve", a.title || "—"]);
+      if (a.dueDate) rows.push(["Échéance", swissDate(a.dueDate)]);
+      const level = a.priority || a.severity;
+      if (level) rows.push([a.type === "task.create" ? "Priorité" : "Gravité", PRIORITY[level] || level]);
+      if (a.assigneeId) rows.push(["Responsable", employeeOf(a.assigneeId)?.name || a.assigneeId]);
+    } else if (a.type === "report.create") {
+      need(a.summary, "résumé");
+      rows.push(["Date", swissDate(a.date || today())], ["Résumé", a.summary || "—"]);
+      if (a.issues) rows.push(["Problèmes", a.issues]);
+    } else if (a.type === "time.add") {
+      if (!a.employeeId && !profile().employee_id) missing.push("salarié");
+      need(a.date, "date");
+      need(a.start, "début");
+      need(a.end, "fin");
+      if (a.employeeId) rows.push(["Salarié", employeeOf(a.employeeId)?.name || a.employeeId]);
+      rows.push(["Date", swissDate(a.date)], ["Horaire", `${a.start || "?"} – ${a.end || "?"}${Number(a.break) ? ` (pause ${Number(a.break)} min)` : ""}`]);
+      if (a.note) rows.push(["Commentaire", a.note]);
+    } else if (a.type === "planning.create") {
+      need(a.employeeId, "salarié");
+      need(a.date, "date");
+      rows.push(["Salarié", employeeOf(a.employeeId)?.name || a.employeeId || "—"], ["Date", swissDate(a.date)], ["Horaire", `${a.start || "?"} – ${a.end || "?"}`]);
+      need(a.start, "début");
+      need(a.end, "fin");
+    } else if (a.type === "absence.request") {
+      if (!a.employeeId && !profile().employee_id) missing.push("salarié");
+      need(a.from, "début");
+      need(a.to, "fin");
+      if (a.employeeId) rows.push(["Salarié", employeeOf(a.employeeId)?.name || a.employeeId]);
+      rows.push(["Type", ABSENCE_TYPES.includes(a.absenceType) ? a.absenceType : "Vacances"]);
+      rows.push(["Période", `du ${swissDate(a.from)} au ${swissDate(a.to)}`]);
+    }
+    return { title: ACTION_TITLES[a.type], rows, missing };
+  }
+  async function executeAction(a) {
+    const me = profile();
+    const enc = encodeURIComponent;
+    if (a.type === "task.create")
+      return core().api("operations/tasks", { projectId: a.projectId, title: a.title, priority: a.priority || "normal", dueDate: a.dueDate || null, assignedEmployeeId: a.assigneeId || null, status: "todo" });
+    if (a.type === "punch.create")
+      return core().api("operations/project/" + enc(a.projectId) + "/punch", { title: a.title, severity: a.severity || "normal", dueDate: a.dueDate || null });
+    if (a.type === "report.create")
+      return core().api("operations/project/" + enc(a.projectId) + "/report", { reportDate: a.date || today(), summary: a.summary, issues: a.issues || "", weather: "", materials: "", team: "" });
+    if (a.type === "time.add")
+      return core().command("time.add", { employeeId: a.employeeId || me.employee_id, project: a.projectId, date: a.date, start: a.start, end: a.end, break: Number(a.break || 0), note: a.note || "" });
+    if (a.type === "planning.create")
+      return core().command("create", { employeeId: a.employeeId, project: a.projectId, date: a.date, start: a.start, end: a.end, location: projectOf(a.projectId)?.address || "" }, "planning");
+    if (a.type === "absence.request")
+      return core().command("absence.request", { employeeId: a.employeeId || me.employee_id, from: a.from, to: a.to, type: ABSENCE_TYPES.includes(a.absenceType) ? a.absenceType : "Vacances", comment: a.comment || "" });
+    throw new Error("Action inconnue.");
+  }
+  function actionCard(a, msgIndex, actionIndex) {
+    const d = describeAction(a);
+    const ids = `data-msg="${msgIndex}" data-act="${actionIndex}"`;
+    let footer;
+    if (a.status === "done") footer = `<p class="ai-action-state ok">${ic("check")}<span>Enregistré</span></p>`;
+    else if (a.status === "cancelled") footer = '<p class="ai-action-state">Annulé</p>';
+    else if (a.status === "running") footer = '<p class="ai-action-state">Enregistrement…</p>';
+    else if (d.missing.length) footer = `<p class="ai-action-state warn">Information manquante : ${esc(d.missing.join(", "))}. Précisez-la dans votre message.</p>`;
+    else
+      footer = `${a.status === "error" ? `<p class="ai-action-state warn">${esc(a.error || "Enregistrement impossible.")}</p>` : ""}<div class="ai-action-buttons"><button type="button" class="btn primary" data-p3-act="confirm" ${ids}>${a.status === "error" ? "Réessayer" : "Confirmer"}</button><button type="button" class="btn secondary" data-p3-act="cancel" ${ids}>Annuler</button></div>`;
+    return `<div class="ai-action-card"><b>${esc(d.title)}</b><dl>${d.rows.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join("")}</dl>${footer}</div>`;
+  }
+
+  // ----- Reading answers aloud (the browser's own voices, no extra service) -----
+  const ttsSupported = () => typeof window !== "undefined" && "speechSynthesis" in window && typeof window.SpeechSynthesisUtterance === "function";
+  let speaking = null,
+    voiceMode = false;
+  try {
+    voiceMode = localStorage.getItem("sgo_ai_voice") === "1";
+  } catch {
+    voiceMode = false;
+  }
+  function speechLanguage(text) {
+    const t = " " + String(text).toLowerCase() + " ";
+    const score = (words) => words.reduce((n, w) => n + (t.includes(w) ? 1 : 0), 0);
+    const scores = {
+      "pt-PT": score([" não ", " você", "ção ", " está ", " obrigado", " são ", " uma ", " para o "]),
+      "de-CH": score([" und ", " der ", " die ", " ist ", " nicht ", " mit ", " für "]),
+      "it-CH": score([" che ", " della ", " sono ", " non ", " per il ", " è ", " gli "]),
+      "en-GB": score([" the ", " and ", " is ", " are ", " with ", " you "]),
+      "fr-CH": score([" le ", " la ", " les ", " des ", " est ", " et ", " pour ", " vous "]),
+    };
+    return Object.entries(scores).sort((a, b) => b[1] - a[1])[0][0];
+  }
+  function pickVoice(lang) {
+    const voices = window.speechSynthesis.getVoices?.() || [];
+    const base = lang.slice(0, 2);
+    return voices.find((v) => v.lang === lang) || voices.find((v) => v.lang?.startsWith(base + "-CH")) || voices.find((v) => v.lang?.startsWith(base)) || null;
+  }
+  function speechText(text) {
+    return visibleText(text)
+      .replace(/\[\[([^\]]+)\]\]/g, (_, id) => projectOf(id)?.title || id)
+      .replace(/\*\*|`|_/g, "")
+      .replace(/CHF\s?([\d']+)\.(\d{2})/g, (_, a, b) => `${a.replace(/'/g, " ")} francs${b !== "00" ? " " + b : ""}`)
+      .replace(/^[-*•]\s+/gm, "")
+      .trim();
+  }
+  function stopSpeaking() {
+    if (!ttsSupported()) return;
+    speaking = null;
+    window.speechSynthesis.cancel();
+    refreshSpeakButtons();
+  }
+  function speak(text, key, onEnd) {
+    if (!ttsSupported()) return;
+    window.speechSynthesis.cancel();
+    const clean = speechText(text);
+    if (!clean) return;
+    const lang = speechLanguage(clean);
+    const voice = pickVoice(lang);
+    // Long texts are read sentence by sentence: some browsers stop a single long utterance.
+    const chunks = clean.match(/[^.!?\n]+[.!?]*\s*|\n+/g)?.map((c) => c.trim()).filter(Boolean) || [clean];
+    const token = {};
+    speaking = { key, token };
+    chunks.forEach((chunk, i) => {
+      const u = new window.SpeechSynthesisUtterance(chunk);
+      u.lang = voice?.lang || lang;
+      if (voice) u.voice = voice;
+      u.rate = 1.03;
+      if (i === chunks.length - 1)
+        u.onend = () => {
+          if (speaking?.token !== token) return;
+          speaking = null;
+          refreshSpeakButtons();
+          onEnd?.();
+        };
+      window.speechSynthesis.speak(u);
+    });
+    refreshSpeakButtons();
+  }
+  function refreshSpeakButtons() {
+    for (const b of document.querySelectorAll("[data-p3-speak]")) {
+      const active = speaking?.key === b.dataset.p3Speak;
+      b.classList.toggle("active", active);
+      b.setAttribute("aria-pressed", String(active));
+      b.title = active ? "Arrêter la lecture" : "Écouter";
+    }
+  }
+  function speakButton(key) {
+    return ttsSupported() ? `<button type="button" class="ai-tool-btn" data-p3-speak="${esc(key)}" title="Écouter" aria-label="Écouter" aria-pressed="false">${ic("speaker")}</button>` : "";
+  }
+
+  function messageHtml(m, i) {
+    if (m.role === "user") return `<div class="ai-msg ai-user"><p>${esc(m.text)}</p></div>`;
+    if (m.role === "error")
+      return `<div class="ai-msg ai-error"><p>${esc(m.text)}</p>${i === chat.length - 1 ? '<button type="button" class="btn secondary" data-p3-panel="retry">Réessayer</button>' : ""}</div>`;
+    const text = visibleText(m.text);
+    const body = text ? richText(text) : m.streaming ? "<p class=\"ai-wait\">L’assistant réfléchit…</p>" : "";
+    const cards = (m.actions || []).map((a, k) => actionCard(a, i, k)).join("");
+    const tools = m.streaming ? "" : `<div class="ai-msg-tools">${speakButton("chat:" + i)}<button type="button" class="ai-tool-btn" data-p3-copy="${i}" title="Copier la réponse" aria-label="Copier la réponse">${ic("copy")}</button></div>`;
+    return `<div class="ai-msg ai-answer${m.streaming ? " ai-streaming" : ""}" data-index="${i}"><div class="ai-rich">${body}</div>${cards}${tools}</div>`;
   }
 
   function renderPanel() {
@@ -1094,22 +1317,24 @@
       .join("");
     const messages = panel.querySelector("#aiMessages");
     messages.innerHTML = chat.length
-      ? chat
-          .map((m, i) =>
-            m.role === "user"
-              ? `<div class="ai-msg ai-user"><p>${esc(m.text)}</p></div>`
-              : m.role === "error"
-                ? `<div class="ai-msg ai-error"><p>${esc(m.text)}</p>${i === chat.length - 1 ? '<button type="button" class="btn secondary" data-p3-panel="retry">Réessayer</button>' : ""}</div>`
-                : `<div class="ai-msg ai-answer"><div class="ai-rich">${richText(m.text)}</div><button type="button" class="ai-copy" data-p3-copy="${i}" title="Copier la réponse" aria-label="Copier la réponse">${ic("copy")}</button></div>`,
-          )
-          .join("") + (asking ? '<div class="ai-msg ai-answer ai-typing"><p>L’assistant réfléchit…</p></div>' : "")
-      : `<div class="ai-welcome"><p><b>Bonjour ${esc((profile().name || "").split(" ")[0] || "")} !</b></p><p>Posez une question sur vos chantiers, factures, planning ou stock. Je réponds à partir des données que votre compte peut voir.</p>${aiReady() ? "" : '<p class="muted">L’IA externe n’est pas configurée : les réponses sont des résumés simples calculés par l’application.</p>'}</div>`;
+      ? chat.map(messageHtml).join("")
+      : `<div class="ai-welcome"><p><b>Bonjour ${esc((profile().name || "").split(" ")[0] || "")} !</b></p><p>Posez une question sur vos chantiers, factures, planning ou stock, ou demandez une action : « Ajoute une tâche… », « J’ai travaillé de 7 h à 16 h hier sur… ». Vous confirmez toujours avant l’enregistrement.</p>${aiReady() ? "" : '<p class="muted">L’IA externe n’est pas configurée : les réponses sont des résumés simples calculés par l’application.</p>'}</div>`;
     messages.scrollTop = messages.scrollHeight;
     const questions = SUGGESTIONS[page] || DEFAULT_SUGGESTIONS;
     panel.querySelector("#aiSuggestions").innerHTML = asking
       ? ""
       : questions.map((q) => `<button type="button" class="ai-chip" data-p3-ask="${esc(q)}">${esc(q)}</button>`).join("");
-    panel.querySelector(".ai-send").disabled = asking;
+    // While an answer arrives, the send button becomes a stop button.
+    const send = panel.querySelector(".ai-send");
+    send.innerHTML = ic(asking ? "stop" : "send");
+    send.setAttribute("aria-label", asking ? "Arrêter la réponse" : "Envoyer");
+    send.title = asking ? "Arrêter la réponse" : "Envoyer";
+    send.classList.toggle("stop", asking);
+    const voiceToggle = panel.querySelector("[data-p3-panel='voice-mode']");
+    if (voiceToggle) {
+      voiceToggle.setAttribute("aria-pressed", String(voiceMode));
+      voiceToggle.classList.toggle("active", voiceMode);
+    }
     // Transparency: where the questions go, and how much of the daily allowance is used.
     const usage = aiStatus?.usage;
     const footnote = [
@@ -1117,6 +1342,23 @@
       usage?.limit && usage.today >= usage.limit * 0.8 ? `${usage.today} / ${usage.limit} demandes utilisées aujourd’hui.` : "",
     ].filter(Boolean).join(" ");
     panel.querySelector("#aiFootnote").textContent = footnote;
+    refreshSpeakButtons();
+  }
+
+  // Only the answer being written is redrawn while it arrives.
+  let liveFrame = 0;
+  function updateLiveAnswer() {
+    if (liveFrame) return;
+    liveFrame = (window.requestAnimationFrame || setTimeout)(() => {
+      liveFrame = 0;
+      const index = chat.length - 1;
+      const node = document.querySelector(`#aiMessages .ai-msg[data-index="${index}"] .ai-rich`);
+      if (!node || !chat[index]) return;
+      const messages = document.getElementById("aiMessages");
+      const atBottom = messages.scrollHeight - messages.scrollTop - messages.clientHeight < 80;
+      node.innerHTML = richText(visibleText(chat[index].text)) || "<p class=\"ai-wait\">L’assistant réfléchit…</p>";
+      if (atBottom) messages.scrollTop = messages.scrollHeight;
+    });
   }
 
   function setLauncherState(open) {
@@ -1141,35 +1383,120 @@
     document.getElementById("aiBackdrop").hidden = true;
     document.body.classList.remove("ai-panel-open");
     setLauncherState(false);
+    voiceQuestion?.abort?.();
+    if (speaking?.key?.startsWith("chat:")) stopSpeaking();
   }
 
-  async function ask(question) {
+  // The answer arrives piece by piece (server-sent events). Without streaming support the
+  // server simply answers in JSON, which is handled the same way.
+  async function streamAssistant(payload, onDelta, signal) {
+    const response = await fetch("/api/operations/p3/assistant", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...payload, stream: true }),
+      signal,
+    });
+    const type = response.headers?.get?.("content-type") || "";
+    if (!response.ok || !type.includes("text/event-stream")) {
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const error = new Error(data.error || "Le service IA est indisponible.");
+        error.status = response.status;
+        throw error;
+      }
+      if (data.answer) onDelta(data.answer);
+      return { mode: data.mode || "ai" };
+    }
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "",
+      mode = "ai";
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let index;
+      while ((index = buffer.indexOf("\n\n")) >= 0) {
+        const block = buffer.slice(0, index);
+        buffer = buffer.slice(index + 2);
+        for (const line of block.split("\n")) {
+          if (!line.startsWith("data:")) continue;
+          const message = JSON.parse(line.slice(5));
+          if (message.delta) onDelta(message.delta);
+          if (message.mode) mode = message.mode;
+          if (message.error) throw new Error(message.error);
+        }
+      }
+    }
+    return { mode };
+  }
+
+  let askController = null;
+  async function ask(question, { spoken = false } = {}) {
     question = String(question || "").trim();
     if (!question || asking) return;
     loadChat();
+    stopSpeaking();
+    // Earlier turns let the AI understand follow-up questions ("et le mois prochain ?").
+    const history = chat
+      .filter((m) => m.role === "user" || m.role === "ai")
+      .slice(-8)
+      .map((m) =>
+        m.role === "user"
+          ? { role: "user", content: m.text }
+          : {
+              role: "assistant",
+              content:
+                visibleText(m.text) +
+                (m.actions || []).map((a) => `\n[Action ${a.type} proposée : ${a.status === "done" ? "confirmée et enregistrée" : a.status === "cancelled" ? "annulée" : "non confirmée"}]`).join(""),
+            },
+      );
     chat.push({ role: "user", text: question });
+    const answer = { role: "ai", text: "", streaming: true };
+    chat.push(answer);
     asking = true;
     saveChat();
     renderPanel();
     const projectId = openProjectId();
     const pageTitle = document.getElementById("title")?.textContent?.trim() || "";
-    // Earlier turns let the AI understand follow-up questions ("et le mois prochain ?").
-    const history = chat
-      .slice(0, -1)
-      .filter((m) => m.role === "user" || m.role === "ai")
-      .slice(-8)
-      .map((m) => ({ role: m.role === "user" ? "user" : "assistant", content: m.text }));
+    askController = typeof AbortController === "function" ? new AbortController() : null;
+    let stopped = false;
     try {
-      const out = await api("assistant", { question, history, page: pageTitle, projectId });
-      chat.push({ role: "ai", text: out.answer || "Aucune réponse." });
+      const out = await streamAssistant(
+        { question, history, page: pageTitle, projectId },
+        (delta) => {
+          answer.text += delta;
+          updateLiveAnswer();
+        },
+        askController?.signal,
+      );
+      if (!answer.text.trim()) answer.text = "Aucune réponse.";
       if (out.mode === "ai" && aiStatus?.usage) aiStatus.usage.today += 1;
     } catch (error) {
-      chat.push({ role: "error", text: (error.message || "Le service IA est indisponible.") + " Vous pouvez réessayer." });
+      stopped = error?.name === "AbortError";
+      if (stopped) answer.text = (answer.text ? answer.text + "\n\n" : "") + "_Réponse arrêtée._";
+      else if (answer.text) answer.text += "\n\n_" + (error.message || "Réponse interrompue.") + "_";
+      else {
+        chat.pop();
+        chat.push({ role: "error", text: (error.message || "Le service IA est indisponible.") + " Vous pouvez réessayer." });
+      }
     } finally {
+      delete answer.streaming;
+      answer.actions = parseActions(answer.text);
       asking = false;
+      askController = null;
       saveChat();
       renderPanel();
     }
+    // Spoken question, or conversation mode: the answer is read aloud, then (spoken question
+    // in conversation mode) the microphone opens again for the next question.
+    if (!stopped && chat.at(-1) === answer && (spoken || voiceMode) && !document.getElementById("aiPanel")?.hidden)
+      speak(answer.text, "chat:" + (chat.length - 1), () => {
+        const mic = document.querySelector("#aiPanel .ai-mic");
+        if (spoken && voiceMode && mic && !document.getElementById("aiPanel")?.hidden && !answer.actions?.some((a) => a.status === "pending"))
+          toggleVoiceQuestion(mic);
+      });
   }
 
   // Asking out loud: the browser's own dictation fills the field, then the question is sent.
@@ -1182,6 +1509,7 @@
     }
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) return core().toast("La dictée n’est pas disponible dans ce navigateur.");
+    stopSpeaking();
     const field = document.getElementById("aiQuestion");
     const recognizer = new SpeechRecognition();
     recognizer.lang = "fr-CH";
@@ -1201,7 +1529,7 @@
       control.setAttribute("aria-pressed", "false");
       if (heard) {
         field.value = "";
-        ask(heard);
+        ask(heard, { spoken: true });
       }
     };
     voiceQuestion = recognizer;
@@ -1246,11 +1574,129 @@
     );
   }
 
+  // ----- Point du jour on the dashboard -----
+  let briefing = null,
+    briefingLoading = false;
+  const localDay = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Zurich" }).format(new Date());
+  function renderBriefing() {
+    const card = document.getElementById("aiBriefing");
+    if (!card) return;
+    const time = briefing?.createdAt ? new Date(briefing.createdAt).toLocaleTimeString("fr-CH", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Zurich" }) : "";
+    card.innerHTML = `<div class="ai-briefing-head">
+        <h2>${ic("sparkle")}<span>Point du jour</span></h2>
+        <div class="ai-briefing-actions">${briefing?.text ? speakButton("briefing") : ""}<button type="button" class="ai-tool-btn" data-p3-briefing="refresh" title="Actualiser" aria-label="Actualiser le point du jour" ${briefingLoading ? "disabled" : ""}>${ic("refresh")}</button></div>
+      </div>
+      <div class="ai-rich">${briefingLoading && !briefing?.text ? "<p class=\"ai-wait\">Préparation de votre point du jour…</p>" : briefing?.error ? `<p class="muted">${esc(briefing.error)}</p>` : richText(briefing?.text || "")}</div>
+      ${time && !briefing?.error ? `<p class="ai-briefing-meta">Préparé à ${esc(time)}${briefing.mode === "ai" && aiStatus?.provider ? " par l’assistant" : ""}.</p>` : ""}`;
+    refreshSpeakButtons();
+  }
+  async function loadBriefing(refresh = false) {
+    if (briefingLoading) return;
+    briefingLoading = true;
+    renderBriefing();
+    try {
+      briefing = { ...(await api("briefing" + (refresh ? "?refresh=1" : ""))), loadedFor: localDay() };
+    } catch (error) {
+      briefing = { error: error.message || "Point du jour indisponible.", loadedFor: localDay() };
+    } finally {
+      briefingLoading = false;
+      renderBriefing();
+    }
+  }
+  function addBriefingCard() {
+    if (isClient() || core().getPage?.() !== "dashboard") return;
+    const welcome = document.querySelector("#content .workspace-welcome");
+    if (!welcome || document.getElementById("aiBriefing")) return;
+    welcome.insertAdjacentHTML("afterend", '<section id="aiBriefing" class="card ai-briefing" aria-live="polite" aria-label="Point du jour"></section>');
+    renderBriefing();
+    if (!briefing || briefing.loadedFor !== localDay()) loadBriefing();
+  }
+
+  // ----- Documents: summary and questions -----
+  let docSession = null;
+  function addDocumentButtons(root = document) {
+    if (isClient() || !aiReady()) return;
+    for (const download of root?.querySelectorAll?.('#content [data-action="download"][data-id], #modalBody [data-action="download"][data-id]') || []) {
+      if (download.parentElement.querySelector(`[data-p3-doc="${window.CSS?.escape ? window.CSS.escape(download.dataset.id) : download.dataset.id}"]`)) continue;
+      download.insertAdjacentHTML("afterend", ` <button type="button" class="btn secondary ai-action" data-p3-doc="${esc(download.dataset.id)}">${ic("sparkle")}<span>Résumer</span></button>`);
+    }
+  }
+  const MIME = { pdf: "application/pdf", png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp", txt: "text/plain" };
+  async function documentContent(doc) {
+    const response = await fetch("/api/state/documents/" + encodeURIComponent(doc.id), { credentials: "same-origin" });
+    if (!response.ok) throw new Error("Téléchargement impossible ou accès expiré.");
+    const extension = String(doc.name || "").split(".").pop().toLowerCase();
+    const file = new File([await response.blob()], doc.name || "document", { type: MIME[extension] || "application/octet-stream" });
+    if (extension === "pdf") return pdfContent(file);
+    if (extension === "txt") return { text: (await file.text()).slice(0, 80000) };
+    if (MIME[extension]?.startsWith("image/")) return { images: [await readImage(file, 1800)] };
+    throw new Error("Ce type de fichier ne peut pas être résumé (PDF, image ou texte uniquement).");
+  }
+  function renderDocThread() {
+    const target = document.getElementById("p3DocThread");
+    if (!target || !docSession) return;
+    target.innerHTML = docSession.turns
+      .map((t, i) =>
+        t.role === "user"
+          ? `<div class="ai-msg ai-user"><p>${esc(t.text)}</p></div>`
+          : `<div class="ai-msg ai-answer${t.error ? " ai-error" : ""}"><div class="ai-rich">${t.waiting ? '<p class="ai-wait">Lecture du document…</p>' : t.error ? `<p>${esc(t.text)}</p>` : richText(t.text)}</div>${t.waiting || t.error ? "" : `<div class="ai-msg-tools">${speakButton("doc:" + i)}<button type="button" class="ai-tool-btn" data-p3-doc-copy="${i}" title="Copier" aria-label="Copier">${ic("copy")}</button></div>`}</div>`,
+      )
+      .join("");
+    const form = document.getElementById("p3DocAsk");
+    if (form) form.querySelector("button").disabled = docSession.busy;
+    refreshSpeakButtons();
+  }
+  async function askDocument(question = "") {
+    if (!docSession || docSession.busy) return;
+    docSession.busy = true;
+    // Earlier questions and answers about this document (the summary counts as an answer).
+    const history = docSession.turns
+      .filter((t) => !t.error && !t.waiting)
+      .slice(-6)
+      .map((t) => ({ role: t.role === "user" ? "user" : "assistant", content: t.text }));
+    if (question) docSession.turns.push({ role: "user", text: question });
+    const answer = { role: "ai", text: "", waiting: true };
+    docSession.turns.push(answer);
+    renderDocThread();
+    try {
+      if (!docSession.content) docSession.content = await documentContent(docSession.doc);
+      const out = await api("document", { documentId: docSession.doc.id, ...docSession.content, question, history });
+      answer.text = out.answer || "Aucune réponse.";
+      if (aiStatus?.usage) aiStatus.usage.today += 1;
+    } catch (error) {
+      answer.text = error.message || "Lecture impossible.";
+      answer.error = true;
+    } finally {
+      answer.waiting = false;
+      docSession.busy = false;
+      renderDocThread();
+    }
+  }
+  function openDocument(id) {
+    const doc = (state().documents || []).find((d) => String(d.id) === String(id));
+    if (!doc) return core().toast("Document introuvable.");
+    docSession = { doc, content: null, turns: [], busy: false };
+    core().modal(
+      "Résumé · " + (doc.name || "document"),
+      `<div class="p3-doc">
+        <div id="p3DocThread" class="p3-doc-thread" aria-live="polite"></div>
+        <form id="p3DocAsk" class="ai-composer">
+          <textarea id="p3DocQuestion" rows="2" maxlength="2000" placeholder="Poser une question sur ce document (délais, montants, obligations…)" aria-label="Question sur le document"></textarea>
+          <button type="submit" class="ai-send" aria-label="Envoyer">${ic("send")}</button>
+        </form>
+        <p class="ai-footnote">Le contenu du document est envoyé${aiStatus?.provider ? " à " + esc(aiStatus.provider) : " au service IA"} pour cette lecture. Vérifiez les points importants dans l’original.</p>
+      </div>`,
+    );
+    askDocument();
+  }
+
   function afterRender() {
     if (!profile()?.id || isClient()) return removeLauncher();
     ensureLauncher();
+    addBriefingCard();
     ensureStatus().then(() => {
       addPageButton();
+      addDocumentButtons();
       if (!document.getElementById("aiPanel")?.hidden) renderPanel();
     });
   }
@@ -1258,9 +1704,12 @@
   {
     const modalBody = document.getElementById("modalBody");
     if (modalBody && window.MutationObserver)
-      new MutationObserver(() => addProjectButton()).observe(modalBody, { childList: true });
+      new MutationObserver(() => {
+        addProjectButton();
+        addDocumentButtons();
+      }).observe(modalBody, { childList: true, subtree: true });
   }
-  document.addEventListener("click", (event) => {
+  document.addEventListener("click", async (event) => {
     const open = event.target.closest("[data-p3-open]");
     if (open)
       return openTool(open.dataset.p3Open, { projectId: open.dataset.project || "", kind: open.dataset.kind || "", id: open.dataset.target || "" });
@@ -1279,7 +1728,42 @@
       return;
     }
     const copy = event.target.closest("[data-p3-copy]");
-    if (copy) return copyText(chat[Number(copy.dataset.p3Copy)]?.text || "");
+    if (copy) return copyText(visibleText(chat[Number(copy.dataset.p3Copy)]?.text || ""));
+    const docCopy = event.target.closest("[data-p3-doc-copy]");
+    if (docCopy) return copyText(docSession?.turns[Number(docCopy.dataset.p3DocCopy)]?.text || "");
+    const speakNode = event.target.closest("[data-p3-speak]");
+    if (speakNode) {
+      const key = speakNode.dataset.p3Speak;
+      if (speaking?.key === key) return stopSpeaking();
+      const [kind, index] = key.split(":");
+      const text = kind === "chat" ? chat[Number(index)]?.text : kind === "doc" ? docSession?.turns[Number(index)]?.text : briefing?.text;
+      return speak(text || "", key);
+    }
+    const doc = event.target.closest("[data-p3-doc]");
+    if (doc) return openDocument(doc.dataset.p3Doc);
+    if (event.target.closest("[data-p3-briefing='refresh']")) return loadBriefing(true);
+    const act = event.target.closest("[data-p3-act]");
+    if (act) {
+      const message = chat[Number(act.dataset.msg)];
+      const action = message?.actions?.[Number(act.dataset.act)];
+      if (!action || action.status === "running" || action.status === "done") return;
+      if (act.dataset.p3Act === "cancel") action.status = "cancelled";
+      else {
+        action.status = "running";
+        renderPanel();
+        try {
+          await executeAction(action);
+          action.status = "done";
+          action.error = "";
+          core().toast("Enregistré.");
+        } catch (error) {
+          action.status = "error";
+          action.error = error.message || "Enregistrement impossible.";
+        }
+      }
+      saveChat();
+      return renderPanel();
+    }
     const chip = event.target.closest("[data-p3-ask]");
     if (chip) return ask(chip.dataset.p3Ask);
     const control = event.target.closest("[data-p3-panel]");
@@ -1288,7 +1772,19 @@
     if (action === "toggle") document.getElementById("aiPanel")?.hidden === false ? closePanel() : openPanel();
     else if (action === "close") closePanel();
     else if (action === "mic") toggleVoiceQuestion(control);
-    else if (action === "clear") {
+    else if (action === "voice-mode") {
+      voiceMode = !voiceMode;
+      try {
+        localStorage.setItem("sgo_ai_voice", voiceMode ? "1" : "0");
+      } catch {
+        // Not kept in private browsing.
+      }
+      if (!voiceMode) stopSpeaking();
+      core().toast(voiceMode ? "Conversation vocale : les réponses seront lues à voix haute." : "Lecture automatique désactivée.");
+      renderPanel();
+    } else if (action === "clear") {
+      askController?.abort();
+      stopSpeaking();
       chat = [];
       saveChat();
       renderPanel();
@@ -1301,8 +1797,18 @@
     }
   });
   document.addEventListener("submit", (event) => {
+    if (event.target.id === "p3DocAsk") {
+      event.preventDefault();
+      const field = document.getElementById("p3DocQuestion");
+      const question = field.value.trim();
+      if (!question || docSession?.busy) return;
+      field.value = "";
+      askDocument(question);
+      return;
+    }
     if (event.target.id !== "aiComposer") return;
     event.preventDefault();
+    if (asking) return askController?.abort();
     const field = document.getElementById("aiQuestion");
     const question = field.value;
     field.value = "";
@@ -1311,9 +1817,11 @@
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && document.getElementById("aiPanel")?.hidden === false && document.getElementById("modalWrap")?.classList.contains("hidden"))
       closePanel();
-    if (event.target.id === "aiQuestion" && event.key === "Enter" && !event.shiftKey) {
+    if (["aiQuestion", "p3DocQuestion"].includes(event.target.id) && event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
-      document.getElementById("aiComposer").requestSubmit();
+      // Enter never stops an answer that is arriving: only the stop button does.
+      if (event.target.id === "aiQuestion" && asking) return;
+      event.target.form?.requestSubmit();
     }
   });
 
