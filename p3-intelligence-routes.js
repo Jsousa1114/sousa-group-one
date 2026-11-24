@@ -185,18 +185,15 @@ function parseJsonText(value) {
   }
 }
 
-async function callAi({ system, user, imageDataUrl = "", json = false, timeoutMs = 30000 }) {
-  if (!aiConfigured()) D.fail("Le fournisseur IA n'est pas configuré (AI_API_URL, AI_API_KEY/OPENAI_API_KEY et AI_MODEL).", 424);
+// Providers are sometimes briefly overloaded (Gemini answers 503, others 429): such failures are
+// retried once, on AI_FALLBACK_MODEL when it is set, within the same overall time budget.
+// Configuration errors (400, 401, 403, 404) are not retried.
+const RETRYABLE_AI_STATUS = new Set([429, 500, 502, 503, 504]);
+
+async function requestAi(model, system, userContent, json, timeoutMs) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const userContent = imageDataUrl
-      ? [
-          { type: "text", text: user },
-          { type: "image_url", image_url: { url: imageDataUrl } },
-        ]
-      : user;
-    const model = process.env.AI_MODEL;
     const reasoningEffort =
       process.env.AI_REASONING_EFFORT ||
       (/^gpt-6(?:-|$)/i.test(model) ? "none" : "");
@@ -223,20 +220,47 @@ async function callAi({ system, user, imageDataUrl = "", json = false, timeoutMs
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
       // Diagnostics contain no prompts, credentials, provider messages or user data.
-      const safeCode = String(payload?.error?.code || "unknown").replace(/[^a-zA-Z0-9_]/g, "").slice(0,60);
-      console.warn("ai.provider.failure", response.status, safeCode);
-      D.fail("Le service IA est indisponible.", 502);
+      // Gemini wraps errors in an array; OpenAI-style providers return an object.
+      const error = Array.isArray(payload) ? payload[0]?.error : payload?.error;
+      const safeCode = String(error?.code || error?.status || "unknown").replace(/[^a-zA-Z0-9_]/g, "").slice(0, 60);
+      return { ok: false, retryable: RETRYABLE_AI_STATUS.has(response.status), reason: response.status + " " + safeCode };
     }
-    const text = providerText(payload);
-    if (!text) D.fail("Le service IA n'a renvoyé aucun contenu.", 502);
-    return json ? parseJsonText(text) : text.slice(0, 30000);
+    return { ok: true, payload };
   } catch (error) {
-    if (error?.status) throw error;
-    console.warn("ai.provider.failure", error?.name === "AbortError" ? "timeout" : "network");
-    D.fail("Le service IA est indisponible.", 502);
+    return { ok: false, retryable: true, reason: error?.name === "AbortError" ? "timeout" : "network" };
   } finally {
     clearTimeout(timer);
   }
+}
+
+async function callAi({ system, user, imageDataUrl = "", json = false, timeoutMs = 30000 }) {
+  if (!aiConfigured()) D.fail("Le fournisseur IA n'est pas configuré (AI_API_URL, AI_API_KEY/OPENAI_API_KEY et AI_MODEL).", 424);
+  const userContent = imageDataUrl
+    ? [
+        { type: "text", text: user },
+        { type: "image_url", image_url: { url: imageDataUrl } },
+      ]
+    : user;
+  const primary = process.env.AI_MODEL;
+  const fallback = String(process.env.AI_FALLBACK_MODEL || "").trim();
+  const models = [primary, fallback || primary];
+  const deadline = Date.now() + timeoutMs;
+  for (let attempt = 0; attempt < models.length; attempt++) {
+    const remaining = deadline - Date.now();
+    if (remaining < 1500) break;
+    // Leave time for the second attempt if the first one hangs.
+    const budget = attempt === 0 ? Math.round(remaining * 0.6) : remaining;
+    const outcome = await requestAi(models[attempt], system, userContent, json, budget);
+    if (outcome.ok) {
+      const text = providerText(outcome.payload);
+      if (!text) D.fail("Le service IA n'a renvoyé aucun contenu.", 502);
+      return json ? parseJsonText(text) : text.slice(0, 30000);
+    }
+    console.warn("ai.provider.failure", "attempt" + (attempt + 1), outcome.reason);
+    if (!outcome.retryable) break;
+    if (attempt < models.length - 1) await new Promise((resolve) => setTimeout(resolve, 600));
+  }
+  D.fail("Le service IA est indisponible.", 502);
 }
 
 function operationalContext(ctx) {
