@@ -184,6 +184,7 @@
             ${switchRow("planning", "Planning", notif.planning)}
             ${switchRow("absences", "Absences", notif.absences)}
             ${switchRow("finance", "Devis et factures", notif.finance)}
+            ${core()?.getProfile?.()?.role !== "client" ? switchRow("assistant", "Point du jour de l’assistant (en semaine le matin)", notif.assistant !== false) : ""}
             ${switchRow("push", "Notifications push", notif.push)}
             ${switchRow("sound", "Son", notif.sound)}
             ${switchRow("vibration", "Vibration", notif.vibration)}

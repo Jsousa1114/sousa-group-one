@@ -211,6 +211,13 @@ if (require.main === module) {
       runP1();
       const p1Timer = setInterval(runP1, 60 * 60 * 1000);
       p1Timer.unref?.();
+      // "Point du jour" prepared on weekday mornings and sent as a notification.
+      const runBriefings = async () =>
+        require("./p3-intelligence-routes")
+          .runDailyBriefings(pool)
+          .catch((e) => console.error("Daily AI briefings failed", e?.code || e?.status || "unknown"));
+      const briefingTimer = setInterval(runBriefings, 15 * 60 * 1000);
+      briefingTimer.unref?.();
       return server;
     })
     .catch((e) => {

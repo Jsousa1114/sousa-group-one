@@ -145,6 +145,8 @@ function navigationIcon(key) {
 }
 // Shared line icons, same drawing style as the navigation. Used instead of emoji in the interface chrome.
 const UI_ICONS = {
+  speaker: '<path d="M4 9v6h4l5 4V5L8 9H4Z"/><path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/>',
+  check: '<path d="m5 12.5 4.5 4.5L19 7.5"/>',
   copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>',
   mail: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>',
   menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
@@ -606,6 +608,23 @@ async function mutate(
     pending = false;
     buttons.forEach((b) => (b.disabled = false));
   }
+}
+// A state command for features that show their own result (the AI assistant's confirmed
+// actions): errors are thrown to the caller instead of being shown in a form.
+async function command(action, payload = {}, collection) {
+  const send = () =>
+    api("state/command", { action, payload, collection, revision, requestId: crypto.randomUUID() });
+  let out;
+  try {
+    out = await send();
+  } catch (e) {
+    // Someone else changed the data meanwhile: reload it and try once more.
+    if (e.status !== 409) throw e;
+    await refresh(false);
+    out = await send();
+  }
+  await refresh().catch(() => {});
+  return out.result;
 }
 $("loginForm").onsubmit = async (e) => {
   e.preventDefault();
@@ -4027,6 +4046,7 @@ window.addEventListener("online", () => {
 window.SGOChatCore = {
   api,
   mutate,
+  command,
   refresh,
   backgroundRefresh,
   render,
