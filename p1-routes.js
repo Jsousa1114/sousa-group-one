@@ -1112,7 +1112,7 @@ function routes(db) {
     const rows=(await db.query("SELECT * FROM p1_integration_profiles ORDER BY provider")).rows;
     const runtime={
       ebill:!!process.env.EBILL_API_KEY,banking:!!process.env.BANKING_API_KEY,bexio:!!process.env.BEXIO_API_TOKEN,
-      abacus:!!process.env.ABACUS_API_TOKEN,winbiz:!!process.env.WINBIZ_API_TOKEN,email:!!process.env.SMTP_URL,sms:!!process.env.SMS_API_KEY
+      abacus:!!process.env.ABACUS_API_TOKEN,winbiz:!!process.env.WINBIZ_API_TOKEN,email:require("./mailer").configured()||!!process.env.SMTP_URL,sms:!!process.env.SMS_API_KEY
     };
     res.json({profiles:rows,runtime});
   }));

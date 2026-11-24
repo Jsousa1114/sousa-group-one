@@ -83,6 +83,7 @@ function createApp(db = pool) {
   app.use("/api/p2", require("./p2-routes").routes(db));
   app.use("/api/suppliers", require("./supplier-routes").routes(db));
   app.use("/api/pro", require("./pro-routes").routes(db));
+  app.use("/api/mail", require("./mail-routes").routes(db));
   app.use("/api/public/v1", require("./p2-routes").publicRoutes(db));
   app.get(["/favicon.ico", "/icon.svg"], (req, res) => {
     res.set("Cache-Control", "no-cache");
@@ -102,6 +103,7 @@ function createApp(db = pool) {
     "p2-runtime.js",
     "p2-center.js",
     "pro-suite.js",
+    "mail-center.js",
     "supplier-suite.js",
     "supplier.css",
     "styles.css",
@@ -157,10 +159,10 @@ function createApp(db = pool) {
       ).catch(() => {});
     if (err.code === "23505")
       return res.status(409).json({ error: "Cet élément existe déjà." });
-    if (status >= 500) console.error(err);
+    if (status >= 500 && !err.expose) console.error(err);
     res.status(status).json({
       error:
-        status >= 500
+        status >= 500 && !err.expose
           ? "Erreur serveur. Aucune modification confirmée."
           : err.message,
     });
@@ -218,6 +220,13 @@ if (require.main === module) {
           .catch((e) => console.error("Daily AI briefings failed", e?.code || e?.status || "unknown"));
       const briefingTimer = setInterval(runBriefings, 15 * 60 * 1000);
       briefingTimer.unref?.();
+      // Automatic payment reminders by e-mail (when switched on), weekdays during office hours.
+      const runMailReminders = async () =>
+        require("./mail-routes")
+          .processEmailReminders(pool)
+          .catch((e) => console.error("E-mail reminders failed", e?.code || e?.status || "unknown"));
+      const mailTimer = setInterval(runMailReminders, 30 * 60 * 1000);
+      mailTimer.unref?.();
       return server;
     })
     .catch((e) => {

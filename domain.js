@@ -5,6 +5,8 @@ class AppError extends Error {
   constructor(message, status = 400) {
     super(message);
     this.status = status;
+    // Written for the person using the application: shown even for 5xx (e.g. "service unavailable").
+    this.expose = true;
   }
 }
 const fail = (message, status = 400) => {

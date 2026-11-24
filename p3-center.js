@@ -230,6 +230,14 @@
     return `<details class="p3-raw"><summary>Détails techniques</summary><pre class="ops-summary-text">${esc(JSON.stringify(data, null, 2))}</pre></details>`;
   }
 
+  const mailReady = () => !!window.SGOMailCenter?.status?.()?.configured;
+  // The Gmail address of the company the message is about.
+  const mailFrom = (kind) => {
+    const id = document.getElementById("p3MailTarget")?.value || "";
+    const list = kind === "invoice_reminder" ? state().invoices : kind === "quote_followup" ? state().quotes : state().projects;
+    const record = (list || []).find((x) => String(x.id) === String(id));
+    return window.SGOMailCenter?.addressFor?.(record?.company) || "";
+  };
   const canStock = () => ["admin", "direction", "manager"].includes(profile().role);
 
   function renderOcrResult(payload) {
@@ -765,9 +773,11 @@
         const label = buttonNode.textContent;
         buttonNode.disabled = true;
         buttonNode.textContent = "Rédaction…";
+        const kind = document.getElementById("p3MailKind")?.value || "";
+        await window.SGOMailCenter?.loadStatus?.();
         try {
           const out = await api("email-draft", {
-            kind: document.getElementById("p3MailKind")?.value || "",
+            kind,
             id,
             tone: document.getElementById("p3MailTone")?.value || "cordial",
             language: document.getElementById("p3MailLanguage")?.value || "fr",
@@ -779,11 +789,32 @@
               <label>Objet<input id="p3MailSubject" value="${esc(out.subject || "")}" maxlength="200"></label>
               <label class="span-2">Texte<textarea id="p3MailBody" rows="12">${esc(out.body || "")}</textarea></label>
             </div>
-            <div class="form-actions">${button("Copier le texte", "copy-mail")}${button("Ouvrir dans ma messagerie", "open-mail", "primary")}</div>
+            ${mailReady() && kind !== "project_update" ? `<label class="mail-check"><input type="checkbox" id="p3MailAttach" checked> Joindre ${kind === "invoice_reminder" ? "la facture (PDF avec bulletin QR)" : "le devis (PDF)"}</label>` : ""}
+            <div class="form-actions">${button("Copier le texte", "copy-mail")}${mailReady() ? button("Ouvrir dans ma messagerie", "open-mail") + button("Envoyer", "send-mail", "primary") : button("Ouvrir dans ma messagerie", "open-mail", "primary")}</div>
+            ${mailReady() && mailFrom(kind) ? `<p class="muted">Envoyé depuis ${esc(mailFrom(kind))}.</p>` : ""}
           </div>`;
         } finally {
           buttonNode.disabled = false;
           buttonNode.textContent = label;
+        }
+      } else if (action === "send-mail") {
+        const to = document.getElementById("p3MailTo")?.value.trim() || "";
+        if (!to) return core().toast("Indiquez l’adresse e-mail du client.");
+        if (!confirm(`Envoyer cet e-mail à ${to} ?`)) return;
+        buttonNode.disabled = true;
+        try {
+          const out = await core().api("mail/client-message", {
+            kind: document.getElementById("p3MailKind")?.value || "",
+            id: document.getElementById("p3MailTarget")?.value || "",
+            to,
+            subject: document.getElementById("p3MailSubject")?.value || "",
+            body: document.getElementById("p3MailBody")?.value || "",
+            attach: document.getElementById("p3MailAttach")?.checked !== false,
+          });
+          document.getElementById("p3MailResult").innerHTML = `<p class="notice">E-mail envoyé à ${esc(out.to)}${out.attached ? " avec le document en pièce jointe" : ""}.</p>`;
+          core().toast("E-mail envoyé.");
+        } finally {
+          buttonNode.disabled = false;
         }
       } else if (action === "copy-mail") {
         const text = (document.getElementById("p3MailSubject")?.value || "") + "\n\n" + (document.getElementById("p3MailBody")?.value || "");
