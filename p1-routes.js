@@ -1136,4 +1136,4 @@ function routes(db) {
   return r;
 }
 
-module.exports = { routes, ensureSchema, runDueJobs, processInvoiceReminders };
+module.exports = { routes, ensureSchema, runDueJobs, processInvoiceReminders, withStateWrite };

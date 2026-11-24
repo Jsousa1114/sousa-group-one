@@ -22,8 +22,9 @@ async function setup(role = "admin") {
   w.fetch = async (url, opts = {}) => {
     calls.push({ url: String(url), body: opts.body ? JSON.parse(opts.body) : null });
     const json = (payload) => ({ ok: true, status: 200, json: async () => payload });
-    if (String(url).includes("/operations/p3/status")) return json({ providerConfigured: true, transcriptionConfigured: false, features: {} });
-    if (String(url).includes("/operations/p3/assistant")) return json({ mode: "ai", answer: "Deux chantiers sont en retard." });
+    if (String(url).includes("/operations/p3/status")) return json({ providerConfigured: true, provider: "Google Gemini", usage: { today: 0, limit: 150 }, transcriptionConfigured: false, features: {} });
+    if (String(url).includes("/operations/p3/assistant"))
+      return json({ mode: "ai", answer: calls.filter((c) => c.url.includes("/assistant")).length > 1 ? "**Deux chantiers** sont en retard :\n- [[p1]] (35 %)\n- [[X-404]]" : "Deux chantiers sont en retard." });
     if (String(url).endsWith("/api/state")) return json({ data: D.viewState(d, profile), revision: 1, profile, contacts: [] });
     return json({});
   };
@@ -72,6 +73,38 @@ test("the AI assistant is reachable from every page and answers in a side panel"
   }
 });
 
+test("answers are formatted, cite records as links, remember the conversation and can be copied", async () => {
+  const h = await setup("admin");
+  try {
+    click(h, ".top-actions [data-p3-panel='toggle']");
+    assert.match(h.d.getElementById("aiFootnote").textContent, /Google Gemini/, "users are told where questions go");
+    for (const question of ["Quels chantiers sont en retard ?", "Lesquels exactement ?"]) {
+      h.d.getElementById("aiQuestion").value = question;
+      h.d.getElementById("aiComposer").dispatchEvent(new h.w.Event("submit", { bubbles: true, cancelable: true }));
+      for (let i = 0; i < 5; i++) await flush();
+    }
+    const second = h.calls.filter((c) => c.url.includes("/operations/p3/assistant"))[1].body;
+    assert.equal(second.question, "Lesquels exactement ?");
+    assert.deepEqual(second.history, [
+      { role: "user", content: "Quels chantiers sont en retard ?" },
+      { role: "assistant", content: "Deux chantiers sont en retard." },
+    ]);
+    const answer = [...h.d.querySelectorAll(".ai-msg.ai-answer .ai-rich")].at(-1);
+    assert.equal(answer.querySelector("b").textContent, "Deux chantiers");
+    assert.equal(answer.querySelectorAll("li").length, 2);
+    const ref = answer.querySelector(".ai-ref[data-p3-ref='project']");
+    assert.equal(ref.textContent, "Chantier", "a known project is shown by its title");
+    assert.match(answer.textContent, /X-404/, "an unknown reference stays plain text");
+    assert.equal(answer.querySelectorAll(".ai-ref").length, 1);
+    assert.ok(h.d.querySelector(".ai-msg.ai-answer .ai-copy"));
+    ref.click();
+    assert.equal(h.d.getElementById("aiPanel").hidden, true, "the panel closes to show the record");
+    assert.equal(h.d.getElementById("modalWrap").classList.contains("hidden"), false, "the project opens");
+  } finally {
+    h.close();
+  }
+});
+
 test("AI tools appear on the pages where they are needed and open in a dialog", async () => {
   const h = await setup("admin");
   try {
@@ -90,6 +123,15 @@ test("AI tools appear on the pages where they are needed and open in a dialog", 
     const company = h.d.getElementById("p3QuoteCompany").value;
     const client = h.d.getElementById("p3QuoteClient").selectedOptions[0];
     assert.equal(client.dataset.company, company);
+    h.w.SGOChatCore.closeModal(true);
+
+    click(h, '[data-page="invoices"]');
+    for (let i = 0; i < 3; i++) await flush();
+    click(h, "#content .section-head [data-p3-open='email']");
+    assert.equal(h.d.getElementById("p3MailKind").value, "invoice_reminder");
+    h.d.getElementById("p3MailKind").value = "project_update";
+    h.d.getElementById("p3MailKind").dispatchEvent(new h.w.Event("change", { bubbles: true }));
+    assert.equal(h.d.getElementById("p3MailTarget").value, "p1", "the list follows the kind of message");
   } finally {
     h.close();
   }
