@@ -430,6 +430,14 @@ function selectChat(key) {
     selectedThreadId = "";
   }
 }
+function markVoiceButtons(recording) {
+  for (const button of document.querySelectorAll('[data-action="chat-voice"]')) {
+    button.classList.toggle("recording", recording);
+    button.innerHTML = uiIcon(recording ? "stop" : "mic");
+    button.setAttribute("aria-label", recording ? "Arrêter l’enregistrement" : "Enregistrer un message vocal");
+    button.title = recording ? "Arrêter l’enregistrement" : "Message vocal";
+  }
+}
 function cancelChatRecording() {
   chatMediaGeneration++;
   if (!chatRecorder) return;
@@ -1899,7 +1907,11 @@ function messagesView() {
       <form id="messageForm" class="chat-composer" data-conversation="${esc(active.key)}">
         <input id="chatFile" type="file" hidden accept="image/jpeg,image/png,image/webp,image/gif,video/*,application/pdf,text/plain,audio/*">
         <button type="button" class="chat-tool" data-action="chat-file" aria-label="Ajouter une photo ou un fichier" title="Pièce jointe">${uiIcon("paperclip")}</button>
-        <button type="button" class="chat-tool" data-action="chat-voice" aria-label="Enregistrer un message vocal" title="Message vocal">${uiIcon("mic")}</button>
+        ${(() => {
+          // A screen refresh during a recording keeps the button in its "stop" state.
+          const recording = chatRecorder?.state === "recording";
+          return `<button type="button" class="chat-tool${recording ? " recording" : ""}" data-action="chat-voice" aria-label="${recording ? "Arrêter l’enregistrement" : "Enregistrer un message vocal"}" title="${recording ? "Arrêter l’enregistrement" : "Message vocal"}">${uiIcon(recording ? "stop" : "mic")}</button>`;
+        })()}
         <div class="chat-compose-field"><textarea id="messageText" name="text" rows="1" maxlength="5000" placeholder="Écrire un message" aria-label="Écrire un message"></textarea><p id="formError" class="error" role="alert"></p></div>
         <button type="submit" class="chat-send" aria-label="Envoyer le message" title="Envoyer">${uiIcon("send")}</button>
       </form>
@@ -3258,8 +3270,7 @@ document.addEventListener("click", async (e) => {
         );
       if (chatRecorder?.state === "recording") {
         chatRecorder.stop();
-        b.innerHTML = uiIcon("mic");
-        b.classList.remove("recording");
+        markVoiceButtons(false);
       } else {
         if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder)
           throw new Error(
@@ -3351,8 +3362,8 @@ document.addEventListener("click", async (e) => {
             render();
           };
           recorder.start(250);
-          b.innerHTML = uiIcon("stop");
-          b.classList.add("recording");
+          // The screen may have been redrawn while the microphone was being opened.
+          markVoiceButtons(true);
         } catch (e) {
           stream?.getTracks().forEach((track) => track.stop());
           chatRecorder = null;

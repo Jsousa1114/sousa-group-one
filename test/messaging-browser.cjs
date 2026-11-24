@@ -75,7 +75,14 @@ async function noOverflow(page, label) {
   assert.ok(dims.body <= dims.client + 2, label + " body overflow " + JSON.stringify(dims));
 }
 async function controlWithinViewport(page, selector, label) {
-  const box = await page.locator(selector).boundingBox();
+  // The conversation can be redrawn (read receipts, live updates): measure once it is shown.
+  const control = page.locator(selector);
+  await control.waitFor({ state: "visible", timeout: 10000 });
+  let box = await control.boundingBox();
+  if (!box) {
+    await control.waitFor({ state: "visible", timeout: 10000 });
+    box = await control.boundingBox();
+  }
   assert.ok(box, label + " missing");
   const width = await page.evaluate(() => innerWidth);
   assert.ok(box.x >= -1 && box.x + box.width <= width + 1, label + " outside viewport: " + JSON.stringify({ box, width }));
