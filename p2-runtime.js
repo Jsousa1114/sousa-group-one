@@ -108,7 +108,7 @@
         refreshTimer = setTimeout(run, 1000);
         return;
       }
-      core().refresh().catch(() => {});
+      (core().backgroundRefresh || core().refresh)().catch(() => {});
     };
     refreshTimer = setTimeout(run, 500);
   }
