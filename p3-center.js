@@ -16,6 +16,7 @@
     d.setDate(d.getDate() + days);
     return d.toISOString().slice(0, 10);
   };
+  const swissDate = (iso) => (/^\d{4}-\d{2}-\d{2}/.test(iso || "") ? `${iso.slice(8, 10)}.${iso.slice(5, 7)}.${iso.slice(0, 4)}` : iso || "");
   const money = (n) =>
     new Intl.NumberFormat("fr-CH", {
       style: "currency",
@@ -69,15 +70,15 @@
   }
 
   function featureCards(status) {
+    const ai = !!status.providerConfigured;
     const rows = [
-      ["Assistant interne", status.features?.assistant],
-      ["Devis assisté", status.features?.quoteDraft],
-      ["OCR factures fournisseurs", status.features?.supplierInvoiceOcr],
-      ["OCR matériel", status.features?.materialOcr],
-      ["Compte rendu vocal → texte", status.features?.voiceToText],
-      ["Résumé journalier chantier", status.features?.dailySummary],
+      ["Assistant (bouton en haut)", ai],
+      ["Devis avec l’IA", ai],
+      ["Lecture de factures (photo, PDF)", ai],
+      ["Bons de livraison → stock", ai],
+      ["Comptes rendus dictés", true],
+      ["E-mails aux clients", ai],
       ["Détection d’anomalies", status.features?.anomalyDetection],
-      ["Prévision charge équipe", status.features?.workloadForecast],
       ["Planification assistée", status.features?.assistedPlanning],
     ];
     return `<div class="ops-kpis">${rows
@@ -86,6 +87,30 @@
           `<article class="card ops-kpi"><span>${esc(label)}</span><b>${ready ? "Prêt" : "À configurer"}</b><small>${ready ? "module actif" : "configuration requise"}</small></article>`,
       )
       .join("")}</div>`;
+  }
+
+  const FEATURE_LABELS = { assistant: "Assistant", quote: "Devis", ocr_invoice: "Factures", ocr_material: "Matériel", report: "Comptes rendus", email: "E-mails" };
+  function usageCard(usage) {
+    const rows = usage.rows || [];
+    const people = new Map();
+    for (const r of rows) {
+      const p = people.get(r.user_id) || { name: r.name, calls: 0, failures: 0, today: 0, features: [] };
+      p.calls += r.calls;
+      p.failures += r.failures;
+      p.today += r.today;
+      p.features.push(`${FEATURE_LABELS[r.feature] || r.feature} ${r.calls}`);
+      people.set(r.user_id, p);
+    }
+    const total = rows.reduce((n, r) => n + r.calls, 0);
+    return `<article class="card">
+      <div class="ops-card-head"><div><h3>Utilisation de l’IA (30 derniers jours)</h3><p>${total} demande${total > 1 ? "s" : ""}${usage.provider ? " envoyée" + (total > 1 ? "s" : "") + " à " + esc(usage.provider) : ""}. Limite : ${usage.limit ? usage.limit + " demandes par personne et par jour" : "aucune"}. Seuls les nombres sont enregistrés, jamais les questions.</p></div></div>
+      ${people.size
+        ? `<div class="table"><table><thead><tr><th>Personne</th><th>Aujourd’hui</th><th>30 jours</th><th>Échecs</th><th>Détail</th></tr></thead><tbody>${[...people.values()]
+            .sort((a, b) => b.calls - a.calls)
+            .map((p) => `<tr><td>${esc(p.name)}</td><td>${p.today}</td><td>${p.calls}</td><td>${p.failures}</td><td><small>${esc(p.features.join(" · "))}</small></td></tr>`)
+            .join("")}</tbody></table></div>`
+        : '<p class="muted">Aucune demande pour l’instant.</p>'}
+    </article>`;
   }
 
   function workloadTable(workload) {
@@ -132,15 +157,28 @@
     </article>`;
   }
 
+  // Where a proposed price comes from, and the supplier purchase price as a hint.
+  function priceNote(line) {
+    const notes = [];
+    if (line.priceSource === "brief") notes.push("prix indiqué dans votre demande");
+    else if (line.priceSource) notes.push("prix repris de " + line.priceSource);
+    if (line.purchase)
+      notes.push(`achat ${line.purchase.vendor} ${line.purchase.reference} : ${money(line.purchase.price)}${line.purchase.unit ? " / " + line.purchase.unit : ""}`);
+    return notes.length ? `<small class="p3-price-note">${esc(notes.join(" · "))}</small>` : "";
+  }
+
   function renderQuoteResult(payload) {
     lastQuote = payload;
     const target = document.getElementById("p3QuoteResult");
     if (!target) return;
     const draft = payload?.draft || {};
+    const questions = draft.questions || [];
+    const withPurchase = (draft.lines || []).some((line) => line.purchase);
     target.innerHTML = `
       <article class="card">
-        <div class="ops-card-head"><div><h3>Brouillon proposé</h3><p>${esc(payload.mode === "ai" ? "Généré avec le fournisseur IA configuré." : "Préparé localement. Complétez les prix avant création.")}</p></div>${badge(payload.mode === "ai" ? "IA" : "Local", true)}</div>
+        <div class="ops-card-head"><div><h3>Brouillon proposé</h3><p>${esc(payload.mode === "ai" ? "Préparé par l’IA : relisez chaque ligne. Les prix ne viennent que de votre demande ou de vos anciens devis." : "Préparé localement. Complétez les prix avant création.")}</p></div>${badge(payload.mode === "ai" ? "IA" : "Local", true)}</div>
         ${payload.warning ? `<p class="notice">${esc(payload.warning)}</p>` : ""}
+        ${questions.length ? `<div class="notice warning"><b>Informations à vérifier avec le client :</b><ul>${questions.map((q) => `<li>${esc(q)}</li>`).join("")}</ul></div>` : ""}
         <div class="form-grid">
           <label>Objet<input id="p3QuoteTitle" value="${esc(draft.title || "")}" maxlength="200"></label>
           <label>Acompte %<input id="p3QuoteDeposit" type="number" min="0" max="100" step="0.1" value="${esc(draft.depositPercent || 0)}"></label>
@@ -149,11 +187,12 @@
           <label class="span-2">Conditions<textarea id="p3QuoteTerms" rows="2" maxlength="5000">${esc(draft.terms || "")}</textarea></label>
           <label class="span-2">Non compris / options<textarea id="p3QuoteExclusions" rows="2" maxlength="5000">${esc(draft.exclusions || "")}</textarea></label>
         </div>
+        ${withPurchase ? `<div class="p3-margin"><label>Marge sur le prix d’achat %<input id="p3QuoteMargin" type="number" min="0" max="500" step="1" value="30"></label>${button("Calculer les prix manquants", "apply-margin")}</div>` : ""}
         <div class="table"><table><thead><tr><th>Prestation</th><th>Qté</th><th>Unité</th><th>Prix unit.</th><th>TVA %</th><th>Remise %</th></tr></thead>
           <tbody id="p3QuoteLines">${(draft.lines || [])
             .map(
-              (line, index) => `<tr data-index="${index}">
-                <td><input data-field="description" value="${esc(line.description || "")}" maxlength="500"><input data-field="details" value="${esc(line.details || "")}" maxlength="5000" placeholder="Détails"></td>
+              (line, index) => `<tr data-index="${index}" ${line.purchase ? `data-purchase="${esc(line.purchase.price)}"` : ""}>
+                <td><input data-field="description" value="${esc(line.description || "")}" maxlength="500"><input data-field="details" value="${esc(line.details || "")}" maxlength="5000" placeholder="Détails">${priceNote(line)}</td>
                 <td><input data-field="quantity" type="number" min="0.001" step="0.001" value="${esc(line.quantity ?? 1)}"></td>
                 <td><input data-field="unit" value="${esc(line.unit || "forfait")}" maxlength="30"></td>
                 <td><input data-field="unitPrice" type="number" min="0" step="0.01" value="${esc(line.unitPrice ?? 0)}"></td>
@@ -191,39 +230,63 @@
     return `<details class="p3-raw"><summary>Détails techniques</summary><pre class="ops-summary-text">${esc(JSON.stringify(data, null, 2))}</pre></details>`;
   }
 
+  const canStock = () => ["admin", "direction", "manager"].includes(profile().role);
+
   function renderOcrResult(payload) {
     lastOcr = payload;
     const target = document.getElementById("p3OcrResult");
     if (!target) return;
     const data = payload?.data || {};
+    const match = payload?.match || {};
     if (payload.mode === "supplier_invoice") {
+      const supplier = match.supplier || data.supplier || "";
+      // The project mentioned on the invoice, if any, is preselected.
+      if (match.projectId) {
+        const select = document.getElementById("p3OcrProject");
+        if (select && [...select.options].some((o) => o.value === match.projectId)) select.value = match.projectId;
+      }
+      const duplicates = match.duplicates || [];
       target.innerHTML = `<article class="card">
         <h3>Facture fournisseur extraite</h3>
+        ${duplicates.length ? `<p class="notice warning"><b>Cette facture semble déjà enregistrée :</b> ${duplicates.map((d) => esc(`${d.supplier} · ${money(d.amount)} · ${swissDate(d.date)}${d.reference ? " · n° " + d.reference : ""}`)).join(" ; ")}. Vérifiez avant de l’enregistrer à nouveau.</p>` : ""}
         <div class="form-grid">
-          <label>Fournisseur<input id="p3OcrSupplier" value="${esc(data.supplier || "")}"></label>
-          <label>N° facture<input value="${esc(data.invoiceNumber || "")}" readonly></label>
+          <label>Fournisseur<input id="p3OcrSupplier" value="${esc(supplier)}"><small class="p3-price-note">${supplier ? (match.knownSupplier ? "Fournisseur déjà connu" : "Nouveau fournisseur") : ""}</small></label>
+          <label>N° facture<input id="p3OcrReference" value="${esc(data.invoiceNumber || "")}" maxlength="80"></label>
           <label>Date<input id="p3OcrDate" type="date" value="${esc(data.date || today())}"></label>
           <label>Total CHF<input id="p3OcrTotal" type="number" min="0" step="0.01" value="${esc(data.total ?? "")}"></label>
         </div>
+        ${match.projectId ? `<p class="muted">Chantier reconnu sur la facture : <b>${esc(match.projectTitle || match.projectId)}</b> (présélectionné ci-dessus).</p>` : ""}
         ${confidenceNote(data)}
         <div class="form-actions">${canExpense() ? button("Créer la dépense", "create-expense", "primary") : ""}</div>
         ${invoiceItems(data)}
         ${rawDetails(data)}
       </article>`;
     } else {
-      const items = Array.isArray(data.items) ? data.items : [];
+      const items = Array.isArray(data.items) ? data.items.slice(0, 50) : [];
+      const found = match.items || [];
       target.innerHTML = `<article class="card">
-        <h3>Matériel reconnu</h3>
-        <div class="table"><table><thead><tr><th>Désignation</th><th>Référence</th><th>EAN/SKU</th><th>Qté</th><th>Prix</th></tr></thead><tbody>
+        <h3>Matériel reconnu${data.deliveryNumber ? ` · bon ${esc(data.deliveryNumber)}` : ""}</h3>
+        ${canStock() && items.length ? '<p class="muted">Cochez les lignes à entrer en stock et vérifiez les quantités. Les articles inconnus seront créés avec la référence indiquée.</p>' : ""}
+        <div class="table"><table><thead><tr>${canStock() ? "<th>Entrer</th>" : ""}<th>Désignation</th><th>Référence</th><th>Qté</th><th>Prix</th><th>Dans le stock</th></tr></thead><tbody id="p3StockLines">
           ${items.length
             ? items
-                .map(
-                  (x) => `<tr><td>${esc(x.description || "")}</td><td>${esc(x.reference || "")}</td><td>${esc(x.ean || x.sku || "")}</td><td>${esc(x.quantity ?? "")} ${esc(x.unit || "")}</td><td>${x.unitPrice == null ? "—" : money(x.unitPrice)}</td></tr>`,
-                )
+                .map((x, i) => {
+                  const known = found[i];
+                  const ref = x.reference || x.sku || x.ean || "";
+                  return `<tr data-index="${i}" ${known ? `data-inventory-id="${esc(known.inventoryId)}"` : ""}>
+                    ${canStock() ? `<td><input type="checkbox" data-field="take" ${known ? "checked" : ""} aria-label="Entrer cette ligne en stock"></td>` : ""}
+                    <td>${canStock() && !known ? `<input data-field="name" value="${esc(x.description || "")}" maxlength="200">` : esc(x.description || "")}</td>
+                    <td>${canStock() && !known ? `<input data-field="sku" value="${esc(ref)}" maxlength="60" placeholder="Référence">` : esc(ref)}</td>
+                    <td>${canStock() ? `<input data-field="quantity" type="number" min="0.001" step="0.001" value="${esc(x.quantity ?? 1)}">` : esc(x.quantity ?? "")} ${esc(x.unit || "")}</td>
+                    <td>${x.unitPrice == null ? "—" : money(x.unitPrice)}</td>
+                    <td>${known ? `${esc(known.name)} <small>(${esc(known.stock)} ${esc(known.unit || "")})</small>` : '<span class="muted">Nouvel article</span>'}</td>
+                  </tr>`;
+                })
                 .join("")
-            : '<tr><td colspan="5">Aucun article reconnu.</td></tr>'}
+            : '<tr><td colspan="6">Aucun article reconnu.</td></tr>'}
         </tbody></table></div>
         ${confidenceNote(data)}
+        ${canStock() && items.length ? `<div class="form-actions">${button("Entrer en stock", "stock-receipt", "primary")}</div>` : ""}
         ${rawDetails(data)}
       </article>`;
     }
@@ -277,14 +340,14 @@
             <label>Chantier ciblé (facultatif)<select id="p3AssistantProject"><option value="">Vue globale</option>${projectOptions()}</select></label>
             <label>Question<textarea id="p3AssistantQuestion" rows="4" placeholder="Ex. Quels chantiers demandent mon attention ?"></textarea></label>
             <div class="form-actions">${button("Analyser", "assistant", "primary")}</div>
-            <pre id="p3AssistantAnswer" class="ops-summary-text">Posez une question pour commencer.</pre>
+            <div id="p3AssistantAnswer" class="ai-rich ops-summary-text">Posez une question pour commencer.</div>
           </article>`;
   }
   function voiceCard(projectId = "") {
     return `
           <article class="card">
             <h3>Compte rendu vocal → texte</h3>
-            <p class="muted">Dictez depuis le navigateur ou transcrivez un fichier audio si le service serveur est configuré.</p>
+            <p class="muted">Dictez ce qui a été fait, les problèmes et le matériel : l’IA range ensuite le texte dans les bonnes rubriques.</p>
             <div class="form-grid">
               <label>Chantier<select id="p3VoiceProject"><option value="">Choisir…</option>${projectOptions(projectId)}</select></label>
               <label>Date<input id="p3VoiceDate" type="date" value="${today()}"></label>
@@ -293,23 +356,33 @@
             </div>
             <div class="form-actions">
               ${button("Démarrer la dictée", "dictate")}
-              ${button("Transcrire le fichier", "transcribe")}
+              ${aiReady() ? button("Mettre en forme avec l’IA", "structure-report") : ""}
+              ${aiStatus?.transcriptionConfigured ? button("Transcrire le fichier", "transcribe") : ""}
               ${button("Enregistrer au chantier", "save-voice-report", "primary")}
+            </div>
+            <div id="p3VoiceFields" class="form-grid" hidden>
+              <label class="span-2">Problèmes / risques<textarea id="p3VoiceIssues" rows="3"></textarea></label>
+              <label class="span-2">Matériel<textarea id="p3VoiceMaterials" rows="2"></textarea></label>
+              <label>Équipe présente<input id="p3VoiceTeam" maxlength="1000"></label>
+              <label>Météo<input id="p3VoiceWeather" maxlength="200"></label>
             </div>
           </article>`;
   }
+  const LANGUAGE_OPTIONS = '<option value="fr">Français</option><option value="de">Allemand</option><option value="it">Italien</option><option value="en">Anglais</option>';
   function quoteCard() {
     const d = defaults();
     return `
         <article class="card">
           <h3>Création de devis assistée</h3>
+          <p class="muted">Décrivez les travaux : l’IA propose les lignes, reprend vos prix déjà pratiqués et affiche les prix d’achat de vos catalogues fournisseurs.</p>
           <div class="form-grid">
             <label>Entreprise<select id="p3QuoteCompany">${companyOptions(d.company)}</select></label>
             <label>Client<select id="p3QuoteClient">${clientOptions(d.client)}</select></label>
             <label>Chantier (facultatif)<select id="p3QuoteProject"><option value="">Aucun</option>${projectOptions()}</select></label>
             <label>TVA %<input id="p3QuoteVat" type="number" min="0" max="100" step="0.1" value="8.1"></label>
-            <label class="span-2">Objet<input id="p3QuoteRequestedTitle" maxlength="200" placeholder="Ex. Mise en conformité électrique"></label>
-            <label class="span-2">Brief<textarea id="p3QuoteBrief" rows="5" placeholder="Décrivez les travaux, quantités connues, contraintes et prix déjà convenus."></textarea></label>
+            <label>Langue du devis<select id="p3QuoteLanguage">${LANGUAGE_OPTIONS}</select></label>
+            <label>Objet<input id="p3QuoteRequestedTitle" maxlength="200" placeholder="Ex. Mise en conformité électrique"></label>
+            <label class="span-2">Description des travaux<textarea id="p3QuoteBrief" rows="5" placeholder="Ex. Poser 3 prises T13 encastrées et 1 interrupteur dans le salon, tirer 15 m de câble. Prise à 85.- comme d’habitude."></textarea></label>
           </div>
           <div class="form-actions">${button("Préparer le devis", "quote-draft", "primary")}</div>
         </article>`;
@@ -318,17 +391,58 @@
     const d = defaults();
     return `
           <article class="card">
-            <h3>OCR facture fournisseur / matériel</h3>
+            <h3>${mode === "material" ? "Matériel ou bon de livraison" : "Lecture de facture fournisseur"}</h3>
             <div class="form-grid">
-              <label>Type<select id="p3OcrMode"><option value="supplier_invoice" ${mode === "supplier_invoice" ? "selected" : ""}>Facture fournisseur</option><option value="material" ${mode === "material" ? "selected" : ""}>Matériel / référence</option></select></label>
-              <label>Photo ou image<input id="p3OcrFile" type="file" accept="image/*"></label>
+              <label>Type<select id="p3OcrMode"><option value="supplier_invoice" ${mode === "supplier_invoice" ? "selected" : ""}>Facture fournisseur</option><option value="material" ${mode === "material" ? "selected" : ""}>Matériel / bon de livraison</option></select></label>
+              <label>Photos ou PDF<input id="p3OcrFile" type="file" accept="image/*,application/pdf,.pdf" multiple></label>
               <label>Entreprise<select id="p3OcrCompany">${companyOptions(d.company)}</select></label>
               <label>Chantier (facultatif)<select id="p3OcrProject"><option value="">Aucun</option>${projectOptions()}</select></label>
             </div>
-            <p class="muted">Prenez la photo bien à plat et lisible. Elle est réduite automatiquement avant l’envoi.</p>
+            <p class="muted">Une photo bien à plat, plusieurs photos d’un même document ou un PDF (4 pages au maximum). Les images sont réduites automatiquement avant l’envoi.</p>
             <div class="form-actions">${button("Lire le document", "ocr", "primary")}</div>
             ${!providerConfigured ? '<p class="muted">Le module est prêt, mais la lecture OCR nécessite AI_API_URL + AI_API_KEY côté serveur.</p>' : ""}
           </article>`;
+  }
+  function emailCard(options = {}) {
+    const kind = options.kind || "invoice_reminder";
+    return `
+          <article class="card">
+            <h3>Rédiger un e-mail au client</h3>
+            <p class="muted">L’IA prépare le texte à partir des montants et dates de l’application. Vous le relisez, puis l’envoyez depuis votre messagerie.</p>
+            <div class="form-grid">
+              <label>Message<select id="p3MailKind">
+                ${canFinance() ? `<option value="invoice_reminder" ${kind === "invoice_reminder" ? "selected" : ""}>Relance de facture</option><option value="quote_followup" ${kind === "quote_followup" ? "selected" : ""}>Suivi de devis</option>` : ""}
+                <option value="project_update" ${kind === "project_update" ? "selected" : ""}>Avancement du chantier</option>
+              </select></label>
+              <label>Concerne<select id="p3MailTarget">${mailTargets(canFinance() ? kind : "project_update", options.id)}</select></label>
+              <label>Ton<select id="p3MailTone"><option value="cordial">Cordial</option><option value="ferme">Ferme</option></select></label>
+              <label>Langue<select id="p3MailLanguage">${LANGUAGE_OPTIONS}</select></label>
+              <label class="span-2">Précisions (facultatif)<textarea id="p3MailNotes" rows="2" maxlength="2000" placeholder="Ex. proposer un paiement en deux fois"></textarea></label>
+            </div>
+            <div class="form-actions">${button("Rédiger", "email-draft", "primary")}</div>
+            <div id="p3MailResult"></div>
+          </article>`;
+  }
+  // The records an e-mail can be about: unpaid invoices, quotes waiting for an answer, open projects.
+  function mailTargets(kind, selected = "") {
+    const s = state();
+    const client = (id) => (s.clients || []).find((c) => String(c.id) === String(id))?.name || "";
+    const option = (id, label) => `<option value="${esc(id)}" ${String(id) === String(selected) ? "selected" : ""}>${esc(label)}</option>`;
+    let rows = [];
+    if (kind === "invoice_reminder")
+      rows = (s.invoices || [])
+        .filter((i) => i.status !== "Brouillon" && (Number(i.amount) || 0) > (Number(i.paid) || 0))
+        .sort((a, b) => String(a.due).localeCompare(String(b.due)))
+        .map((i) => option(i.id, `${i.id} · ${client(i.clientId)} · reste ${money((Number(i.amount) || 0) - (Number(i.paid) || 0))}${i.due && i.due < today() ? " · en retard" : ""}`));
+    else if (kind === "quote_followup")
+      rows = (s.quotes || [])
+        .filter((q) => !["Accepté", "Refusé", "Brouillon"].includes(q.status))
+        .map((q) => option(q.id, `${q.id} · ${client(q.clientId)} · ${q.title || ""}`));
+    else
+      rows = (s.projects || [])
+        .filter((p) => !["Terminé", "Archivé"].includes(p.status))
+        .map((p) => option(p.id, `${p.title || p.id} · ${client(p.clientId)}`));
+    return rows.join("") || '<option value="">Aucun élément concerné</option>';
   }
   function planningCard() {
     return `
@@ -350,10 +464,12 @@
     if (!container) return;
     container.innerHTML = '<article class="card"><p>Chargement de l’assistant…</p></article>';
     try {
-      const [status, workload, anomalyPayload] = await Promise.all([
+      const admin = ["admin", "direction"].includes(profile().role);
+      const [status, workload, anomalyPayload, usage] = await Promise.all([
         api("status"),
         api("workload?weeks=4"),
         api("anomalies"),
+        admin ? api("usage").catch(() => null) : null,
       ]);
       aiStatus = status;
       container.innerHTML = `
@@ -372,9 +488,11 @@
         <div class="ops-grid-2">${ocrCard("supplier_invoice", status.providerConfigured)}${planningCard()}</div>
         <div id="p3OcrResult"></div>
         <div id="p3PlanningResult"></div>
+        ${status.providerConfigured && (canFinance() || canPlan()) ? emailCard({ kind: canFinance() ? "invoice_reminder" : "project_update" }) : ""}
 
         ${workloadTable(workload)}
         ${anomaliesCard(anomalyPayload.anomalies || [])}
+        ${usage ? usageCard(usage) : ""}
       `;
     } catch (error) {
       container.innerHTML = `<article class="card"><p class="error">${esc(error.message || "Chargement impossible.")}</p></article>`;
@@ -430,6 +548,13 @@
     core().toast("Dictée démarrée.");
   }
 
+  // The e-mail target list follows the chosen kind of message.
+  document.addEventListener("change", (event) => {
+    if (event.target?.id !== "p3MailKind") return;
+    const target = document.getElementById("p3MailTarget");
+    if (target) target.innerHTML = mailTargets(event.target.value);
+  });
+
   // Keep the quote form consistent: a client belongs to one company.
   document.addEventListener("change", (event) => {
     const companySelect = document.getElementById("p3QuoteCompany"),
@@ -458,11 +583,8 @@
         const target = document.getElementById("p3AssistantAnswer");
         if (!question.trim()) return core().toast("Écrivez une question.");
         target.textContent = "Analyse…";
-        const out = await api("assistant", {
-          question: projectId ? question + "\nChantier ciblé : " + projectId : question,
-          projectId,
-        });
-        target.textContent = out.answer || "Aucune réponse.";
+        const out = await api("assistant", { question, projectId, page: "Pilotage – Assistant intelligent" });
+        target.innerHTML = richText(out.answer || "Aucune réponse.");
       } else if (action === "quote-draft") {
         if (!canFinance()) return core().toast("Accès devis non autorisé.");
         const out = await api("quote-draft", {
@@ -472,8 +594,20 @@
           title: document.getElementById("p3QuoteRequestedTitle")?.value || "",
           brief: document.getElementById("p3QuoteBrief")?.value || "",
           vatRate: Number(document.getElementById("p3QuoteVat")?.value || 0),
+          language: document.getElementById("p3QuoteLanguage")?.value || "fr",
         });
         renderQuoteResult(out);
+      } else if (action === "apply-margin") {
+        const margin = Number(document.getElementById("p3QuoteMargin")?.value);
+        if (!Number.isFinite(margin) || margin < 0) return core().toast("Indiquez une marge valide.");
+        let filled = 0;
+        for (const row of document.querySelectorAll("#p3QuoteLines tr[data-purchase]")) {
+          const price = row.querySelector('[data-field="unitPrice"]');
+          if (Number(price.value) > 0) continue;
+          price.value = (Math.round(Number(row.dataset.purchase) * (1 + margin / 100) * 20) / 20).toFixed(2);
+          filled += 1;
+        }
+        core().toast(filled ? `${filled} prix calculé${filled > 1 ? "s" : ""} à partir du prix d’achat.` : "Aucun prix manquant avec prix d’achat connu.");
       } else if (action === "create-quote") {
         if (!lastQuote) return;
         const lines = quoteLinesFromDom();
@@ -487,7 +621,7 @@
             project: document.getElementById("p3QuoteProject")?.value || "",
             title: document.getElementById("p3QuoteTitle")?.value || "Devis assisté",
             lines,
-            language: "fr",
+            language: lastQuote.language || "fr",
             message: document.getElementById("p3QuoteMessage")?.value || "",
             terms: document.getElementById("p3QuoteTerms")?.value || "",
             scope: document.getElementById("p3QuoteScope")?.value || "",
@@ -501,21 +635,56 @@
           "quotes",
         );
       } else if (action === "ocr") {
-        const file = document.getElementById("p3OcrFile")?.files?.[0];
-        if (!file) return core().toast("Choisissez une photo ou une image.");
+        const files = [...(document.getElementById("p3OcrFile")?.files || [])];
+        if (!files.length) return core().toast("Choisissez une photo, plusieurs photos ou un PDF.");
         const label = buttonNode.textContent;
         buttonNode.disabled = true;
-        buttonNode.textContent = "Lecture en cours…";
+        buttonNode.textContent = "Préparation du document…";
         try {
-          const data = await readImage(file);
+          const images = await documentPages(files);
+          buttonNode.textContent = images.length > 1 ? `Lecture des ${images.length} pages…` : "Lecture en cours…";
           const out = await api("ocr", {
             mode: document.getElementById("p3OcrMode")?.value || "supplier_invoice",
-            imageDataUrl: data,
+            images,
           });
           renderOcrResult(out);
         } finally {
           buttonNode.disabled = false;
           buttonNode.textContent = label;
+        }
+      } else if (action === "stock-receipt") {
+        if (!lastOcr || lastOcr.mode !== "material") return;
+        const lines = [], create = [];
+        for (const row of document.querySelectorAll("#p3StockLines tr[data-index]")) {
+          if (!row.querySelector('[data-field="take"]')?.checked) continue;
+          const quantity = Number(row.querySelector('[data-field="quantity"]')?.value);
+          if (!(quantity > 0)) return core().toast("Vérifiez les quantités cochées.");
+          if (row.dataset.inventoryId) lines.push({ inventoryId: row.dataset.inventoryId, quantity });
+          else {
+            const sku = row.querySelector('[data-field="sku"]')?.value.trim() || "";
+            const name = row.querySelector('[data-field="name"]')?.value.trim() || "";
+            if (!sku || !name) return core().toast("Indiquez la désignation et la référence des nouveaux articles.");
+            const item = (lastOcr.data?.items || [])[Number(row.dataset.index)] || {};
+            create.push({ sku, name, quantity, unit: item.unit || "pce", buy: Number(item.unitPrice) || 0 });
+          }
+        }
+        if (!lines.length && !create.length) return core().toast("Cochez au moins une ligne.");
+        buttonNode.disabled = true;
+        try {
+          const out = await api("stock-receipt", {
+            company: document.getElementById("p3OcrCompany")?.value || "",
+            deliveryNumber: lastOcr.data?.deliveryNumber || "",
+            lines,
+            create,
+          });
+          await core().refresh();
+          const count = (out.updated || []).length + (out.created || []).length;
+          core().toast(`${count} article${count > 1 ? "s" : ""} entré${count > 1 ? "s" : ""} en stock.`);
+          document.getElementById("p3OcrResult").innerHTML = `<article class="card"><h3>Stock mis à jour</h3><ul>${[...(out.updated || []), ...(out.created || []).map((x) => ({ ...x, created: true }))]
+            .map((x) => `<li><b>${esc(x.name)}</b> : +${esc(x.quantity)} → ${esc(x.stock)} en stock${x.created ? " (nouvel article)" : ""}</li>`)
+            .join("")}</ul></article>`;
+        } finally {
+          buttonNode.disabled = false;
         }
       } else if (action === "create-expense") {
         if (!lastOcr || lastOcr.mode !== "supplier_invoice") return;
@@ -530,6 +699,7 @@
             company: document.getElementById("p3OcrCompany")?.value || "",
             project: document.getElementById("p3OcrProject")?.value || "",
             supplier,
+            reference: document.getElementById("p3OcrReference")?.value.trim() || "",
             amount,
             date,
           },
@@ -546,20 +716,85 @@
         const out = await api("transcribe", { audioDataUrl: data });
         const target = document.getElementById("p3VoiceText");
         target.value = [target.value.trim(), out.text || ""].filter(Boolean).join("\n");
+      } else if (action === "structure-report") {
+        const field = document.getElementById("p3VoiceText");
+        if (!field?.value.trim()) return core().toast("Dictez ou écrivez d’abord le compte rendu.");
+        if (recognition) {
+          recognition.stop();
+          recognition = null;
+        }
+        const label = buttonNode.textContent;
+        buttonNode.disabled = true;
+        buttonNode.textContent = "Mise en forme…";
+        try {
+          const out = await api("report-structure", { text: field.value });
+          field.value = out.summary || field.value;
+          const set = (id, value) => {
+            const el = document.getElementById(id);
+            if (el) el.value = value || "";
+          };
+          set("p3VoiceIssues", out.issues);
+          set("p3VoiceMaterials", out.materials);
+          set("p3VoiceTeam", out.team);
+          set("p3VoiceWeather", out.weather);
+          const fields = document.getElementById("p3VoiceFields");
+          if (fields) fields.hidden = false;
+          core().toast("Compte rendu mis en forme : relisez avant d’enregistrer.");
+        } finally {
+          buttonNode.disabled = false;
+          buttonNode.textContent = label;
+        }
       } else if (action === "save-voice-report") {
         const projectId = document.getElementById("p3VoiceProject")?.value || "";
         const text = document.getElementById("p3VoiceText")?.value || "";
         if (!projectId || !text.trim())
           return core().toast("Choisissez un chantier et ajoutez un compte rendu.");
+        const value = (id) => document.getElementById(id)?.value.trim() || "";
         await core().api("operations/project/" + encodeURIComponent(projectId) + "/report", {
           reportDate: document.getElementById("p3VoiceDate")?.value || today(),
-          weather: "",
+          weather: value("p3VoiceWeather"),
           summary: text.trim(),
-          issues: "",
-          materials: "",
-          team: "",
+          issues: value("p3VoiceIssues"),
+          materials: value("p3VoiceMaterials"),
+          team: value("p3VoiceTeam"),
         });
         core().toast("Compte rendu enregistré sur le chantier.");
+      } else if (action === "email-draft") {
+        const id = document.getElementById("p3MailTarget")?.value || "";
+        if (!id) return core().toast("Choisissez la facture, le devis ou le chantier concerné.");
+        const label = buttonNode.textContent;
+        buttonNode.disabled = true;
+        buttonNode.textContent = "Rédaction…";
+        try {
+          const out = await api("email-draft", {
+            kind: document.getElementById("p3MailKind")?.value || "",
+            id,
+            tone: document.getElementById("p3MailTone")?.value || "cordial",
+            language: document.getElementById("p3MailLanguage")?.value || "fr",
+            notes: document.getElementById("p3MailNotes")?.value || "",
+          });
+          document.getElementById("p3MailResult").innerHTML = `<div class="p3-mail">
+            <div class="form-grid">
+              <label>Destinataire<input id="p3MailTo" type="email" value="${esc(out.to || "")}" placeholder="Adresse e-mail du client"></label>
+              <label>Objet<input id="p3MailSubject" value="${esc(out.subject || "")}" maxlength="200"></label>
+              <label class="span-2">Texte<textarea id="p3MailBody" rows="12">${esc(out.body || "")}</textarea></label>
+            </div>
+            <div class="form-actions">${button("Copier le texte", "copy-mail")}${button("Ouvrir dans ma messagerie", "open-mail", "primary")}</div>
+          </div>`;
+        } finally {
+          buttonNode.disabled = false;
+          buttonNode.textContent = label;
+        }
+      } else if (action === "copy-mail") {
+        const text = (document.getElementById("p3MailSubject")?.value || "") + "\n\n" + (document.getElementById("p3MailBody")?.value || "");
+        await copyText(text);
+      } else if (action === "open-mail") {
+        const to = document.getElementById("p3MailTo")?.value.trim() || "";
+        const subject = document.getElementById("p3MailSubject")?.value || "";
+        const body = document.getElementById("p3MailBody")?.value || "";
+        // mailto links are limited in length by some e-mail programs.
+        const link = "mailto:" + encodeURIComponent(to) + "?subject=" + encodeURIComponent(subject) + "&body=" + encodeURIComponent(body.slice(0, 1800));
+        window.location.href = link;
       } else if (action === "planning-suggestions") {
         const out = await api("planning-suggestions", {
           projectId: document.getElementById("p3PlanProject")?.value || "",
@@ -605,12 +840,12 @@
   const aiReady = () => !!aiStatus?.providerConfigured;
 
   // Phone photos are often 3–10 MB: shrink them to a size that is plenty for reading a document.
-  async function readImage(file) {
+  async function readImage(file, maxSide = 2000) {
     if (!/^image\//.test(file.type || "") && !/\.(heic|heif)$/i.test(file.name || ""))
-      throw new Error("Choisissez une photo ou une image.");
+      throw new Error("Choisissez des photos ou un PDF.");
     try {
       const bitmap = await createImageBitmap(file);
-      const scale = Math.min(1, 2000 / Math.max(bitmap.width, bitmap.height));
+      const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
       const canvas = document.createElement("canvas");
       canvas.width = Math.max(1, Math.round(bitmap.width * scale));
       canvas.height = Math.max(1, Math.round(bitmap.height * scale));
@@ -623,15 +858,145 @@
     }
   }
 
+  // PDF invoices are turned into page images in the browser (pdf.js, loaded only when needed),
+  // so any AI provider able to read photos can read them.
+  let pdfLibrary = null;
+  async function pdfPages(file, max, maxSide) {
+    if (file.size > 20 * 1024 * 1024) throw new Error("PDF trop volumineux (20 Mo max).");
+    if (!pdfLibrary) {
+      pdfLibrary = await import("/vendor/pdfjs/pdf.min.mjs");
+      pdfLibrary.GlobalWorkerOptions.workerSrc = "/vendor/pdfjs/pdf.worker.min.mjs";
+    }
+    const task = pdfLibrary.getDocument({ data: new Uint8Array(await file.arrayBuffer()), isEvalSupported: false, enableXfa: false });
+    let doc;
+    try {
+      doc = await task.promise;
+    } catch (error) {
+      task.destroy?.();
+      throw new Error(error?.name === "PasswordException" ? "Ce PDF est protégé par un mot de passe." : "Ce PDF ne peut pas être ouvert.");
+    }
+    try {
+      if (doc.numPages > max) core().toast(`Seules les ${max} premières pages du PDF sont lues.`);
+      const pages = [];
+      for (let n = 1; n <= Math.min(doc.numPages, max); n++) {
+        const page = await doc.getPage(n);
+        const base = page.getViewport({ scale: 1 });
+        const viewport = page.getViewport({ scale: Math.min(3, maxSide / Math.max(base.width, base.height)) });
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(viewport.width);
+        canvas.height = Math.round(viewport.height);
+        await page.render({ canvas, viewport, background: "#ffffff" }).promise;
+        pages.push(canvas.toDataURL("image/jpeg", 0.85));
+        page.cleanup();
+      }
+      return pages;
+    } finally {
+      // Frees the PDF worker and its memory.
+      task.destroy?.();
+    }
+  }
+
+  async function documentPages(files) {
+    const MAX = 4;
+    const pdfCount = files.filter((f) => f.type === "application/pdf" || /\.pdf$/i.test(f.name || "")).length;
+    const maxSide = files.length > 1 || pdfCount ? 1700 : 2000;
+    const pages = [];
+    for (const file of files) {
+      if (pages.length >= MAX) break;
+      if (file.type === "application/pdf" || /\.pdf$/i.test(file.name || "")) pages.push(...(await pdfPages(file, MAX - pages.length, maxSide)));
+      else pages.push(await readImage(file, maxSide));
+    }
+    if (files.length > MAX && pages.length >= MAX) core().toast(`Seules les ${MAX} premières pages sont lues.`);
+    if (!pages.length) throw new Error("Aucune page lisible.");
+    return pages;
+  }
+
+  // AI answers: a small, safe subset of Markdown (bold, lists, line breaks) and references
+  // such as [[F-2026-0004]] turned into buttons that open the record.
+  function referenceButton(id) {
+    const s = state();
+    const project = (s.projects || []).find((p) => String(p.id) === id);
+    const kind = project ? "project" : (s.invoices || []).some((x) => String(x.id) === id) ? "invoice" : (s.quotes || []).some((x) => String(x.id) === id) ? "quote" : "";
+    if (!kind) return esc(id);
+    const label = project ? project.title || id : id;
+    return `<button type="button" class="ai-ref" data-p3-ref="${kind}" data-id="${esc(id)}" title="Ouvrir ${esc(id)}">${esc(label)}</button>`;
+  }
+  function inline(text) {
+    const refs = [];
+    let out = String(text).replace(/\u0000/g, "").replace(/\[\[([A-Za-z0-9][A-Za-z0-9_.\-]{0,79})\]\]/g, (_, id) => {
+      refs.push(id);
+      return "\u0000" + (refs.length - 1) + "\u0000";
+    });
+    out = esc(out)
+      .replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")
+      .replace(/(^|[\s(])\*([^*\s][^*]*?)\*(?=[\s).,;:!?]|$)/g, "$1<i>$2</i>")
+      .replace(/`([^`]+)`/g, "<code>$1</code>");
+    return out.replace(/\u0000(\d+)\u0000/g, (_, i) => referenceButton(refs[Number(i)]));
+  }
+  function richText(text) {
+    const lines = String(text || "").replace(/\r/g, "").split("\n");
+    const html = [];
+    let list = null;
+    const close = () => {
+      if (list) html.push(`</${list}>`);
+      list = null;
+    };
+    for (const raw of lines) {
+      const line = raw.trim();
+      const bullet = line.match(/^[-*•]\s+(.*)$/);
+      const numbered = line.match(/^\d+[.)]\s+(.*)$/);
+      if (bullet || numbered) {
+        const kind = bullet ? "ul" : "ol";
+        if (list !== kind) {
+          close();
+          html.push(`<${kind}>`);
+          list = kind;
+        }
+        html.push(`<li>${inline((bullet || numbered)[1])}</li>`);
+        continue;
+      }
+      close();
+      if (!line) continue;
+      const heading = line.match(/^#{1,6}\s+(.*)$/);
+      html.push(`<p>${heading ? `<b>${inline(heading[1])}</b>` : inline(line)}</p>`);
+    }
+    close();
+    return html.join("");
+  }
+
+  async function copyText(text) {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      const area = document.createElement("textarea");
+      area.value = text;
+      area.setAttribute("readonly", "");
+      area.style.position = "fixed";
+      area.style.opacity = "0";
+      document.body.append(area);
+      area.select();
+      document.execCommand?.("copy");
+      area.remove();
+    }
+    core().toast("Texte copié.");
+  }
+
   const TOOLS = {
-    "ocr-invoice": { title: "Lire une facture fournisseur", icon: "camera", label: "Lire une facture", allowed: () => canExpense() && aiReady(), html: () => ocrCard("supplier_invoice") + '<div id="p3OcrResult"></div>' },
-    "ocr-material": { title: "Reconnaître du matériel", icon: "camera", label: "Reconnaître du matériel", allowed: () => aiReady(), html: () => ocrCard("material") + '<div id="p3OcrResult"></div>' },
-    quote: { title: "Devis avec l’IA", icon: "sparkle", label: "Devis avec l’IA", allowed: () => canFinance() && aiReady(), html: () => quoteCard() + '<div id="p3QuoteResult"></div>' },
-    voice: { title: "Compte rendu vocal", icon: "mic", label: "Compte rendu vocal", allowed: () => !isClient(), html: (o) => voiceCard(o.projectId || "") },
-    planning: { title: "Proposer l’équipe", icon: "users", label: "Proposer l’équipe", allowed: () => canSuggestPlanning(), html: () => planningCard() + '<div id="p3PlanningResult"></div>' },
+    "ocr-invoice": { title: "Lire une facture fournisseur", icon: "camera", label: "Lire une facture", field: "p3OcrFile", allowed: () => canExpense() && aiReady(), html: () => ocrCard("supplier_invoice") + '<div id="p3OcrResult"></div>' },
+    "ocr-material": { title: "Matériel et bons de livraison", icon: "camera", label: "Lire un bon de livraison", field: "p3OcrFile", allowed: () => aiReady(), html: () => ocrCard("material") + '<div id="p3OcrResult"></div>' },
+    quote: { title: "Devis avec l’IA", icon: "sparkle", label: "Devis avec l’IA", field: "p3QuoteBrief", allowed: () => canFinance() && aiReady(), html: () => quoteCard() + '<div id="p3QuoteResult"></div>' },
+    email: { title: "E-mail au client", icon: "mail", label: "E-mail au client", field: "p3MailKind", allowed: () => aiReady() && (canFinance() || canPlan()), html: (o) => emailCard(o) },
+    voice: { title: "Compte rendu vocal", icon: "mic", label: "Compte rendu vocal", field: "p3VoiceText", allowed: () => !isClient(), html: (o) => voiceCard(o.projectId || "") },
+    planning: { title: "Proposer l’équipe", icon: "users", label: "Proposer l’équipe", field: "p3PlanProject", allowed: () => canSuggestPlanning(), html: () => planningCard() + '<div id="p3PlanningResult"></div>' },
   };
   // Contextual buttons, added next to the page's own actions.
-  const PAGE_TOOLS = { expenses: "ocr-invoice", quotes: "quote", inventory: "ocr-material", planning: "planning" };
+  const PAGE_TOOLS = {
+    expenses: { tool: "ocr-invoice" },
+    quotes: { tool: "quote" },
+    inventory: { tool: "ocr-material" },
+    planning: { tool: "planning" },
+    invoices: { tool: "email", label: "Relance par e-mail", kind: "invoice_reminder" },
+  };
 
   function openTool(name, options = {}) {
     const tool = TOOLS[name];
@@ -639,7 +1004,7 @@
     if (!tool.allowed()) return core().toast("Cet outil n’est pas disponible pour votre compte.");
     closePanel();
     // The full assistant page already holds the same forms: point to it instead of duplicating ids.
-    const existing = document.querySelector("#content #p3OcrFile, #content #p3QuoteBrief");
+    const existing = document.querySelector("#content #" + tool.field);
     if (existing) {
       existing.closest(".card")?.scrollIntoView({ behavior: "smooth", block: "start" });
       return;
@@ -710,8 +1075,10 @@
         <div id="aiSuggestions" class="ai-suggestions"></div>
         <form id="aiComposer" class="ai-composer">
           <textarea id="aiQuestion" rows="2" maxlength="2500" placeholder="Posez votre question…" aria-label="Votre question"></textarea>
+          ${speechSupported() ? `<button type="button" class="ai-mic" data-p3-panel="mic" aria-label="Poser la question à voix haute" title="Poser la question à voix haute" aria-pressed="false">${ic("mic")}</button>` : ""}
           <button type="submit" class="ai-send" aria-label="Envoyer">${ic("send")}</button>
         </form>
+        <p id="aiFootnote" class="ai-footnote"></p>
       </aside>`,
     );
     return document.getElementById("aiPanel");
@@ -733,7 +1100,7 @@
               ? `<div class="ai-msg ai-user"><p>${esc(m.text)}</p></div>`
               : m.role === "error"
                 ? `<div class="ai-msg ai-error"><p>${esc(m.text)}</p>${i === chat.length - 1 ? '<button type="button" class="btn secondary" data-p3-panel="retry">Réessayer</button>' : ""}</div>`
-                : `<div class="ai-msg ai-answer"><p>${esc(m.text)}</p></div>`,
+                : `<div class="ai-msg ai-answer"><div class="ai-rich">${richText(m.text)}</div><button type="button" class="ai-copy" data-p3-copy="${i}" title="Copier la réponse" aria-label="Copier la réponse">${ic("copy")}</button></div>`,
           )
           .join("") + (asking ? '<div class="ai-msg ai-answer ai-typing"><p>L’assistant réfléchit…</p></div>' : "")
       : `<div class="ai-welcome"><p><b>Bonjour ${esc((profile().name || "").split(" ")[0] || "")} !</b></p><p>Posez une question sur vos chantiers, factures, planning ou stock. Je réponds à partir des données que votre compte peut voir.</p>${aiReady() ? "" : '<p class="muted">L’IA externe n’est pas configurée : les réponses sont des résumés simples calculés par l’application.</p>'}</div>`;
@@ -743,6 +1110,13 @@
       ? ""
       : questions.map((q) => `<button type="button" class="ai-chip" data-p3-ask="${esc(q)}">${esc(q)}</button>`).join("");
     panel.querySelector(".ai-send").disabled = asking;
+    // Transparency: where the questions go, and how much of the daily allowance is used.
+    const usage = aiStatus?.usage;
+    const footnote = [
+      aiStatus?.provider ? `Questions et données utiles envoyées à ${aiStatus.provider}.` : "",
+      usage?.limit && usage.today >= usage.limit * 0.8 ? `${usage.today} / ${usage.limit} demandes utilisées aujourd’hui.` : "",
+    ].filter(Boolean).join(" ");
+    panel.querySelector("#aiFootnote").textContent = footnote;
   }
 
   function setLauncherState(open) {
@@ -779,15 +1153,16 @@
     renderPanel();
     const projectId = openProjectId();
     const pageTitle = document.getElementById("title")?.textContent?.trim() || "";
+    // Earlier turns let the AI understand follow-up questions ("et le mois prochain ?").
+    const history = chat
+      .slice(0, -1)
+      .filter((m) => m.role === "user" || m.role === "ai")
+      .slice(-8)
+      .map((m) => ({ role: m.role === "user" ? "user" : "assistant", content: m.text }));
     try {
-      const out = await api("assistant", {
-        question:
-          question +
-          (pageTitle ? "\n(Page affichée : " + pageTitle + ")" : "") +
-          (projectId ? "\nChantier ciblé : " + projectId : ""),
-        projectId,
-      });
+      const out = await api("assistant", { question, history, page: pageTitle, projectId });
       chat.push({ role: "ai", text: out.answer || "Aucune réponse." });
+      if (out.mode === "ai" && aiStatus?.usage) aiStatus.usage.today += 1;
     } catch (error) {
       chat.push({ role: "error", text: (error.message || "Le service IA est indisponible.") + " Vous pouvez réessayer." });
     } finally {
@@ -795,6 +1170,44 @@
       saveChat();
       renderPanel();
     }
+  }
+
+  // Asking out loud: the browser's own dictation fills the field, then the question is sent.
+  const speechSupported = () => !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+  let voiceQuestion = null;
+  function toggleVoiceQuestion(control) {
+    if (voiceQuestion) {
+      voiceQuestion.stop();
+      return;
+    }
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) return core().toast("La dictée n’est pas disponible dans ce navigateur.");
+    const field = document.getElementById("aiQuestion");
+    const recognizer = new SpeechRecognition();
+    recognizer.lang = "fr-CH";
+    recognizer.interimResults = true;
+    recognizer.continuous = false;
+    let heard = "";
+    recognizer.onresult = (event) => {
+      heard = [...event.results].map((r) => r[0]?.transcript || "").join(" ").trim();
+      field.value = heard;
+    };
+    recognizer.onerror = (event) => {
+      if (event.error === "not-allowed") core().toast("Autorisez le micro pour poser la question à voix haute.");
+    };
+    recognizer.onend = () => {
+      voiceQuestion = null;
+      control.classList.remove("listening");
+      control.setAttribute("aria-pressed", "false");
+      if (heard) {
+        field.value = "";
+        ask(heard);
+      }
+    };
+    voiceQuestion = recognizer;
+    control.classList.add("listening");
+    control.setAttribute("aria-pressed", "true");
+    recognizer.start();
   }
 
   function ensureLauncher() {
@@ -811,13 +1224,13 @@
   }
 
   function addPageButton() {
-    const toolId = PAGE_TOOLS[core().getPage?.() || ""];
-    const tool = TOOLS[toolId];
+    const entry = PAGE_TOOLS[core().getPage?.() || ""];
+    const tool = TOOLS[entry?.tool];
     const actions = document.querySelector("#content .section-head > .actions");
     if (!tool || !actions || actions.querySelector("[data-p3-open]") || !tool.allowed()) return;
     actions.insertAdjacentHTML(
       "beforeend",
-      `<button type="button" class="btn secondary ai-action" data-p3-open="${toolId}" data-keep-visible>${ic(tool.icon)}<span>${esc(tool.label)}</span></button>`,
+      `<button type="button" class="btn secondary ai-action" data-p3-open="${entry.tool}" ${entry.kind ? `data-kind="${esc(entry.kind)}"` : ""} data-keep-visible>${ic(tool.icon)}<span>${esc(entry.label || tool.label)}</span></button>`,
     );
   }
   function addProjectButton() {
@@ -825,9 +1238,11 @@
     // Optional chaining: the observer can fire while a test window is being closed.
     const central = document?.querySelector?.('#modalBody [data-pro-action="project-central"]');
     if (!central || central.parentElement.querySelector("[data-p3-open='voice']")) return;
+    const id = esc(central.dataset.id || "");
     central.insertAdjacentHTML(
       "afterend",
-      ` <button type="button" class="btn secondary ai-action" data-p3-open="voice" data-project="${esc(central.dataset.id || "")}">${ic("mic")}<span>Compte rendu vocal</span></button>`,
+      ` <button type="button" class="btn secondary ai-action" data-p3-open="voice" data-project="${id}">${ic("mic")}<span>Compte rendu vocal</span></button>` +
+        (TOOLS.email.allowed() ? ` <button type="button" class="btn secondary ai-action" data-p3-open="email" data-kind="project_update" data-target="${id}">${ic("mail")}<span>Message au client</span></button>` : ""),
     );
   }
 
@@ -847,7 +1262,24 @@
   }
   document.addEventListener("click", (event) => {
     const open = event.target.closest("[data-p3-open]");
-    if (open) return openTool(open.dataset.p3Open, { projectId: open.dataset.project || "" });
+    if (open)
+      return openTool(open.dataset.p3Open, { projectId: open.dataset.project || "", kind: open.dataset.kind || "", id: open.dataset.target || "" });
+    const ref = event.target.closest("[data-p3-ref]");
+    if (ref) {
+      // Open the record with the application's own action, after closing the panel.
+      closePanel();
+      const opener = document.createElement("button");
+      opener.type = "button";
+      opener.hidden = true;
+      opener.dataset.action = ref.dataset.p3Ref;
+      opener.dataset.id = ref.dataset.id;
+      document.body.append(opener);
+      opener.click();
+      opener.remove();
+      return;
+    }
+    const copy = event.target.closest("[data-p3-copy]");
+    if (copy) return copyText(chat[Number(copy.dataset.p3Copy)]?.text || "");
     const chip = event.target.closest("[data-p3-ask]");
     if (chip) return ask(chip.dataset.p3Ask);
     const control = event.target.closest("[data-p3-panel]");
@@ -855,6 +1287,7 @@
     const action = control.dataset.p3Panel;
     if (action === "toggle") document.getElementById("aiPanel")?.hidden === false ? closePanel() : openPanel();
     else if (action === "close") closePanel();
+    else if (action === "mic") toggleVoiceQuestion(control);
     else if (action === "clear") {
       chat = [];
       saveChat();

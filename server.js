@@ -127,6 +127,14 @@ function createApp(db = pool) {
       res.set("Cache-Control", "no-cache");
       res.sendFile(path.join(__dirname, file));
     });
+  // pdf.js turns PDF invoices into images in the browser before the AI reads them.
+  // Loaded only when someone picks a PDF; versioned with the dependency.
+  for (const file of ["pdf.min.mjs", "pdf.worker.min.mjs"])
+    app.get("/vendor/pdfjs/" + file, (req, res) => {
+      res.set("Cache-Control", "public, max-age=604800");
+      res.type("text/javascript");
+      res.sendFile(path.join(path.dirname(require.resolve("pdfjs-dist/package.json")), "build", file));
+    });
   app.get("/", (req, res) => res.sendFile(path.join(__dirname, "index.html")));
   app.use((req, res) => res.status(404).json({ error: "Page introuvable." }));
   app.use((err, req, res, next) => {

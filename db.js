@@ -742,6 +742,17 @@ async function migrate(db = pool) {
       ('messages',3650),('call_history',730),('call_signals',7)
       ON CONFLICT(scope) DO NOTHING`,
   );
+  // AI usage per person and per day: counts only, never the questions or the answers.
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS ai_usage(
+      day DATE NOT NULL,
+      user_id INTEGER NOT NULL,
+      feature VARCHAR(40) NOT NULL,
+      calls INTEGER NOT NULL DEFAULT 0,
+      failures INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY(day,user_id,feature)
+    )`,
+  );
 
   await db.query(
     "INSERT INTO app_state(id,data) VALUES(1,$1) ON CONFLICT(id) DO NOTHING",
@@ -784,7 +795,8 @@ async function migrate(db = pool) {
       ('2026-09-27-entity-records-mirror'),
       ('2026-09-27-webauthn-passkeys'),
       ('2026-09-27-external-file-storage'),
-      ('2026-09-30-reliable-recurrences')
+      ('2026-09-30-reliable-recurrences'),
+      ('2026-11-24-ai-usage')
       ON CONFLICT(version) DO NOTHING`,
   );
   // Disable the previously published demo credentials, even on an existing installation.

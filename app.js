@@ -145,6 +145,8 @@ function navigationIcon(key) {
 }
 // Shared line icons, same drawing style as the navigation. Used instead of emoji in the interface chrome.
 const UI_ICONS = {
+  copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>',
+  mail: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>',
   menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
   x: '<path d="M6 6l12 12M18 6 6 18"/>',
   refresh: '<path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/>',
@@ -1974,6 +1976,7 @@ const columns = {
   ],
   expenses: [
     ["supplier", "Fournisseur"],
+    ["reference", "N° facture"],
     ["project", "Chantier"],
     ["amount", "Montant"],
     ["date", "Date"],
@@ -2233,6 +2236,7 @@ const schemas = {
   expenses: [
     ["company", "Entreprise", "@companies"],
     ["supplier", "Fournisseur"],
+    ["reference", "N° de facture", "text?"],
     ["project", "Chantier", "@projects?"],
     ["amount", "Montant CHF", "number"],
     ["date", "Date", "date"],

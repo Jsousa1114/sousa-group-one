@@ -851,6 +851,7 @@ function applyCommand(
         company: c,
         project: proj?.id || "",
         supplier: text(p.supplier, "Fournisseur"),
+        reference: text(p.reference, "N° de facture", 80, true),
         amount: fromCents(cents(p.amount)),
         date: iso(p.date),
         status: "Enregistrée",

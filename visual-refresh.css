@@ -493,3 +493,29 @@ body.light .suite-e2ee.waiting { color:#7a4300 !important; background:#fcefd6; b
   .section-head > .actions > .ai-action .ui-icon { display:none; }
 }
 body.light .notice.warning { color:#7a4300; background:#fcefd6; border-color:#f1d9a8; }
+/* ===== IA : réponses mises en forme, micro, transparence, outils enrichis (24.11.2026) ===== */
+.ai-answer { position:relative; padding-right:40px; }
+.ai-rich p { margin:0 0 6px; white-space:normal; }
+.ai-rich p:last-child { margin-bottom:0; }
+.ai-rich ul, .ai-rich ol { margin:4px 0 6px; padding-left:20px; }
+.ai-rich li { margin:2px 0; overflow-wrap:anywhere; }
+.ai-rich code { padding:1px 4px; border-radius:4px; background:var(--soft); font-size:.85em; }
+.ai-ref { display:inline; padding:0 4px; border:0; border-radius:4px; background:var(--accent-soft); color:var(--action); font:inherit; font-weight:600; text-decoration:underline; text-underline-offset:2px; cursor:pointer; }
+.ai-ref:hover { text-decoration-thickness:2px; }
+.ai-copy { position:absolute; top:6px; right:6px; display:inline-grid; place-items:center; width:28px; height:28px; border:0; border-radius:6px; background:transparent; color:var(--muted); cursor:pointer; }
+.ai-copy:hover { background:var(--soft); color:var(--text); }
+.ai-copy .ui-icon { width:16px; height:16px; }
+.ai-mic { flex:none; display:inline-grid; place-items:center; width:44px; height:44px; border:1px solid var(--border); border-radius:10px; background:var(--panel); color:var(--text); cursor:pointer; }
+.ai-mic .ui-icon { width:20px; height:20px; }
+.ai-mic.listening { border-color:#c62828; background:#c62828; color:#fff; animation:ai-listen 1.2s ease-in-out infinite; }
+@keyframes ai-listen { 50% { box-shadow:0 0 0 6px #c6282833; } }
+@media (prefers-reduced-motion:reduce) { .ai-mic.listening { animation:none; } }
+.ai-footnote { margin:0; padding:0 16px 10px; color:var(--muted); font-size:.75rem; }
+.ai-footnote:empty { display:none; }
+.p3-price-note { display:block; margin-top:4px; color:var(--muted); font-size:.75rem; font-weight:400; }
+.p3-margin { display:flex; flex-wrap:wrap; gap:8px; align-items:flex-end; margin:8px 0; }
+.p3-margin label { max-width:220px; }
+.p3-mail { margin-top:12px; }
+.p3-mail textarea { font-family:inherit; }
+.notice.warning ul { margin:6px 0 0; padding-left:20px; }
+#p3AssistantAnswer.ai-rich { white-space:normal; }
