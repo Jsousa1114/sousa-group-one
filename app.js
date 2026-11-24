@@ -784,6 +784,7 @@ function render() {
     window.SGOP1Suite?.afterRender?.();
     window.SGOProSuite?.afterRender?.();
     window.SGOP3Center?.afterRender?.();
+    window.SGOMailCenter?.afterRender?.();
   });
 }
 function projectRows(list) {

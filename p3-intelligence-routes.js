@@ -1785,6 +1785,7 @@ function routes(db) {
 
 module.exports = {
   aiConfigured,
+  emailFacts,
   runDailyBriefings,
   streamAi,
   callAi,

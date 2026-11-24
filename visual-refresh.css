@@ -553,3 +553,20 @@ body.light .notice.warning { color:#7a4300; background:#fcefd6; border-color:#f1
 .p3-doc-thread .ai-msg { max-width:100%; }
 .p3-doc .ai-composer { padding:0; border-top:0; }
 .p3-doc .ai-footnote { padding:0; }
+/* ===== E-mails : envoi au client, relances (25.11.2026) ===== */
+.mail-form { display:grid; gap:12px; }
+.mail-form textarea { font-family:inherit; }
+.mail-check { display:flex; align-items:center; gap:8px; font-weight:500; }
+.mail-check input { width:auto; min-width:18px; height:18px; }
+.mail-inline { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+.mail-inline input { flex:1 1 220px; }
+.mail-send { display:inline-flex; align-items:center; gap:6px; }
+.mail-send .ui-icon, .mail-form .btn .ui-icon { width:16px; height:16px; }
+.mail-form .btn { display:inline-flex; align-items:center; gap:6px; }
+.mail-history { display:flex; align-items:center; gap:6px; margin:6px 0 0; font-size:.875rem; }
+.mail-history .ui-icon { width:16px; height:16px; color:var(--action); }
+.mail-center { display:grid; gap:14px; }
+.mail-center > .card { display:grid; gap:10px; margin:0; }
+.mail-center h3 { display:flex; align-items:center; gap:8px; margin:0; }
+.mail-center h3 .ui-icon { width:18px; height:18px; color:var(--action); }
+.mail-center p { margin:0; }

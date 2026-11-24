@@ -753,6 +753,23 @@ async function migrate(db = pool) {
       PRIMARY KEY(day,user_id,feature)
     )`,
   );
+  // E-mails sent by the application: who, what and the outcome (not the message itself).
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS email_log(
+      id TEXT PRIMARY KEY,
+      company TEXT,
+      kind VARCHAR(40) NOT NULL,
+      entity_type VARCHAR(20),
+      entity_id TEXT,
+      recipient TEXT NOT NULL,
+      subject TEXT NOT NULL,
+      status VARCHAR(12) NOT NULL,
+      error TEXT,
+      created_by INTEGER,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`,
+  );
+  await db.query("CREATE INDEX IF NOT EXISTS email_log_entity_idx ON email_log(entity_type,entity_id,kind)");
   // One "point du jour" per person and per day (Zurich date), kept to avoid regenerating it.
   await db.query(
     `CREATE TABLE IF NOT EXISTS ai_briefings(
@@ -809,7 +826,8 @@ async function migrate(db = pool) {
       ('2026-09-27-external-file-storage'),
       ('2026-09-30-reliable-recurrences'),
       ('2026-11-24-ai-usage'),
-      ('2026-11-24-ai-briefings')
+      ('2026-11-24-ai-briefings'),
+      ('2026-11-25-email-log')
       ON CONFLICT(version) DO NOTHING`,
   );
   // Disable the previously published demo credentials, even on an existing installation.

@@ -202,7 +202,7 @@ function routes(db) {
     const external = {
       googleCalendar: !!(process.env.GOOGLE_CALENDAR_API_URL && process.env.GOOGLE_CALENDAR_API_KEY),
       microsoftCalendar: !!(process.env.MICROSOFT_CALENDAR_API_URL && process.env.MICROSOFT_CALENDAR_API_KEY),
-      email: !!(process.env.EMAIL_API_URL && process.env.EMAIL_API_KEY),
+      email: require("./mailer").configured() || !!(process.env.EMAIL_API_URL && process.env.EMAIL_API_KEY),
       sms: !!(process.env.SMS_API_URL && process.env.SMS_API_KEY),
     };
     const features = {
@@ -495,16 +495,21 @@ function routes(db) {
       const client=clientVisible(ctx,req.user,String(quote.clientId||""));
       const recipient=channel==="email"?client.email:client.phone;
       if(!recipient) D.fail("Coordonnée client manquante.");
-      const url=channel==="email"?process.env.EMAIL_API_URL:process.env.SMS_API_URL;
-      const key=channel==="email"?process.env.EMAIL_API_KEY:process.env.SMS_API_KEY;
-      if(!url||!key) D.fail("Connecteur "+channel+" non configuré.",503);
       const payload={
         to:recipient,
         subject:channel==="email"?"Relance devis "+quote.id:undefined,
         text:note||("Bonjour, nous revenons vers vous concernant le devis "+quote.id+" de Sousa Group One."),
         metadata:{quoteId:quote.id,clientId:client.id,company:quote.company||null}
       };
-      await callConnector(url,key,payload);
+      // E-mail goes through Gmail/SMTP when it is configured, otherwise through the HTTP adapter.
+      if(channel==="email"&&require("./mailer").configured())
+        await require("./mailer").sendMail({to:payload.to,subject:payload.subject,text:payload.text});
+      else{
+        const url=channel==="email"?process.env.EMAIL_API_URL:process.env.SMS_API_URL;
+        const key=channel==="email"?process.env.EMAIL_API_KEY:process.env.SMS_API_KEY;
+        if(!url||!key) D.fail("Connecteur "+channel+" non configuré.",503);
+        await callConnector(url,key,payload);
+      }
       status="sent";
     }
     await db.query("INSERT INTO p2_quote_reminders(id,quote_id,company,channel,status,note,created_by) VALUES($1,$2,$3,$4,$5,$6,$7)",
@@ -563,9 +568,10 @@ function routes(db) {
     if(!companyAllowed(req.user,company)) D.fail("Entreprise non autorisée.",403);
     const recipient=provider==="email"?client.email:client.phone;
     if(!recipient) D.fail("Coordonnée client manquante.");
+    const smtp=provider==="email"&&require("./mailer").configured();
     const url=provider==="email"?process.env.EMAIL_API_URL:process.env.SMS_API_URL;
     const key=provider==="email"?process.env.EMAIL_API_KEY:process.env.SMS_API_KEY;
-    if(!url||!key) D.fail("Connecteur "+provider+" non configuré.",503);
+    if(!smtp&&(!url||!key)) D.fail("Connecteur "+provider+" non configuré.",503);
     const id=randomUUID(), payload={
       to:recipient,
       subject:provider==="email"?clean(String(b.subject||"Sousa Group One"),200):undefined,
@@ -575,7 +581,8 @@ function routes(db) {
     await db.query("INSERT INTO p2_connector_jobs(id,company,provider,kind,recipient,payload,created_by) VALUES($1,$2,$3,$4,$5,$6,$7)",
       [id,company,provider,"message",recipient,JSON.stringify(payload),req.user.id]);
     try{
-      await callConnector(url,key,payload);
+      if(smtp) await require("./mailer").sendMail({to:payload.to,subject:payload.subject,text:payload.text});
+      else await callConnector(url,key,payload);
       await db.query("UPDATE p2_connector_jobs SET status='sent',sent_at=NOW() WHERE id=$1",[id]);
       res.json({ok:true,id,status:"sent"});
     }catch(error){
