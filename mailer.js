@@ -1,8 +1,8 @@
 "use strict";
 // Outgoing e-mail over SMTP (Gmail with an app password by default), one account per company.
 //   SMTP_USER_<COMPANY> / SMTP_PASS_<COMPANY>  the Gmail address and its 16-character "app
-//       password" for one company, e.g. SMTP_USER_HOME / SMTP_PASS_HOME for Sousa Home Service
-//       (company ids in capitals: ELECTRICITE, HOME, TECH, MOVING, SOLAR, EVENTS, GROUP).
+//       password" for one company, saved under its name without "Sousa", in capitals
+//       (ELECTRICITE, HOME, TECH, MOVING, SOLAR, EVENTS, GROUP) or under its id.
 //   SMTP_USER / SMTP_PASS  optional default account, used by companies without their own.
 //   SMTP_HOST default smtp.gmail.com, SMTP_PORT default 465 (TLS)
 //   MAIL_FROM_NAME  name shown when no company name is given (default "Sousa Group One")
@@ -13,10 +13,32 @@ const EMAIL = /^[^\s@<>"',;]+@[^\s@<>"',;]+\.[^\s@<>"',;]{2,}$/;
 const validEmail = (value) => typeof value === "string" && value.length <= 254 && EMAIL.test(value.trim());
 const envKey = (company) => String(company || "").toUpperCase().replace(/[^A-Z0-9]/g, "_");
 
+// The names a company's account can be saved under: its id, its name without "Sousa"
+// ("Sousa Moving" → MOVING, "Sousa Home Service" → HOME_SERVICE, then HOME), and its code.
+// Companies created in the application have a generated id, so the name is what people use.
+function accountKeys(company) {
+  if (!company) return [];
+  const c = typeof company === "object" ? company : { id: company };
+  const keys = [envKey(c.id)];
+  if (c.name) {
+    const slug = String(c.name)
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toUpperCase()
+      .replace(/^SOUSA[\s-]+/, "")
+      .replace(/[^A-Z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "");
+    keys.push(slug);
+    if (c.code) keys.push(envKey(c.code));
+    keys.push(slug.split("_")[0]);
+  } else if (c.code) keys.push(envKey(c.code));
+  return [...new Set(keys.filter(Boolean))];
+}
+
 function account(company) {
-  const key = envKey(company);
-  const own = key && validEmail(process.env["SMTP_USER_" + key] || "") && String(process.env["SMTP_PASS_" + key] || "").trim();
-  if (own) return { user: process.env["SMTP_USER_" + key].trim(), pass: process.env["SMTP_PASS_" + key], source: "company" };
+  for (const key of accountKeys(company))
+    if (validEmail(process.env["SMTP_USER_" + key] || "") && String(process.env["SMTP_PASS_" + key] || "").trim())
+      return { user: process.env["SMTP_USER_" + key].trim(), pass: process.env["SMTP_PASS_" + key], source: "company", key };
   if (validEmail(process.env.SMTP_USER || "") && String(process.env.SMTP_PASS || "").trim())
     return { user: process.env.SMTP_USER.trim(), pass: process.env.SMTP_PASS, source: "default" };
   return null;
@@ -37,7 +59,7 @@ function settings(company) {
   };
 }
 
-// With a company: is there an account for it (its own or the default)?
+// With a company (id or { id, name, code }): is there an account for it (its own or the default)?
 // Without: is there at least one account?
 function configured(company) {
   if (company !== undefined) return !!(settings(company).host && settings(company).user && settings(company).pass);
@@ -108,4 +130,4 @@ async function sendMail({ to, subject, text, attachments = [], replyTo = "", com
   }
 }
 
-module.exports = { configured, sender, sendMail, validEmail, friendlyError, envKey, _reset: () => transports.clear() };
+module.exports = { configured, sender, sendMail, validEmail, friendlyError, envKey, accountKeys, _reset: () => transports.clear() };

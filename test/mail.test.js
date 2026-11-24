@@ -11,7 +11,7 @@ const { createApp } = require("../server");
 const D = require("../domain");
 
 process.env.JWT_SECRET = "test-only-secret-with-at-least-32-characters";
-const ENV = ["SMTP_HOST", "SMTP_PORT", "SMTP_SECURE", "SMTP_USER", "SMTP_PASS", "SMTP_USER_HOME", "SMTP_PASS_HOME", "MAIL_FROM_NAME", "MAIL_REPLY_TO", "AI_API_URL", "AI_API_KEY"];
+const ENV = ["SMTP_HOST", "SMTP_PORT", "SMTP_SECURE", "SMTP_USER", "SMTP_PASS", "SMTP_USER_HOME", "SMTP_PASS_HOME", "SMTP_USER_MOVING", "SMTP_PASS_MOVING", "MAIL_FROM_NAME", "MAIL_REPLY_TO", "AI_API_URL", "AI_API_KEY"];
 const saved = Object.fromEntries(ENV.map((k) => [k, process.env[k]]));
 let db, server, smtp, url;
 const tokens = {};
@@ -65,12 +65,15 @@ function fakeSmtp(password) {
 }
 
 let smtpPassword = "app-password-16c";
+const MOVING_ID = "62595bda-dfc6-44c2-8aed-804a3183806f";
 const fixture = () => {
   const d = D.emptyState();
   d.clients = [
     { id: "c1", company: "home", name: "Sophie Bernard", street: "Rue du Lac", buildingNumber: "4", zip: "1000", city: "Lausanne", country: "CH", email: "sophie@example.invalid" },
     { id: "c2", company: "home", name: "Sans E-mail SA", street: "Rue B", buildingNumber: "1", zip: "1000", city: "Lausanne", country: "CH", email: "" },
   ];
+  // Like on the live installation: a company created in the application has a generated id.
+  d.companies.find((c) => c.id === "moving").id = MOVING_ID;
   d.companies.find((c) => c.id === "home").billing = { iban: "CH9300762011623852957", street: "Rue Test", buildingNumber: "2", zip: "1000", city: "Lausanne", country: "CH", email: "factures@sousa.invalid" };
   const admin = { id: 1, role: "admin", company: "group" };
   const invoice = (clientId, date, due) => {
@@ -211,6 +214,27 @@ test("each company sends from its own Gmail account, with its own name", async (
   } finally {
     delete process.env.SMTP_USER_HOME;
     delete process.env.SMTP_PASS_HOME;
+    smtpPassword = "app-password-16c";
+  }
+});
+
+test("a company with a generated id is found by its name (SMTP_USER_MOVING for Sousa Moving)", async () => {
+  configure();
+  Object.assign(process.env, { SMTP_USER_MOVING: "sousa.moving@example.invalid", SMTP_PASS_MOVING: "moving-app-pass" });
+  smtpPassword = "moving-app-pass";
+  try {
+    const status = await call("mail/status", "admin");
+    const moving = status.data.companies.find((c) => c.name === "Sousa Moving");
+    assert.equal(moving.id, MOVING_ID);
+    assert.deepEqual([moving.address, moving.own], ["sousa.moving@example.invalid", true]);
+    const before = messages.length;
+    const out = await call("mail/test", "admin", { company: MOVING_ID });
+    assert.equal(out.status, 200, JSON.stringify(out.data));
+    assert.equal(out.data.from, "sousa.moving@example.invalid");
+    assert.match(messages[before].raw, /From: Sousa Moving <sousa\.moving@example\.invalid>/);
+  } finally {
+    delete process.env.SMTP_USER_MOVING;
+    delete process.env.SMTP_PASS_MOVING;
     smtpPassword = "app-password-16c";
   }
 });

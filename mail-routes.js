@@ -65,6 +65,12 @@ async function financePdf(kind, document, issuer, customer, qr, { fallback = fal
     return renderPDF(document, kind, issuer, customer, false);
   }
 }
+// The company as the mail account lookup needs it (id, name, code): accounts are saved under
+// the company's name ("Sousa Moving" → SMTP_USER_MOVING) or its id.
+const companyOf = (state, id) => {
+  const c = (state?.companies || []).find((x) => D.same(x.id, id));
+  return c ? { id: String(c.id), name: c.name || "", code: c.code || "" } : { id: String(id || "") };
+};
 const replyToFor = (issuer) => (mailer.validEmail(issuer?.billing?.email || "") ? issuer.billing.email : "");
 
 function defaultFinanceMessage(kind, document, issuer, customer) {
@@ -159,7 +165,7 @@ async function processEmailReminders(db, now = new Date()) {
       continue;
     }
     // No Gmail account for this company (nor a default one): wait until there is one.
-    if (!mailer.configured(invoice.company)) continue;
+    if (!mailer.configured(companyOf(state, invoice.company))) continue;
     const message = reminderMessage(stage, invoice, issuer, customer);
     const entry = { company: invoice.company, kind, entityType: "invoices", entityId: invoice.id };
     if (!mailer.validEmail(customer?.email || "")) {
@@ -172,7 +178,7 @@ async function processEmailReminders(db, now = new Date()) {
         to: customer.email,
         subject: message.subject,
         text: message.text,
-        company: invoice.company,
+        company: companyOf(state, invoice.company),
         fromName: issuer?.name,
         replyTo: replyToFor(issuer),
         attachments: [{ filename: `${invoice.id}.pdf`, content: pdf, contentType: "application/pdf" }],
@@ -201,7 +207,7 @@ function routes(db) {
       const state = D.viewState((await loadState(db)).data, req.user);
       // Each company sends from its own Gmail account, or from the default one.
       const companies = (state.companies || []).map((c) => {
-        const from = mailer.sender(c.id);
+        const from = mailer.sender(companyOf(state, c.id));
         return { id: String(c.id), name: c.name || String(c.id), address: from?.address || "", own: from?.source === "company" };
       });
       res.json({
@@ -220,7 +226,8 @@ function routes(db) {
       const state = D.viewState((await loadState(db)).data, req.user);
       const co = company ? (state.companies || []).find((c) => D.same(c.id, company)) : null;
       if (company && !co) D.fail("Entreprise non autorisée.", 403);
-      const from = mailer.sender(company);
+      const account = co ? companyOf(state, co.id) : "";
+      const from = mailer.sender(account);
       if (!from) D.fail(`Aucune adresse Gmail n’est configurée pour ${co?.name || "l’envoi"}.`, 503);
       const to = text(req.body?.to, 254) || from.address;
       await sendLogged(
@@ -228,7 +235,7 @@ function routes(db) {
         { kind: "test", company: company || null, createdBy: req.user.id },
         {
           to,
-          company,
+          company: account,
           fromName: co?.name,
           subject: `Test d’envoi · ${co?.name || "Sousa Group One"}`,
           text: `Bonjour,\n\nCet e-mail confirme que l’application Sousa Group One peut envoyer des e-mails${co ? " pour " + co.name : ""} depuis ${from.address}.\n\nEnvoyé par ${req.user.name || "un utilisateur"} le ${new Date().toLocaleString("fr-CH", { timeZone: "Europe/Zurich" })}.`,
@@ -271,7 +278,8 @@ function routes(db) {
       if (!document) D.fail("Document introuvable.", 404);
       if (document.status === "Brouillon") D.fail("Émettez le document avant de l’envoyer.");
       const { issuer, customer } = financeParts(state, kind, document);
-      if (!mailer.configured(document.company)) D.fail(`Aucune adresse Gmail n’est configurée pour ${issuer?.name || document.company}.`, 503);
+      const account = companyOf(state, document.company);
+      if (!mailer.configured(account)) D.fail(`Aucune adresse Gmail n’est configurée pour ${issuer?.name || document.company}.`, 503);
       const to = text(req.body?.to, 254) || customer?.email || "";
       if (!mailer.validEmail(to)) D.fail("Indiquez une adresse e-mail valide pour le client.");
       const qr = kind === "invoices" && req.body?.qr !== false && document.status !== "Payée";
@@ -281,9 +289,9 @@ function routes(db) {
       await sendLogged(
         db,
         { company: document.company, kind: kind === "quotes" ? "quote" : "invoice", entityType: kind, entityId: document.id, createdBy: req.user.id },
-        { to, subject, text: body, company: document.company, fromName: issuer?.name, replyTo: replyToFor(issuer), attachments: [{ filename: `${document.id}.pdf`, content: pdf, contentType: "application/pdf" }] },
+        { to, subject, text: body, company: account, fromName: issuer?.name, replyTo: replyToFor(issuer), attachments: [{ filename: `${document.id}.pdf`, content: pdf, contentType: "application/pdf" }] },
       );
-      res.json({ ok: true, to, from: mailer.sender(document.company)?.address || "" });
+      res.json({ ok: true, to, from: mailer.sender(account)?.address || "" });
     }),
   );
 
@@ -309,7 +317,8 @@ function routes(db) {
       const attachments = [];
       let replyTo = "";
       const companyName = (ctx.view.companies || []).find((c) => D.same(c.id, record?.company))?.name || "";
-      if (!mailer.configured(record?.company || "")) D.fail(`Aucune adresse Gmail n’est configurée pour ${companyName || "cette entreprise"}.`, 503);
+      const account = companyOf(ctx.view, record?.company);
+      if (!mailer.configured(account)) D.fail(`Aucune adresse Gmail n’est configurée pour ${companyName || "cette entreprise"}.`, 503);
       if (entityType !== "projects") {
         const { issuer, customer } = financeParts(ctx.view, entityType, record);
         replyTo = replyToFor(issuer);
@@ -323,7 +332,7 @@ function routes(db) {
       await sendLogged(
         db,
         { company: record?.company || null, kind: "message-" + kind, entityType, entityId: id, createdBy: req.user.id },
-        { to, subject, text: body, replyTo, attachments, company: record?.company || "", fromName: companyName },
+        { to, subject, text: body, replyTo, attachments, company: account, fromName: companyName },
       );
       res.json({ ok: true, to, attached: attachments.length > 0, facts: { client: facts.client } });
     }),
