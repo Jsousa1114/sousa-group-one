@@ -1,6 +1,6 @@
 "use strict";
 
-const STATIC_CACHE = "sgo-shell-2026-11-25-wm2",
+const STATIC_CACHE = "sgo-shell-2026-11-26-wa1",
   STATIC_ASSETS = [
     "/",
     "/index.html",
@@ -9,6 +9,8 @@ const STATIC_CACHE = "sgo-shell-2026-11-25-wm2",
     "/mail-center.js",
     "/webmail-center.js",
     "/webmail.css",
+    "/whatsapp-center.js",
+    "/whatsapp.css",
     "/finance.js",
     "/messaging-crypto.js",
     "/messaging-suite.js",

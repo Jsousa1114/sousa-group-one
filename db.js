@@ -885,6 +885,118 @@ async function migrate(db = pool) {
     )`,
   );
   await db.query("CREATE INDEX IF NOT EXISTS webmail_reminders_due_idx ON webmail_reminders(status,remind_at)");
+  // WhatsApp (linked like WhatsApp Web): the session (encrypted), the conversations and messages
+  // received on the linked number, who may open it, messages waiting to leave and reminders.
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS whatsapp_auth(
+      account TEXT NOT NULL,
+      key TEXT NOT NULL,
+      value TEXT NOT NULL,
+      PRIMARY KEY(account,key)
+    )`,
+  );
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS whatsapp_chats(
+      account TEXT NOT NULL,
+      jid TEXT NOT NULL,
+      name TEXT,
+      is_group BOOLEAN NOT NULL DEFAULT false,
+      unread INTEGER NOT NULL DEFAULT 0,
+      last_at TIMESTAMPTZ,
+      last_text TEXT,
+      last_from_me BOOLEAN NOT NULL DEFAULT false,
+      archived BOOLEAN NOT NULL DEFAULT false,
+      muted_until TIMESTAMPTZ,
+      snoozed_until TIMESTAMPTZ,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY(account,jid)
+    )`,
+  );
+  await db.query("CREATE INDEX IF NOT EXISTS whatsapp_chats_last_idx ON whatsapp_chats(account,last_at DESC)");
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS whatsapp_messages(
+      account TEXT NOT NULL,
+      jid TEXT NOT NULL,
+      id TEXT NOT NULL,
+      from_me BOOLEAN NOT NULL DEFAULT false,
+      sender TEXT,
+      sender_name TEXT,
+      at TIMESTAMPTZ NOT NULL,
+      kind TEXT NOT NULL DEFAULT 'text',
+      body TEXT,
+      media_mime TEXT,
+      media_name TEXT,
+      media_size BIGINT,
+      thumb TEXT,
+      quoted_id TEXT,
+      quoted_text TEXT,
+      status INTEGER,
+      deleted BOOLEAN NOT NULL DEFAULT false,
+      edited BOOLEAN NOT NULL DEFAULT false,
+      reactions TEXT,
+      raw TEXT,
+      media_file TEXT,
+      seq BIGSERIAL,
+      PRIMARY KEY(account,jid,id)
+    )`,
+  );
+  await db.query("CREATE INDEX IF NOT EXISTS whatsapp_messages_chat_idx ON whatsapp_messages(account,jid,at DESC)");
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS whatsapp_contacts(
+      account TEXT NOT NULL,
+      jid TEXT NOT NULL,
+      name TEXT,
+      notify TEXT,
+      PRIMARY KEY(account,jid)
+    )`,
+  );
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS whatsapp_lids(
+      account TEXT NOT NULL,
+      lid TEXT NOT NULL,
+      pn TEXT NOT NULL,
+      PRIMARY KEY(account,lid)
+    )`,
+  );
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS whatsapp_access(
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      account TEXT NOT NULL,
+      granted_by INTEGER,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY(user_id,account)
+    )`,
+  );
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS whatsapp_outbox(
+      id TEXT PRIMARY KEY,
+      account TEXT NOT NULL,
+      jid TEXT NOT NULL,
+      user_id INTEGER,
+      kind TEXT NOT NULL DEFAULT 'undo',
+      status TEXT NOT NULL DEFAULT 'scheduled',
+      send_at TIMESTAMPTZ NOT NULL,
+      preview TEXT,
+      payload TEXT,
+      error TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      sent_at TIMESTAMPTZ
+    )`,
+  );
+  await db.query("CREATE INDEX IF NOT EXISTS whatsapp_outbox_due_idx ON whatsapp_outbox(status,send_at)");
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS whatsapp_reminders(
+      id TEXT PRIMARY KEY,
+      account TEXT NOT NULL,
+      jid TEXT NOT NULL,
+      user_id INTEGER,
+      remind_at TIMESTAMPTZ NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      done_at TIMESTAMPTZ
+    )`,
+  );
+  await db.query("CREATE INDEX IF NOT EXISTS whatsapp_reminders_due_idx ON whatsapp_reminders(status,remind_at)");
   await db.query(
     `CREATE TABLE IF NOT EXISTS email_inbox_state(
       account TEXT PRIMARY KEY,
@@ -955,7 +1067,8 @@ async function migrate(db = pool) {
       ('2026-11-25-email-log'),
       ('2026-11-25-email-settings-inbox'),
       ('2026-11-25-webmail'),
-      ('2026-11-26-webmail-2')
+      ('2026-11-26-webmail-2'),
+      ('2026-11-26-whatsapp')
       ON CONFLICT(version) DO NOTHING`,
   );
   // Disable the previously published demo credentials, even on an existing installation.
