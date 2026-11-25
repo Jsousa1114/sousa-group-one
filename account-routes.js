@@ -31,6 +31,7 @@ const DEFAULT_PREFS = Object.freeze({
     absences: true,
     finance: true,
     assistant: true,
+    mail: true,
     push: true,
     sound: true,
     vibration: true,

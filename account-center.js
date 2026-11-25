@@ -185,6 +185,7 @@
             ${switchRow("absences", "Absences", notif.absences)}
             ${switchRow("finance", "Devis et factures", notif.finance)}
             ${core()?.getProfile?.()?.role !== "client" ? switchRow("assistant", "Point du jour de l’assistant (en semaine le matin)", notif.assistant !== false) : ""}
+            ${window.SGOWebmail?.hasAccess?.() ? switchRow("mail", "Nouveaux e-mails (Boîte mail)", notif.mail !== false) : ""}
             ${switchRow("push", "Notifications push", notif.push)}
             ${switchRow("sound", "Son", notif.sound)}
             ${switchRow("vibration", "Vibration", notif.vibration)}
@@ -478,9 +479,11 @@
         await savePrefs(
           "notifications",
           Object.fromEntries(
+            // A choice that is not shown here (for example « Nouveaux e-mails » without access
+            // to a mailbox) keeps its current value instead of being switched off.
             Object.keys(cache.preferences.notifications).map((key) => [
               key,
-              data.has(key),
+              f.elements[key] ? data.has(key) : cache.preferences.notifications[key] !== false,
             ]),
           ),
         );

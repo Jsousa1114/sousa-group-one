@@ -100,6 +100,7 @@ function imapSettings(company) {
     secure: String(process.env.IMAP_SECURE || "true") === "true",
     user: s.user,
     pass: s.pass,
+    source: s.source,
   };
 }
 
@@ -120,24 +121,47 @@ function friendlyError(error, address = "") {
 
 const userError = (message, status) => Object.assign(new Error(message), { status, expose: true });
 
+// Addresses given as an array or as a text separated by commas or semicolons.
+const addressList = (value) =>
+  (Array.isArray(value) ? value : String(value || "").split(/[,;]/))
+    .map((a) => String(a || "").trim())
+    .filter(Boolean);
+const messageIds = (value) =>
+  (Array.isArray(value) ? value : String(value || "").split(/\s+/))
+    .map((id) => String(id || "").replace(/[\r\n\s]+/g, "").trim())
+    .filter((id) => /^<[^<>]{3,490}>$/.test(id))
+    .slice(-20);
+
 // company: whose Gmail account sends; fromName: the name shown (usually the company name).
+// to / cc / bcc: one address or several (array, or text separated by commas).
 // attachments: [{ filename, content: Buffer, contentType }]
 // html: the laid-out version (the text stays the fallback); bcc: hidden copy.
-async function sendMail({ to, subject, text, html = "", attachments = [], replyTo = "", company = "", fromName = "", bcc = "" }) {
+// inReplyTo / references: Message-IDs of the message answered, so the reply joins its conversation.
+async function sendMail({ to, cc = "", subject, text, html = "", attachments = [], replyTo = "", company = "", fromName = "", bcc = "", inReplyTo = "", references = "" }) {
   const s = settings(company);
   if (!s.user || !s.pass) throw userError("L’envoi d’e-mails n’est pas configuré sur le serveur pour cette entreprise.", 503);
-  if (!validEmail(to)) throw userError("Adresse e-mail du destinataire invalide.", 400);
+  const toList = addressList(to);
+  if (!toList.length || !toList.every(validEmail)) throw userError("Adresse e-mail du destinataire invalide.", 400);
+  const ccList = addressList(cc);
+  if (!ccList.every(validEmail)) throw userError("Adresse en copie invalide.", 400);
+  const visible = new Set([...toList, ...ccList].map((a) => a.toLowerCase()));
+  const bccList = addressList(bcc).filter((a) => validEmail(a) && !visible.has(a.toLowerCase()));
   const name = String(fromName || s.fromName).replace(/["<>\r\n]/g, "").trim() || s.fromName;
+  const answered = messageIds(inReplyTo)[0];
+  const thread = messageIds(references);
   try {
     const info = await getTransport(s).sendMail({
       from: { name, address: s.user },
-      to: to.trim(),
+      to: toList.join(", "),
+      cc: ccList.length ? ccList.join(", ") : undefined,
       replyTo: validEmail(replyTo) ? replyTo.trim() : s.replyTo || undefined,
-      bcc: validEmail(bcc) && bcc.trim().toLowerCase() !== to.trim().toLowerCase() ? bcc.trim() : undefined,
+      bcc: bccList.length ? bccList.join(", ") : undefined,
       subject: String(subject || "").replace(/[\r\n]+/g, " ").slice(0, 250),
       text: String(text || ""),
       html: html || undefined,
       attachments,
+      inReplyTo: answered || undefined,
+      references: thread.length ? thread : undefined,
     });
     return { messageId: String(info?.messageId || ""), from: s.user };
   } catch (error) {
@@ -146,4 +170,4 @@ async function sendMail({ to, subject, text, html = "", attachments = [], replyT
   }
 }
 
-module.exports = { configured, sender, sendMail, imapSettings, validEmail, friendlyError, envKey, accountKeys, _reset: () => transports.clear() };
+module.exports = { configured, sender, sendMail, imapSettings, validEmail, friendlyError, envKey, accountKeys, addressList, _reset: () => transports.clear() };

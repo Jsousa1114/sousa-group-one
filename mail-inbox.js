@@ -38,6 +38,8 @@ async function fetchNew(account, row, { limit = 40 } = {}) {
     emitLogs: false,
     socketTimeout: 60000,
   });
+  // Without a listener, a network error event would stop the whole server.
+  client.on("error", (error) => console.warn("mail.inbox.imap_error", error?.code || "unknown"));
   await client.connect();
   const lock = await client.getMailboxLock("INBOX");
   try {
@@ -76,10 +78,11 @@ function replyText(parsed) {
   return kept.join("\n").trim().slice(0, 20000);
 }
 
-async function notifyFinance(db, company, title, body) {
+// People who can open the mailbox already get the « Boîte mail » notification for the message.
+async function notifyFinance(db, company, title, body, skip = []) {
   const users = (
     await db.query("SELECT id,company FROM users WHERE role IN ('admin','direction','accounting') AND disabled=false AND deleted_at IS NULL")
-  ).rows.filter((u) => u.company === "group" || u.company === company);
+  ).rows.filter((u) => (u.company === "group" || u.company === company) && !skip.includes(Number(u.id)));
   if (!users.length) return;
   await require("./messaging-routes")
     .notifyUsers(db, users.map((u) => u.id), { category: "finance", title, body, url: "/?open=invoices" })
@@ -126,7 +129,10 @@ async function processInbox(db, { now = new Date(), fetcher = fetchNew } = {}) {
   if (!mailer.configured()) return result;
   const { simpleParser } = require("mailparser");
   const state = (await loadState(db)).data;
+  const webmail = require("./webmail");
   for (const account of accounts(state)) {
+    const box = webmail.mailboxes(state).find((b) => b.address.toLowerCase() === String(account.user).toLowerCase());
+    const mailboxReaders = box ? await webmail.usersWithAccess(db, box).catch(() => []) : [];
     let row = (await db.query("SELECT * FROM email_inbox_state WHERE account=$1", [account.user])).rows[0];
     if (!row)
       // First check: the last day only, never the whole mailbox.
@@ -183,7 +189,7 @@ async function processInbox(db, { now = new Date(), fetcher = fetchNew } = {}) {
       ).rows[0];
       if (inserted) {
         result.stored++;
-        await notifyFinance(db, link.company, "Réponse de " + (link.fromName || link.fromAddress), String(parsed.subject || "Nouveau message").slice(0, 160));
+        await notifyFinance(db, link.company, "Réponse de " + (link.fromName || link.fromAddress), String(parsed.subject || "Nouveau message").slice(0, 160), mailboxReaders);
       }
     }
     await db.query(
