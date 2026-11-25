@@ -1373,6 +1373,13 @@ function setCallUi(name, status, mode = "active") {
   $("callVideoStage").classList.toggle("hidden", !isVideo);
   $("callAvatar").classList.toggle("hidden", isVideo);
   $("callEnableAudio").classList.toggle("hidden", !callAudioBlocked || mode === "incoming" || mode === "ended");
+  syncCallMediaButtons();
+}
+// Mute/camera act on the local stream, which getUserMedia delivers asynchronously:
+// keep them disabled until it exists so an early click is not silently dropped.
+function syncCallMediaButtons() {
+  const ready = Boolean(activeCall?.stream);
+  for (const id of ["callMute", "callCamera"]) if ($(id)) $(id).disabled = !ready;
 }
 function hideCallUi() {
   $("callOverlay")?.classList.add("hidden");
@@ -1643,6 +1650,7 @@ async function startDirectCall(contactId, callType = "audio") {
       stream,
       answerApplied: false,
     };
+    syncCallMediaButtons();
     const offer = await peer.createOffer({
       offerToReceiveAudio: true,
       offerToReceiveVideo: callType === "video",
@@ -1683,6 +1691,7 @@ async function acceptIncomingCall() {
     const { peer, stream } = await makePeer(call.callType || "audio");
     activeCall = { ...call, callType: call.callType || "audio", peer, stream, answerApplied: true };
     incomingCall = null;
+    syncCallMediaButtons();
     callCandidateCursor = 0;
     remoteIceQueue = [];
     await peer.setRemoteDescription(call.offer);
