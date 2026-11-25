@@ -103,6 +103,7 @@ const menus = {
   documents: ["Documents", Object.keys(roles)],
   messages: ["Messages", Object.keys(roles)],
   mailbox: ["Boîte mail", Object.keys(roles).filter((r) => r !== "client")],
+  whatsapp: ["WhatsApp", Object.keys(roles).filter((r) => r !== "client")],
   reports: ["Rapports", [...core, "hr", "accounting", "manager"]],
   pilotage: ["Pilotage", [...core, "hr", "manager", "accounting", "employee"]],
   pro: ["Centre de gestion", [...core, "hr", "manager", "accounting", "employee"]],
@@ -113,7 +114,7 @@ const menus = {
 };
 // Presentation-only navigation. Existing role and fine-permission checks remain authoritative.
 const navigationGroups = [
-  ["Vue d’ensemble", ["dashboard", "messages", "mailbox"]],
+  ["Vue d’ensemble", ["dashboard", "messages", "mailbox", "whatsapp"]],
   ["Équipe", ["employees", "planning", "time", "absences"]],
   ["Activité", ["projects", "clients", "maintenance", "documents"]],
   ["Finances", ["quotes", "invoices", "payments", "expenses"]],
@@ -125,6 +126,7 @@ function navigationIcon(key) {
     dashboard: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
     messages: '<path d="M21 11a8 8 0 0 1-8 8H7l-4 3V11a8 8 0 0 1 8-8h2a8 8 0 0 1 8 8Z"/><path d="M8 9h8M8 13h5"/>',
     mailbox: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3.5 7 8.5 6 8.5-6"/>',
+    whatsapp: '<path d="M4 20.5l1.2-3.9A8.5 8.5 0 1 1 8.3 19.6L4 20.5Z"/><path d="M9.2 8.6c.3 2.6 2.4 4.8 5.1 5.4l1-1.2-1.7-1-.8.7a4.6 4.6 0 0 1-2.1-2.1l.7-.8-1-1.7-1.2.7Z"/>',
     employees: '<circle cx="9" cy="8" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3M17 5a3 3 0 0 1 0 6M18 14a5 5 0 0 1 3 5v2"/>',
     planning: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 3v4M17 3v4M3 11h18M7 15h3M14 15h3"/>',
     time: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
@@ -544,7 +546,7 @@ async function refresh(renderNow = true) {
 // Pages that load their own data and hold user input or results: Pilotage (with the AI assistant),
 // advanced tools, management centre, account and supplier catalogue. An automatic refresh updates
 // the data but must not rebuild them, which scrolls back to the top and wipes answers and drafts.
-const SELF_MANAGED_PAGES = new Set(["pilotage", "advanced", "pro", "settings", "suppliers", "mailbox"]);
+const SELF_MANAGED_PAGES = new Set(["pilotage", "advanced", "pro", "settings", "suppliers", "mailbox", "whatsapp"]);
 function userIsTypingInContent() {
   const active = document.activeElement;
   return !!(
@@ -727,7 +729,12 @@ function render() {
     .map(([group, keys]) => {
       // « Boîte mail » only appears for people allowed to open at least one Gmail mailbox.
       const available = keys.filter(
-        (k) => menus[k] && can(menus[k][1]) && k !== "users" && (k !== "mailbox" || window.SGOWebmail?.hasAccess?.()),
+        (k) =>
+          menus[k] &&
+          can(menus[k][1]) &&
+          k !== "users" &&
+          (k !== "mailbox" || window.SGOWebmail?.hasAccess?.()) &&
+          (k !== "whatsapp" || window.SGOWhatsApp?.hasAccess?.()),
       );
       if (!available.length) return "";
       return `<div class="nav-section"><p class="nav-group">${esc(group)}</p>${available
@@ -741,7 +748,9 @@ function render() {
                 )
               : k === "mailbox"
                 ? Number(window.SGOWebmail?.unreadTotal?.() || 0)
-                : 0;
+                : k === "whatsapp"
+                  ? Number(window.SGOWhatsApp?.unreadTotal?.() || 0)
+                  : 0;
           return `<button class="nav-item ${page === k ? "active" : ""}" data-page="${k}" ${page === k ? 'aria-current="page"' : ""}>${navigationIcon(k)}<span>${esc(label)}</span>${unread ? ` <span class="nav-unread">${unread > 99 ? "99+" : unread}</span>` : ""}</button>`;
         })
         .join("")}</div>`;
@@ -762,6 +771,7 @@ function render() {
   if (page === "suppliers" && window.SGOSuppliers?.render)
     window.SGOSuppliers.render($("supplierCatalog")).catch((e) => notice(e.message));
   if (page === "mailbox") window.SGOWebmail?.render?.($("webmailRoot"));
+  if (page === "whatsapp") window.SGOWhatsApp?.render?.($("whatsappRoot"));
   if (page === "advanced" && window.SGOP2Center?.render)
     window.SGOP2Center.render($("p2Standalone")).catch((e) => notice(e.message));
   if (page === "pro" && window.SGOProSuite?.render)
@@ -806,6 +816,7 @@ function render() {
     window.SGOP3Center?.afterRender?.();
     window.SGOMailCenter?.afterRender?.();
     window.SGOWebmail?.afterRender?.();
+    window.SGOWhatsApp?.afterRender?.();
   });
 }
 function projectRows(list) {
@@ -1981,6 +1992,7 @@ const views = {
   documents: documentsView,
   messages: messagesView,
   mailbox: () => '<div id="webmailRoot" class="wm-root"></div>',
+  whatsapp: () => '<div id="whatsappRoot" class="wa-root"></div>',
   reports: reportsView,
   pilotage: () =>
     heading("Pilotage") +

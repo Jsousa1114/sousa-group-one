@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@simplewebauthn/server": "14.0.3",
+    "baileys": "7.0.0-rc14",
     "bcryptjs": "^2.4.3",
     "compression": "1.8.2",
     "dom-serializer": "2.0.0",
@@ -28,6 +29,8 @@
     "pdfjs-dist": "6.5.438",
     "pdfkit": "0.20.2",
     "pg": "^8.12.0",
+    "pino": "10.3.1",
+    "qrcode": "1.5.4",
     "swissqrbill": "4.4.1",
     "web-push": "^3.6.7"
   },

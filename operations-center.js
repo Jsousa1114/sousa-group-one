@@ -955,6 +955,7 @@
         const target = new URL(b.dataset.url, location.origin);
         const p = target.searchParams.get("open");
         if (p === "mailbox") window.SGOWebmail?.prepare?.({ box: target.searchParams.get("box") || "" });
+        if (p === "whatsapp") window.SGOWhatsApp?.prepare?.({ chat: target.searchParams.get("chat") || "" });
         if (p) core().setPage(p);
       }
     } catch (e) {

@@ -62,6 +62,7 @@ function createApp(db = pool) {
   );
   // Messages written in the mailbox may carry up to 18 MB of attachments (Gmail's limit).
   app.use("/api/webmail", express.json({ limit: "26mb" }));
+  app.use("/api/whatsapp", express.json({ limit: "26mb" }));
   app.use(express.json({ limit: "8mb" }));
   app.get("/healthz", async (req, res) => {
     try {
@@ -88,6 +89,7 @@ function createApp(db = pool) {
   app.use("/api/mail-public", require("./mail-routes").publicRoutes(db));
   app.use("/api/mail", require("./mail-routes").routes(db));
   app.use("/api/webmail", require("./webmail-routes").routes(db));
+  app.use("/api/whatsapp", require("./whatsapp-routes").routes(db));
   app.use("/api/public/v1", require("./p2-routes").publicRoutes(db));
   app.get(["/favicon.ico", "/icon.svg"], (req, res) => {
     res.set("Cache-Control", "no-cache");
@@ -110,6 +112,8 @@ function createApp(db = pool) {
     "mail-center.js",
     "webmail-center.js",
     "webmail.css",
+    "whatsapp-center.js",
+    "whatsapp.css",
     "supplier-suite.js",
     "supplier.css",
     "styles.css",
@@ -258,7 +262,14 @@ if (require.main === module) {
         await require("./webmail-organize")
           .processReminders(pool)
           .catch((e) => console.error("Mail reminders failed", e?.code || e?.status || "unknown"));
+        const wa = require("./whatsapp-routes");
+        await wa.processOutbox(pool).catch((e) => console.error("WhatsApp outbox failed", e?.code || e?.status || "unknown"));
+        await wa.processReminders(pool).catch((e) => console.error("WhatsApp reminders failed", e?.code || e?.status || "unknown"));
       };
+      // WhatsApp: reconnects the linked phone, if any.
+      require("./whatsapp")
+        .boot(pool)
+        .catch((e) => console.error("WhatsApp start failed", e?.code || e?.status || "unknown"));
       setTimeout(runOutbox, 15 * 1000).unref?.();
       const outboxTimer = setInterval(runOutbox, 30 * 1000);
       outboxTimer.unref?.();

@@ -427,6 +427,7 @@ module.exports = {
   signatureFor,
   quoteOf,
   addressesFrom,
+  appFiles,
   prepare,
   build,
   deliver,
