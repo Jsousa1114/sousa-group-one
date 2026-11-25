@@ -65,7 +65,7 @@ function fakeWhatsApp() {
       current.user = me;
       emit("connection.update", { connection: "open" });
     },
-    close: (statusCode) => emit("connection.update", { connection: "close", lastDisconnect: { error: { output: { statusCode } } } }),
+    close: (statusCode, message = "") => emit("connection.update", { connection: "close", lastDisconnect: { error: { message, output: { statusCode } } } }),
   };
 }
 
