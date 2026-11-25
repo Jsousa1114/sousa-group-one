@@ -147,6 +147,10 @@ function navigationIcon(key) {
 }
 // Shared line icons, same drawing style as the navigation. Used instead of emoji in the interface chrome.
 const UI_ICONS = {
+  list: '<path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="18" r="1"/>',
+  "list-ordered": '<path d="M10 6h10M10 12h10M10 18h10"/><path d="M4 4.5h1.5V9M4 9h3M4 14.5a1.5 1.5 0 0 1 3 0c0 1.5-3 2-3 4h3"/>',
+  link: '<path d="M10 14a4.5 4.5 0 0 0 6.4 0l3-3a4.5 4.5 0 0 0-6.4-6.4l-1 1"/><path d="M14 10a4.5 4.5 0 0 0-6.4 0l-3 3a4.5 4.5 0 0 0 6.4 6.4l1-1"/>',
+  eraser: '<path d="m7 21-4-4 11-11 7 7-8 8H7Z"/><path d="M21 21H11M8.5 10.5l7 7"/>',
   star: '<path d="m12 3.5 2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8-4.3-4.1 5.9-.9L12 3.5Z"/>',
   reply: '<path d="M9 7 4 12l5 5"/><path d="M4 12h10a6 6 0 0 1 6 6v1"/>',
   "reply-all": '<path d="M11 7l-5 5 5 5"/><path d="M7 7l-5 5 5 5"/><path d="M6 12h9a6 6 0 0 1 6 6v1"/>',

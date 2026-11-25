@@ -71,4 +71,4 @@ ${closing ? paragraphs(closing) : ""}</td></tr>
   };
 }
 
-module.exports = { compose, signatureLines, escapeHtml };
+module.exports = { compose, signatureLines, escapeHtml, logoFor };

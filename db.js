@@ -837,6 +837,54 @@ async function migrate(db = pool) {
       last_error TEXT
     )`,
   );
+  // « Boîte mail » 2: messages waiting to leave (10 seconds to cancel, or a time chosen),
+  // quick replies of each mailbox, and reminders (the conversation comes back later).
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS webmail_outbox(
+      id TEXT PRIMARY KEY,
+      mailbox TEXT NOT NULL,
+      user_id INTEGER,
+      kind TEXT NOT NULL DEFAULT 'undo',
+      status TEXT NOT NULL DEFAULT 'scheduled',
+      send_at TIMESTAMPTZ NOT NULL,
+      subject TEXT,
+      recipients TEXT,
+      payload TEXT,
+      message_id TEXT,
+      error TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      sent_at TIMESTAMPTZ
+    )`,
+  );
+  await db.query("CREATE INDEX IF NOT EXISTS webmail_outbox_due_idx ON webmail_outbox(status,send_at)");
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS webmail_snippets(
+      id TEXT PRIMARY KEY,
+      mailbox TEXT NOT NULL,
+      title TEXT NOT NULL,
+      body TEXT NOT NULL,
+      created_by INTEGER,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`,
+  );
+  await db.query("CREATE INDEX IF NOT EXISTS webmail_snippets_mailbox_idx ON webmail_snippets(mailbox)");
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS webmail_reminders(
+      id TEXT PRIMARY KEY,
+      mailbox TEXT NOT NULL,
+      user_id INTEGER,
+      thread_id TEXT,
+      message_id TEXT,
+      subject TEXT,
+      sender TEXT,
+      remind_at TIMESTAMPTZ NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      error TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      done_at TIMESTAMPTZ
+    )`,
+  );
+  await db.query("CREATE INDEX IF NOT EXISTS webmail_reminders_due_idx ON webmail_reminders(status,remind_at)");
   await db.query(
     `CREATE TABLE IF NOT EXISTS email_inbox_state(
       account TEXT PRIMARY KEY,
@@ -906,7 +954,8 @@ async function migrate(db = pool) {
       ('2026-11-24-ai-briefings'),
       ('2026-11-25-email-log'),
       ('2026-11-25-email-settings-inbox'),
-      ('2026-11-25-webmail')
+      ('2026-11-25-webmail'),
+      ('2026-11-26-webmail-2')
       ON CONFLICT(version) DO NOTHING`,
   );
   // Disable the previously published demo credentials, even on an existing installation.

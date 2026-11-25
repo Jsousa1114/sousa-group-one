@@ -249,6 +249,19 @@ if (require.main === module) {
       setTimeout(runWebmail, 30 * 1000).unref?.();
       const webmailTimer = setInterval(runWebmail, 2 * 60 * 1000);
       webmailTimer.unref?.();
+      // Messages waiting to leave (programmed, or still in their 10 seconds when the server
+      // restarted) and reminders that are due.
+      const runOutbox = async () => {
+        await require("./webmail-compose")
+          .processOutbox(pool)
+          .catch((e) => console.error("Mail outbox failed", e?.code || e?.status || "unknown"));
+        await require("./webmail-organize")
+          .processReminders(pool)
+          .catch((e) => console.error("Mail reminders failed", e?.code || e?.status || "unknown"));
+      };
+      setTimeout(runOutbox, 15 * 1000).unref?.();
+      const outboxTimer = setInterval(runOutbox, 30 * 1000);
+      outboxTimer.unref?.();
       return server;
     })
     .catch((e) => {

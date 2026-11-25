@@ -14,7 +14,7 @@ const { fakeSmtp } = require("./fake-smtp.cjs");
 const { fakeGmail } = require("./fake-gmail.cjs");
 
 process.env.JWT_SECRET = "test-only-secret-with-at-least-32-characters";
-const ENV = ["SMTP_HOST", "SMTP_PORT", "SMTP_SECURE", "SMTP_USER", "SMTP_PASS", "SMTP_USER_HOME", "SMTP_PASS_HOME", "SMTP_USER_MOVING", "SMTP_PASS_MOVING", "IMAP_HOST", "MAIL_REPLY_TO", "AI_API_URL", "AI_API_KEY", "AI_MODEL"];
+const ENV = ["SMTP_HOST", "SMTP_PORT", "SMTP_SECURE", "SMTP_USER", "SMTP_PASS", "SMTP_USER_HOME", "SMTP_PASS_HOME", "SMTP_USER_MOVING", "SMTP_PASS_MOVING", "IMAP_HOST", "MAIL_REPLY_TO", "AI_API_URL", "AI_API_KEY", "AI_MODEL", "WEBMAIL_UNDO_SECONDS"];
 const saved = Object.fromEntries(ENV.map((k) => [k, process.env[k]]));
 const MOVING = "62595bda-dfc6-44c2-8aed-804a3183806f";
 const PASS = "gmailapppass16ch";
@@ -69,6 +69,8 @@ test.before(async () => {
     AI_API_URL: `http://127.0.0.1:${provider.address().port}/v1/chat/completions`,
     AI_API_KEY: "fake",
     AI_MODEL: "fake-model",
+    // Sent at once in these tests; the 10 seconds to cancel are tested on their own below.
+    WEBMAIL_UNDO_SECONDS: "0",
   });
   W._reset();
   W._setClientFactory((imap) => gmail[imap.user].factory(imap));
@@ -105,6 +107,10 @@ test.before(async () => {
   d.companies.find((c) => c.id === MOVING).billing = { iban: "CH9300762011623852957", street: "Rue Test", buildingNumber: "2", zip: "1000", city: "Lausanne", country: "CH", email: "factures@sousa.invalid" };
   d.employees = [{ id: "e1", company: MOVING, name: "Léa Martin", status: "Actif" }];
   d.clients = [{ id: "c1", company: MOVING, name: "Sophie Bernard", street: "Rue du Lac", buildingNumber: "4", zip: "1000", city: "Lausanne", country: "CH", email: "sophie@example.invalid" }];
+  d.projects = [
+    { id: "P-1", title: "Déménagement Bernard", clientId: "c1", company: MOVING, team: ["e1"], status: "En cours", address: "Rue du Lac 4" },
+    { id: "P-HOME", title: "Salle de bain", clientId: "", company: "home", team: [], status: "En cours", address: "" },
+  ];
   const admin = { id: 1, role: "admin", company: "group" };
   const invoice = D.applyCommand(d, admin, { action: "create", collection: "invoices", payload: { company: MOVING, clientId: "c1", title: "Déménagement", date: "2026-11-20", due: "2026-12-20", lines: [{ description: "Déménagement", quantity: 1, unit: "forfait", unitPrice: 1000, vatRate: 8.1, discount: 0 }] } }).result;
   D.applyCommand(d, admin, { action: "invoice.issue", payload: { id: invoice.id } });
@@ -140,7 +146,7 @@ test("each Gmail account is a mailbox; administrators of the group see them all,
     ],
   );
   assert.equal(admin.data.canManage, true);
-  assert.match(admin.data.mailboxes.find((b) => b.id === MOVING).signature, /--\nCompte admin\nSousa Moving/);
+  assert.deepEqual(admin.data.mailboxes.find((b) => b.id === MOVING).signature, { person: "Compte admin", company: "Sousa Moving", contact: "", extra: "", logo: "/assets/logos/moving.png" });
   for (const who of ["manager", "lea"]) assert.deepEqual((await call("webmail/status", who)).data.mailboxes, [], who + " has no access yet");
   assert.deepEqual((await call("webmail/status", "client")).data.mailboxes, []);
   assert.equal((await call(box("folders"), "lea")).status, 404);
@@ -386,4 +392,186 @@ test("cleaning a message: scripts, events, forms and dangerous links go; quotes 
   assert.equal(remote, 1);
   assert.equal(quoted, true);
   assert.match(W.textToHtml("Salut\nhttps://a.ch/?x=1&y=2\n\nOn Mon, Bob wrote:\n> old").html, /<a href="https:\/\/a\.ch\/\?x=1&amp;y=2"[^>]*>.*<details class="q">/s);
+});
+
+// ---------------------------------------------------------------------------
+// Writing: 10 seconds to cancel, programmed sending, drafts, formatting, signature, quick
+// replies, pieces of the application; filing in documents; reminders.
+// ---------------------------------------------------------------------------
+const C = require("../webmail-compose");
+const O = require("../webmail-organize");
+
+test("after « Envoyer » there are 10 seconds to cancel, then the message leaves", async () => {
+  process.env.WEBMAIL_UNDO_SECONDS = "10";
+  try {
+    const before = sent.length;
+    const queued = await call(box("send"), "admin", { to: "client@exemple.ch", subject: "Annulé", html: "<p>Test</p>" });
+    assert.equal(queued.status, 200, JSON.stringify(queued.data));
+    assert.equal(queued.data.sent, false);
+    assert.equal(queued.data.kind, "undo");
+    assert.ok(new Date(queued.data.sendAt) - Date.now() > 8000);
+    const cancelled = await call(box(`outbox/${queued.data.id}/cancel`), "admin", {});
+    assert.equal(cancelled.status, 200);
+    assert.equal(cancelled.data.compose.subject, "Annulé");
+    assert.equal((await call(box(`outbox/${queued.data.id}`), "admin")).data.status, "cancelled");
+    assert.equal((await call(box(`outbox/${queued.data.id}/cancel`), "admin", {})).status, 404, "only once");
+
+    const second = await call(box("send"), "admin", { to: "client@exemple.ch", subject: "Parti", html: "<p>Test</p>" });
+    assert.equal((await C.processOutbox(db)).sent, 0, "not before its time");
+    const run = await C.processOutbox(db, { now: new Date(Date.now() + 15000) });
+    assert.equal(run.sent, 1);
+    assert.equal(sent.length, before + 1);
+    assert.match(decode(sent.at(-1).raw), /^Subject: Parti/m);
+    const status = await call(box(`outbox/${second.data.id}`), "admin");
+    assert.equal(status.data.status, "sent");
+    const late = await call(box(`outbox/${second.data.id}/cancel`), "admin", {});
+    assert.equal(late.status, 409);
+    assert.match(late.data.error, /déjà parti/);
+    assert.equal((await db.query("SELECT payload FROM webmail_outbox WHERE id=$1", [second.data.id])).rows[0].payload, null, "the copy is removed once sent");
+  } finally {
+    process.env.WEBMAIL_UNDO_SECONDS = "0";
+  }
+});
+
+test("programmed sending: listed, sent at its time, or put back in « Brouillons »", async () => {
+  const at = new Date(Date.now() + 2 * 3600000).toISOString();
+  assert.equal((await call(box("send"), "admin", { to: "a@b.ch", subject: "x", html: "y", sendAt: new Date(Date.now() + 5000).toISOString() })).status, 400, "at least a minute ahead");
+  const planned = await call(box("send"), "lea", { to: "sophie@example.invalid", subject: "Rendez-vous de lundi", html: "<p>À lundi.</p>", sendAt: at });
+  assert.equal(planned.status, 200, JSON.stringify(planned.data));
+  assert.equal(planned.data.kind, "scheduled");
+  const other = await call(box("send"), "lea", { to: "sophie@example.invalid", subject: "Brouillon programmé", html: "<p>Texte</p>", sendAt: at, uploads: [{ name: "plan.pdf", type: "application/pdf", data: Buffer.from("%PDF plan").toString("base64") }] });
+  const list = await call(box("outbox"), "admin");
+  assert.deepEqual(list.data.messages.map((m) => m.subject).sort(), ["Brouillon programmé", "Rendez-vous de lundi"]);
+  assert.equal(list.data.messages[0].by, "Compte employee");
+
+  const back = await call(box(`outbox/${other.data.id}/cancel`), "lea", { draft: true });
+  assert.equal(back.status, 200, JSON.stringify(back.data));
+  assert.ok(back.data.draft.uid > 0, "saved in Gmail's drafts");
+  const draft = moving.store.messages.find((m) => m.id === back.data.draft.uid);
+  assert.ok(draft.flags.has("\\Draft"));
+  assert.match(draft.source.toString(), /X-SGO-Compose:/i);
+  const reopened = await call(box(`draft?uid=${draft.id}`), "lea");
+  assert.equal(reopened.data.subject, "Brouillon programmé");
+  assert.deepEqual(reopened.data.attachments.map((a) => a.filename), ["plan.pdf"]);
+
+  const before = sent.length;
+  const run = await C.processOutbox(db, { now: new Date(Date.now() + 3 * 3600000) });
+  assert.equal(run.sent, 1);
+  assert.equal(sent.length, before + 1);
+  assert.match(decode(sent.at(-1).raw), /Rendez-vous de lundi/);
+  assert.deepEqual((await call(box("outbox"), "admin")).data.messages, []);
+});
+
+test("formatting is kept, anything else removed, and the signature carries the company's logo", async () => {
+  const r = await call(box("send"), "lea", {
+    to: "client@exemple.ch",
+    subject: "Mise en forme",
+    html: '<p>Bonjour <b>Madame</b>,</p><ul><li>point <i>un</i></li></ul><p><a href="https://sousa.ch">site</a> <a href="javascript:alert(1)">piège</a></p><script>alert(2)</script><img src="https://tracker.example/x.png" onerror="x()">',
+  });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  const raw = decode(sent.at(-1).raw);
+  assert.match(raw, /Bonjour <b>Madame<\/b>,/);
+  assert.match(raw, /<li>point <i>un<\/i><\/li>/);
+  assert.match(raw, /<a href="https:\/\/sousa\.ch" target="_blank">site<\/a> piège/);
+  assert.doesNotMatch(raw, /<script|javascript:|tracker\.example|onerror/);
+  assert.match(raw, /cid:signature-logo@sousa/);
+  assert.match(raw, /Content-Type: image\/png/);
+  assert.match(raw, /--\nCompte employee\nSousa Moving/, "signature in the text version");
+  assert.match(raw, /- point un/, "readable text version");
+  await call(box("send"), "lea", { to: "client@exemple.ch", subject: "Sans signature", html: "<p>Court.</p>", signature: false });
+  assert.doesNotMatch(decode(sent.at(-1).raw), /signature-logo/);
+  const status = await call("webmail/status", "lea");
+  assert.deepEqual(Object.keys(status.data.mailboxes[0].signature).sort(), ["company", "contact", "extra", "logo", "person"]);
+  assert.equal(status.data.mailboxes[0].signature.logo, "/assets/logos/moving.png");
+});
+
+test("invoices, quotes and documents of the application can be attached, as the person may see them", async () => {
+  const r = await call(box("send"), "admin", { to: "sophie@example.invalid", subject: "Votre facture", html: "<p>Ci-joint.</p>", appFiles: [{ kind: "invoices", id: seeded.invoiceId }] });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  const raw = sent.at(-1).raw;
+  assert.match(raw, new RegExp(`filename=${seeded.invoiceId}\\.pdf`));
+  assert.match(raw, /Content-Type: application\/pdf/);
+  const refused = await call(box("send"), "lea", { to: "a@b.ch", subject: "x", html: "y", appFiles: [{ kind: "invoices", id: seeded.invoiceId }] });
+  assert.equal(refused.status, 403);
+  const unknown = await call(box("send"), "admin", { to: "a@b.ch", subject: "x", html: "y", appFiles: [{ kind: "documents", id: "nope" }] });
+  assert.equal(unknown.status, 403);
+});
+
+test("a draft is kept in Gmail, reopened with its attachments, and removed once sent", async () => {
+  const saved = await call(box("draft"), "lea", { to: "", subject: "Brouillon en cours", html: "<p>Pas fini</p>", uploads: [{ name: "photo.png", type: "image/png", data: Buffer.from("png").toString("base64") }] });
+  assert.equal(saved.status, 200, JSON.stringify(saved.data));
+  assert.deepEqual(saved.data.attachments.map((a) => a.filename), ["photo.png"]);
+  const again = await call(box("draft"), "lea", { to: "sophie@example.invalid", subject: "Brouillon en cours", html: "<p>Presque fini</p>", draftUid: saved.data.uid, draftParts: saved.data.attachments.map((a) => a.part) });
+  assert.ok(moving.store.messages.find((m) => m.id === saved.data.uid).deleted, "the previous version is replaced");
+  const list = await call(box("messages?folder=drafts"), "lea");
+  assert.ok(list.data.messages.some((m) => m.uid === again.data.uid && m.draft));
+  const open = await call(box(`draft?uid=${again.data.uid}`), "lea");
+  assert.deepEqual([open.data.to, open.data.subject, open.data.mode], [["sophie@example.invalid"], "Brouillon en cours", "new"]);
+  assert.match(open.data.html, /Presque fini/);
+  const send = await call(box("send"), "lea", { to: "sophie@example.invalid", subject: "Brouillon en cours", html: open.data.html, draftUid: again.data.uid, draftParts: open.data.attachments.map((a) => a.part) });
+  assert.equal(send.status, 200, JSON.stringify(send.data));
+  assert.match(sent.at(-1).raw, /filename=photo\.png/);
+  assert.ok(moving.store.messages.find((m) => m.id === again.data.uid).deleted, "sent: the draft is removed");
+});
+
+test("quick replies are shared by everyone who opens the mailbox", async () => {
+  const created = await call(box("snippets"), "lea", { title: "Envoi du devis", html: "<p>Bonjour,</p><p>Vous trouverez <b>notre devis</b> ci-joint.</p><script>x()</script>" });
+  assert.equal(created.status, 200, JSON.stringify(created.data));
+  const list = await call(box("snippets"), "admin");
+  assert.deepEqual(list.data.snippets.map((x) => x.title), ["Envoi du devis"]);
+  assert.doesNotMatch(list.data.snippets[0].html, /script/);
+  assert.equal((await call(box("snippets"), "lea", { id: created.data.id, title: "Devis envoyé", html: "<p>Merci</p>" })).status, 200);
+  assert.equal((await call(box("snippets"), "admin")).data.snippets[0].title, "Devis envoyé");
+  assert.equal((await call(box("snippets"), "lea", { title: "", html: "<p>x</p>" })).status, 400);
+  assert.equal((await call(box("snippets"), "manager")).status, 404, "not for someone without the mailbox");
+  await call(box(`snippets/${created.data.id}/delete`), "admin", {});
+  assert.deepEqual((await call(box("snippets"), "admin")).data.snippets, []);
+});
+
+test("an e-mail and its attachments are filed in a site's documents", async () => {
+  const conv = await call(box(`conversation?folder=inbox&uid=${seeded.marc.id}`), "admin");
+  const m = conv.data.messages[0];
+  const r = await call(box("file"), "lea", { folder: m.folder, uid: m.uid, target: { type: "project", id: "P-1" }, message: true, parts: m.attachments.map((a) => a.part) });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.target, "Déménagement Bernard");
+  assert.equal(r.data.saved.length, 2);
+  const state = (await require("../db").loadState(db)).data;
+  const docs = state.documents.filter((d) => d.project === "P-1");
+  assert.deepEqual(docs.map((d) => [d.name, d.category, d.company]), [
+    ["E-mail 2026-11-25 Devis déménagement juin.pdf", "E-mail", MOVING],
+    ["Plan été.pdf", "E-mail", MOVING],
+  ]);
+  const pdf = await require("../storage").loadFile(db, docs[0].id);
+  assert.equal(Buffer.from(pdf.content).subarray(0, 5).toString(), "%PDF-");
+  assert.equal(Buffer.from((await require("../storage").loadFile(db, docs[1].id)).content).toString(), "%PDF-1.4 plan");
+  const other = await call(box("file"), "lea", { folder: m.folder, uid: m.uid, target: { type: "project", id: "P-HOME" }, message: true });
+  assert.equal(other.status, 403, "not in a site of another company");
+  assert.equal((await call(box("file"), "lea", { folder: m.folder, uid: m.uid, target: { type: "project", id: "P-1" }, message: false, parts: [] })).status, 400);
+});
+
+test("« Me le rappeler »: the conversation leaves the inbox and comes back unread, with a notification", async () => {
+  const thread = await moving.add({ from: "Paul Rochat <paul@rochat.example>", subject: "Visite du garde-meuble", text: "Quand pouvons-nous venir ?", threadId: 900 });
+  const at = new Date(Date.now() + 26 * 3600000).toISOString();
+  assert.equal((await call(box("remind"), "lea", { folder: "inbox", uid: thread.id, threadId: "900", at: new Date(Date.now() - 1000).toISOString() })).status, 400);
+  const r = await call(box("remind"), "lea", { folder: "inbox", uid: thread.id, threadId: "900", at });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.archived, true);
+  assert.ok(!thread.labels.has("\\Inbox"), "out of the inbox until then");
+  const list = await call(box("reminders"), "admin");
+  assert.deepEqual(list.data.reminders.map((x) => [x.subject, x.sender]), [["Visite du garde-meuble", "Paul Rochat <paul@rochat.example>"]]);
+  assert.equal((await O.processReminders(db)).done, 0, "not yet");
+  thread.flags.add("\\Seen");
+  await db.query("DELETE FROM user_notifications");
+  assert.equal((await O.processReminders(db, { now: new Date(Date.now() + 27 * 3600000) })).done, 1);
+  assert.ok(thread.labels.has("\\Inbox") && !thread.flags.has("\\Seen"), "back in the inbox, unread");
+  const notes = (await db.query("SELECT u.email,n.title,n.body FROM user_notifications n JOIN users u ON u.id=n.user_id")).rows;
+  assert.deepEqual(notes.map((n) => [n.email, n.title, n.body]), [["wm-lea@test.invalid", "Rappel : Visite du garde-meuble", "Paul Rochat <paul@rochat.example> · Sousa Moving"]]);
+  assert.deepEqual((await call(box("reminders"), "admin")).data.reminders, []);
+
+  // Cancelling brings the conversation back at once.
+  await call(box("remind"), "lea", { folder: "inbox", uid: thread.id, threadId: "900", at });
+  assert.ok(!thread.labels.has("\\Inbox"));
+  const id = (await call(box("reminders"), "lea")).data.reminders[0].id;
+  assert.equal((await call(box(`reminders/${id}/cancel`), "lea", {})).status, 200);
+  assert.ok(thread.labels.has("\\Inbox"));
 });

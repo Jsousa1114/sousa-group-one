@@ -56,7 +56,9 @@
     reading: false,
   };
   const drafts = new Map();
+  const snippetCache = new Map();
   let composeFiles = [];
+  let composeApp = [];
   let timer = null;
   let handledUrl = "";
 
@@ -191,7 +193,7 @@
   // security policy refuses style attributes).
   const avatar = (a) => `<span class="wm-avatar" data-hue="${Math.floor(hue(a?.address) / 30)}" aria-hidden="true">${esc(initials(a))}</span>`;
   const mkey = (m) => `${m.folder}:${m.uid}`;
-  const folderName = () => st.folders.find((f) => f.id === st.folder)?.name || "Boîte de réception";
+  const folderName = () => ({ "x:outbox": "Programmés", "x:reminders": "Rappels" })[st.folder] || st.folders.find((f) => f.id === st.folder)?.name || "Boîte de réception";
   const listKey = () => [st.box, st.folder, st.query].join("|");
   const unique = (list) => [...new Set(list.filter(Boolean))];
   const boxPath = (box = st.box) => enc(box);
@@ -304,6 +306,7 @@
       <div class="wm-top-actions">
         <button type="button" class="btn primary" data-wm="compose">${ic("edit")}<span>Nouveau message</span></button>
         <button type="button" class="btn secondary wm-icon-btn" data-wm="refresh" title="Actualiser" aria-label="Actualiser">${ic("refresh")}</button>
+        <button type="button" class="btn secondary" data-wm="snippets" title="Réponses rapides de cette boîte">${ic("message")}<span>Réponses rapides</span></button>
         ${st.status?.canManage ? `<button type="button" class="btn secondary" data-wm="access">${ic("lock")}<span>Accès</span></button>` : ""}
       </div>`;
   }
@@ -321,14 +324,22 @@
       const n = f.id === "drafts" ? f.total : ["inbox", "junk"].includes(f.id) ? f.unseen : 0;
       return n ? `<span class="wm-folder-count">${n > 9999 ? "9999+" : n}</span>` : "";
     };
+    // Two folders of the application: programmed messages and reminders.
+    const outbox = st.extras?.outbox || [];
+    const extras = [
+      { id: "x:outbox", name: "Programmés", icon: "clock", total: outbox.length, failed: outbox.some((m) => m.status === "failed") },
+      { id: "x:reminders", name: "Rappels", icon: "bell", total: (st.extras?.reminders || []).length },
+    ];
     const specials = st.folders.filter((f) => f.special);
     const labels = st.folders.filter((f) => !f.special);
     const button = (f) =>
-      `<button type="button" class="wm-folder${f.id === st.folder ? " active" : ""}" data-wm="folder" data-id="${esc(f.id)}" ${f.id === st.folder ? 'aria-current="true"' : ""}>${ic(FOLDER_ICONS[f.id] || "folder")}<span>${esc(f.name)}</span>${count(f)}</button>`;
+      `<button type="button" class="wm-folder${f.id === st.folder ? " active" : ""}" data-wm="folder" data-id="${esc(f.id)}" ${f.id === st.folder ? 'aria-current="true"' : ""}>${ic(f.icon || FOLDER_ICONS[f.id] || "folder")}<span>${esc(f.name)}</span>${
+        f.id.startsWith("x:") ? (f.total ? `<span class="wm-folder-count${f.failed ? " failed" : ""}">${f.total}</span>` : "") : count(f)
+      }</button>`;
     el.innerHTML = `
-      <div class="wm-folder-list">${specials.map(button).join("")}${labels.length ? `<p class="wm-folder-group">Libellés</p>${labels.map(button).join("")}` : ""}</div>
-      <label class="wm-folder-select"><span>Dossier</span><select id="wmFolderSelect">${st.folders
-        .map((f) => `<option value="${esc(f.id)}" ${f.id === st.folder ? "selected" : ""}>${esc(f.name)}${f.unseen && ["inbox", "junk"].includes(f.id) ? ` (${f.unseen})` : ""}</option>`)
+      <div class="wm-folder-list">${specials.map(button).join("")}${extras.map(button).join("")}${labels.length ? `<p class="wm-folder-group">Libellés</p>${labels.map(button).join("")}` : ""}</div>
+      <label class="wm-folder-select"><span>Dossier</span><select id="wmFolderSelect">${[...specials, ...extras, ...labels]
+        .map((f) => `<option value="${esc(f.id)}" ${f.id === st.folder ? "selected" : ""}>${esc(f.name)}${f.unseen && ["inbox", "junk"].includes(f.id) ? ` (${f.unseen})` : f.id.startsWith("x:") && f.total ? ` (${f.total})` : ""}</option>`)
         .join("")}</select></label>`;
   }
 
@@ -355,6 +366,10 @@
     const el = document.getElementById("wmList");
     if (!el) return;
     const previous = el.querySelector(".wm-rows")?.scrollTop || 0;
+    if (st.folder.startsWith("x:")) {
+      el.innerHTML = `<div class="wm-list-head"><div class="wm-list-title"><b>${st.folder === "x:outbox" ? "E-mails programmés" : "Rappels"}</b></div></div><div class="wm-rows">${st.extras ? extraList() : '<p class="muted wm-loading">Chargement…</p>'}</div>`;
+      return;
+    }
     const list = threads();
     for (const key of [...st.selected]) if (!list.some((t) => t.key === key)) st.selected.delete(key);
     const all = list.length && list.every((t) => st.selected.has(t.key));
@@ -450,7 +465,9 @@
         ${avatar(from)}
         <div class="wm-msg-who"><b>${esc(from.name || from.address || "(inconnu)")}</b>${from.name ? ` <small>&lt;${esc(from.address)}&gt;</small>` : ""}<div class="wm-msg-to">${esc(recipients)}</div></div>
         <time datetime="${esc(m.date || "")}" title="${esc(fullDate(m.date))}">${esc(shortDate(m.date))}</time>
-        <div class="wm-msg-actions">${icon("reply", "reply", "Répondre")}${icon("replyAll", "reply-all", "Répondre à tous")}${icon("forward", "forward", "Transférer")}${icon("collapse", "chevron-down", "Réduire")}</div>
+        <div class="wm-msg-actions">${icon("reply", "reply", "Répondre")}${icon("replyAll", "reply-all", "Répondre à tous")}${icon("forward", "forward", "Transférer")}${
+          canFile() ? icon("file", "folder", "Classer dans les documents d’un chantier ou d’un client") : ""
+        }${icon("collapse", "chevron-down", "Réduire")}</div>
       </header>
       ${m.draft ? '<p class="wm-note">Brouillon enregistré dans Gmail.</p>' : ""}
       ${
@@ -513,6 +530,7 @@
             ? tool("inbox", "inbox", st.openRef.folder === "junk" ? "Pas un spam" : "Restaurer") + tool("delete", "trash", "Supprimer définitivement")
             : tool(st.openRef.folder === "inbox" ? "archive" : "inbox", st.openRef.folder === "inbox" ? "archive" : "inbox", st.openRef.folder === "inbox" ? "Archiver" : "Remettre dans la boîte de réception") +
               tool("trash", "trash", "Supprimer") +
+              `<button type="button" class="wm-icon-btn" data-wm="remind" title="Me le rappeler" aria-label="Me le rappeler">${ic("bell")}</button>` +
               tool("unread", "mail", "Marquer comme non lu") +
               tool("spam", "alert", "Signaler comme spam")
         }${
@@ -604,6 +622,7 @@
   // -------------------------------------------------------------------------
   function selectBox(id, load = true) {
     st.box = id;
+    st.extras = null;
     st.folder = "inbox";
     st.folders = [];
     st.foldersFor = "";
@@ -645,6 +664,7 @@
       st.foldersError = "";
       const inbox = st.folders.find((f) => f.id === "inbox");
       if (inbox) setBoxUnread(box, inbox.unseen);
+      loadExtras();
     } catch (error) {
       if (st.box !== box) return;
       st.foldersError = error.message;
@@ -800,12 +820,59 @@
     return st.conv?.messages.find((m) => mkey(m) === key) || st.conv?.messages.at(-1) || null;
   }
 
-  function openCompose({ mode = "new", messageKey = "", to = "", autoAi = false } = {}) {
-    const box = currentBox();
+  // Compose window: formatted text, signature with the logo, quick replies, files and pieces of
+  // the application, Gmail drafts, sending later, and 10 seconds to cancel after « Envoyer ».
+  const textToHtml = (text) =>
+    String(text || "")
+      .replace(/\r/g, "")
+      .trim()
+      .split(/\n{2,}/)
+      .map((block) => `<p>${esc(block).replace(/\n/g, "<br>")}</p>`)
+      .join("");
+  const editorEl = () => document.getElementById("wmEditor");
+  const pad = (n) => String(n).padStart(2, "0");
+  const localInput = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  const atHour = (days, hour) => {
+    const d = new Date();
+    d.setDate(d.getDate() + days);
+    d.setHours(hour, 0, 0, 0);
+    return d;
+  };
+  const nextMonday = (hour) => {
+    const d = atHour(1, hour);
+    while (d.getDay() !== 1) d.setDate(d.getDate() + 1);
+    return d;
+  };
+  const FIN_ROLES = ["admin", "direction", "accounting"];
+  const canFile = () => {
+    const s = core()?.getState?.() || {};
+    return role() !== "client" && ((s.projects || []).length > 0 || (s.clients || []).length > 0);
+  };
+  const role = () => core()?.getProfile?.()?.role || "";
+
+  function signaturePreview(box) {
+    const s = box?.signature || {};
+    return `${s.logo ? `<img src="${esc(s.logo)}" alt="" width="40" height="40">` : ""}<div><b>${esc(s.person || "")}</b>${s.company ? "<br>" + esc(s.company) : ""}${s.contact ? "<br>" + esc(s.contact) : ""}${s.extra ? "<br>" + esc(s.extra) : ""}</div>`;
+  }
+
+  function scheduleChoices() {
+    const now = new Date();
+    const choices = [];
+    if (now.getHours() < 16) choices.push(["Cet après-midi (17:00)", atHour(0, 17)]);
+    choices.push(["Demain matin (8:00)", atHour(1, 8)], ["Lundi matin (8:00)", nextMonday(8)]);
+    return choices;
+  }
+
+  function openCompose({ mode = "new", messageKey = "", to = "", autoAi = false, fromDraft = null, restore = null } = {}) {
+    const boxes = st.status?.mailboxes || [];
+    const box = (restore && boxes.find((b) => b.id === restore.boxId)) || currentBox();
     if (!box) return;
-    const message = mode === "new" ? null : findMessage(messageKey);
-    if (mode !== "new" && !message) return;
-    const key = `${box.id}|${mode}|${message ? mkey(message) : to || "new"}`;
+    if (fromDraft) mode = fromDraft.mode || "new";
+    if (restore) mode = restore.mode || "new";
+    const message = mode === "new" || fromDraft || restore ? null : findMessage(messageKey);
+    if (mode !== "new" && !message && !fromDraft && !restore) return;
+    const ref = restore?.ref || fromDraft?.ref || (message ? { folder: message.folder, uid: message.uid } : null);
+    const key = restore?.key || `${box.id}|${mode}|${ref ? ref.folder + ":" + ref.uid : to || "new"}|${fromDraft?.uid || ""}`;
     const own = box.address.toLowerCase();
     let toList = to ? [to] : [];
     let cc = [];
@@ -820,20 +887,34 @@
       }
       subject = mode === "forward" ? prefixed("Fwd: ", message.subject) : prefixed("Re: ", message.subject);
     }
-    const draft = drafts.get(key);
-    const initialText = "\n" + String(box.signature || "");
-    const values = draft || { to: toList.join(", "), cc: cc.join(", "), bcc: "", subject, text: initialText };
-    composeFiles = [];
-    const title = { new: "Nouveau message", reply: "Répondre", replyAll: "Répondre à tous", forward: "Transférer" }[mode];
-    const boxes = st.status.mailboxes;
+    const saved = restore || drafts.get(key);
+    const values =
+      saved ||
+      (fromDraft
+        ? { to: fromDraft.to.join(", "), cc: fromDraft.cc.join(", "), bcc: fromDraft.bcc.join(", "), subject: fromDraft.subject, html: fromDraft.html, signature: fromDraft.signature !== false, quote: fromDraft.quote !== false }
+        : { to: toList.join(", "), cc: cc.join(", "), bcc: "", subject, html: "", signature: true, quote: true });
+    composeFiles = [...(saved?.files || [])];
+    composeApp = [...(saved?.app || [])];
+    const draftUid = saved?.draftUid || fromDraft?.uid || 0;
+    const draftParts = saved?.draftParts || (fromDraft?.attachments || []).map((a) => ({ ...a, checked: true }));
+    const forwardParts = mode === "forward" && message?.attachments?.length ? message.attachments : [];
+    const title = draftUid ? "Brouillon" : { new: "Nouveau message", reply: "Répondre", replyAll: "Répondre à tous", forward: "Transférer" }[mode];
     const fromField =
-      mode === "new" && boxes.length > 1
+      mode === "new" && boxes.length > 1 && !draftUid
         ? `<label>De<select name="box">${boxes.map((b) => `<option value="${esc(b.id)}" ${b.id === box.id ? "selected" : ""}>${esc(b.label)} · ${esc(b.address)}</option>`).join("")}</select></label>`
         : `<input type="hidden" name="box" value="${esc(box.id)}"><p class="wm-from">De : <b>${esc(box.label)}</b> · ${esc(box.address)}</p>`;
+    const tool = (cmd, icon, label) => `<button type="button" class="wm-tool" data-wm-cmd="${cmd}" title="${label}" aria-label="${label}">${icon}</button>`;
+    const parts = (name, list, legend) =>
+      list.length
+        ? `<fieldset class="wm-forward-files"><legend>${legend}</legend>${list
+            .map((a) => `<label class="wm-inline"><input type="checkbox" name="${name}" value="${esc(a.part)}" ${a.checked === false ? "" : "checked"}> ${esc(a.filename)} <small>(${esc(size(a.size))})</small></label>`)
+            .join("")}</fieldset>`
+        : "";
     core().modal(
       title,
-      `<form id="wmComposeForm" class="wm-compose" data-mode="${mode}" data-key="${esc(key)}" data-folder="${esc(message?.folder || "")}" data-uid="${message?.uid || ""}" novalidate>
-        ${draft ? '<p class="wm-note">Brouillon repris là où vous l’aviez laissé.</p>' : ""}
+      `<form id="wmComposeForm" class="wm-compose" data-mode="${mode}" data-key="${esc(key)}" data-folder="${esc(ref?.folder || "")}" data-uid="${ref?.uid || ""}" data-draft-uid="${draftUid || ""}" novalidate>
+        ${saved && !restore ? '<p class="wm-note">Brouillon repris là où vous l’aviez laissé.</p>' : ""}
+        ${restore ? '<p class="wm-note">Envoi annulé : votre message est rouvert, vous pouvez le modifier.</p>' : ""}
         ${fromField}
         <label>À<input name="to" value="${esc(values.to)}" list="wmAddressBook" autocomplete="off" inputmode="email" placeholder="adresse@exemple.ch, autre@exemple.ch"></label>
         <button type="button" class="link-button wm-cc-toggle" data-wm="show-cc" ${values.cc || values.bcc ? "hidden" : ""}>Ajouter Cc / Cci</button>
@@ -843,46 +924,204 @@
         </div>
         <label>Objet<input name="subject" value="${esc(values.subject)}" maxlength="250"></label>
         ${
-          mode === "reply" || mode === "replyAll"
+          (mode === "reply" || mode === "replyAll") && ref
             ? `<div class="wm-ai-compose"><input name="instruction" placeholder="Consigne pour l’IA (facultatif) : accepter le rendez-vous de mardi…" aria-label="Consigne pour l’IA"><button type="button" class="btn secondary" data-wm="compose-ai">${ic("sparkle")}<span>Proposer une réponse</span></button></div>`
             : ""
         }
-        <label>Message<textarea name="text" rows="12">${esc(values.text)}</textarea></label>
-        ${mode !== "new" ? `<label class="wm-inline"><input type="checkbox" name="quote" checked> Inclure le message d’origine en dessous</label>` : ""}
-        ${
-          mode === "forward" && message.attachments?.length
-            ? `<fieldset class="wm-forward-files"><legend>Pièces jointes transférées</legend>${message.attachments
-                .map((a) => `<label class="wm-inline"><input type="checkbox" name="forwardPart" value="${esc(a.part)}" checked> ${esc(a.filename)} <small>(${esc(size(a.size))})</small></label>`)
-                .join("")}</fieldset>`
-            : ""
-        }
-        <div class="wm-files"><label class="btn secondary wm-file-btn">${ic("paperclip")}<span>Joindre des fichiers</span><input type="file" id="wmFiles" multiple hidden></label><ul id="wmFileList" class="wm-file-list"></ul></div>
+        <div class="wm-editor-wrap">
+          <div class="wm-toolbar" role="toolbar" aria-label="Mise en forme">
+            ${tool("bold", "<b>G</b>", "Gras (Ctrl+B)")}${tool("italic", "<i>I</i>", "Italique (Ctrl+I)")}${tool("underline", "<u>S</u>", "Souligné (Ctrl+U)")}
+            ${tool("insertUnorderedList", ic("list"), "Liste à puces")}${tool("insertOrderedList", ic("list-ordered"), "Liste numérotée")}${tool("createLink", ic("link"), "Ajouter un lien")}${tool("removeFormat", ic("eraser"), "Effacer la mise en forme")}
+            <select class="wm-snippet-select" data-wm-snippet aria-label="Réponses rapides"><option value="">Réponses rapides…</option></select>
+          </div>
+          <div id="wmEditor" class="wm-editor" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Message" data-placeholder="Écrivez votre message…"></div>
+        </div>
+        <label class="wm-inline"><input type="checkbox" name="signature" ${values.signature === false ? "" : "checked"}> Ajouter ma signature avec le logo</label>
+        <div class="wm-signature-preview" ${values.signature === false ? "hidden" : ""}>${signaturePreview(box)}</div>
+        ${mode !== "new" && ref ? `<label class="wm-inline"><input type="checkbox" name="quote" ${values.quote === false ? "" : "checked"}> Inclure le message d’origine en dessous</label>` : ""}
+        ${draftUid ? parts("draftPart", draftParts, "Pièces jointes du brouillon") : parts("forwardPart", forwardParts, "Pièces jointes transférées")}
+        <div class="wm-files">
+          <div class="wm-file-buttons">
+            <label class="btn secondary wm-file-btn">${ic("paperclip")}<span>Joindre des fichiers</span><input type="file" id="wmFiles" multiple hidden></label>
+            <button type="button" class="btn secondary" data-wm="app-files" aria-expanded="false">${ic("file")}<span>Joindre depuis l’application</span></button>
+          </div>
+          <div id="wmAppPicker" class="wm-app-picker" hidden>
+            <input type="search" id="wmAppSearch" placeholder="Rechercher une facture, un devis, un document…" aria-label="Rechercher dans l’application">
+            <div id="wmAppList" class="wm-app-list"></div>
+          </div>
+          <ul id="wmFileList" class="wm-file-list"></ul>
+        </div>
+        <div class="wm-schedule" hidden>
+          <label>Envoyer le<input type="datetime-local" name="sendAt" min="${esc(localInput(new Date(Date.now() + 2 * 60000)))}"></label>
+          <div class="wm-schedule-choices">${scheduleChoices().map(([label, d]) => `<button type="button" class="btn secondary" data-wm="schedule-pick" data-value="${esc(localInput(d))}">${esc(label)}</button>`).join("")}</div>
+        </div>
         <p id="wmComposeError" class="error" role="alert"></p>
-        <div class="form-actions"><button type="button" class="btn secondary" data-wm="compose-cancel">Annuler</button><button type="submit" class="btn primary">${ic("send")}<span>Envoyer</span></button></div>
+        <div class="form-actions wm-compose-actions">
+          <button type="button" class="btn secondary" data-wm="compose-cancel">Annuler</button>
+          <button type="button" class="btn secondary" data-wm="draft-save">${ic("file")}<span>Enregistrer le brouillon</span></button>
+          <button type="button" class="btn secondary" data-wm="schedule-toggle" aria-expanded="false">${ic("clock")}<span>Programmer</span></button>
+          <button type="submit" class="btn primary">${ic("send")}<span>Envoyer</span></button>
+        </div>
         <datalist id="wmAddressBook">${addressBook().map(([address, name]) => `<option value="${esc(address)}">${esc(name || "")}</option>`).join("")}</datalist>
       </form>`,
     );
     const form = document.getElementById("wmComposeForm");
-    const field = form?.elements[mode === "new" && !toList.length && !draft ? "to" : "text"];
-    if (field) {
-      field.focus();
-      if (field.name === "text") field.setSelectionRange(0, 0);
-    }
+    if (!form) return;
+    form.composeRef = ref;
+    form.composeMode = mode;
+    editorEl().innerHTML = values.html || "";
+    renderFiles();
+    fillSnippets(box.id);
+    if (mode === "new" && !values.to) form.elements.to.focus();
+    else placeCaret(editorEl(), true);
     if (autoAi) composeAi(form);
   }
 
+  function placeCaret(el, atStart) {
+    if (!el) return;
+    el.focus();
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    range.collapse(atStart);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+
+  // What the window holds, kept in memory (reopened after « Annuler » or by mistake closed).
+  function localDraft(form) {
+    return {
+      key: form.dataset.key,
+      boxId: form.elements.box.value,
+      mode: form.dataset.mode,
+      ref: form.composeRef || null,
+      to: form.elements.to.value,
+      cc: form.elements.cc.value,
+      bcc: form.elements.bcc.value,
+      subject: form.elements.subject.value,
+      html: editorEl()?.innerHTML || "",
+      signature: form.elements.signature.checked,
+      quote: form.elements.quote ? form.elements.quote.checked : true,
+      files: [...composeFiles],
+      app: [...composeApp],
+      draftUid: Number(form.dataset.draftUid) || 0,
+      draftParts: [...form.querySelectorAll("input[name=draftPart]")].map((x) => ({ part: x.value, filename: x.parentElement.textContent.trim().replace(/\s*\([^)]*\)$/, ""), size: 0, checked: x.checked })),
+    };
+  }
   function saveDraft(form) {
-    if (!form) return;
-    const text = form.elements.text.value;
-    drafts.set(form.dataset.key, { to: form.elements.to.value, cc: form.elements.cc.value, bcc: form.elements.bcc.value, subject: form.elements.subject.value, text });
+    if (form) drafts.set(form.dataset.key, localDraft(form));
   }
 
   function renderFiles() {
     const list = document.getElementById("wmFileList");
     if (!list) return;
-    list.innerHTML = composeFiles
-      .map((f, i) => `<li>${ic("paperclip")}<span>${esc(f.name)}</span><small>${esc(size(f.size))}</small><button type="button" class="wm-icon-btn" data-wm="file-remove" data-index="${i}" aria-label="Retirer ${esc(f.name)}" title="Retirer">${ic("x")}</button></li>`)
-      .join("");
+    list.innerHTML = [
+      ...composeFiles.map(
+        (f, i) =>
+          `<li>${ic("paperclip")}<span>${esc(f.name)}</span><small>${esc(size(f.size))}</small><button type="button" class="wm-icon-btn" data-wm="file-remove" data-index="${i}" aria-label="Retirer ${esc(f.name)}" title="Retirer">${ic("x")}</button></li>`,
+      ),
+      ...composeApp.map(
+        (a, i) =>
+          `<li>${ic("file")}<span>${esc(a.label)}</span><small>de l’application</small><button type="button" class="wm-icon-btn" data-wm="app-remove" data-index="${i}" aria-label="Retirer ${esc(a.label)}" title="Retirer">${ic("x")}</button></li>`,
+      ),
+    ].join("");
+  }
+
+  // Invoices, quotes and documents the person may attach (those of the recipients' clients first).
+  function appCandidates(form) {
+    const s = core()?.getState?.() || {};
+    const same = core().same || ((a, b) => String(a) === String(b));
+    const recipients = mailboxAddresses(form);
+    const clientIds = new Set((s.clients || []).filter((c) => !c.deletedAt && recipients.includes(String(c.email || "").trim().toLowerCase())).map((c) => String(c.id)));
+    const clientName = (id) => (s.clients || []).find((c) => same(c.id, id))?.name || "";
+    const project = (id) => (s.projects || []).find((p) => same(p.id, id));
+    const items = [];
+    if (FIN_ROLES.includes(role())) {
+      for (const i of s.invoices || [])
+        if (!i.deletedAt && !i.archivedAt && i.status !== "Brouillon") items.push({ kind: "invoices", id: String(i.id), label: `Facture ${i.id}`, detail: [clientName(i.clientId), money(i.amount)].filter(Boolean).join(" · "), clientId: String(i.clientId || ""), date: i.date || "" });
+      for (const q of s.quotes || [])
+        if (!q.deletedAt && !q.archivedAt && q.status !== "Brouillon") items.push({ kind: "quotes", id: String(q.id), label: `Devis ${q.id}`, detail: [clientName(q.clientId), money(q.amount)].filter(Boolean).join(" · "), clientId: String(q.clientId || ""), date: q.date || "" });
+    }
+    for (const d of s.documents || []) {
+      if (d.deletedAt || d.category === "identity") continue;
+      const p = d.project ? project(d.project) : null;
+      items.push({ kind: "documents", id: String(d.id), label: d.name || "Document", detail: p?.title || clientName(d.clientId) || "Document", clientId: String(d.clientId || p?.clientId || ""), date: String(d.createdAt || "").slice(0, 10) });
+    }
+    return items.sort((a, b) => (clientIds.has(b.clientId) ? 1 : 0) - (clientIds.has(a.clientId) ? 1 : 0) || String(b.date).localeCompare(String(a.date)));
+  }
+  function mailboxAddresses(form) {
+    return ["to", "cc", "bcc"].flatMap((f) => String(form?.elements[f]?.value || "").split(/[,;]/).map((a) => (a.match(/<([^<>]+)>/)?.[1] || a).trim().toLowerCase())).filter(Boolean);
+  }
+  function renderAppPicker() {
+    const form = document.getElementById("wmComposeForm");
+    const list = document.getElementById("wmAppList");
+    if (!form || !list) return;
+    const words = String(document.getElementById("wmAppSearch")?.value || "").toLowerCase().split(/\s+/).filter(Boolean);
+    const chosen = new Set(composeApp.map((a) => a.kind + ":" + a.id));
+    const items = appCandidates(form).filter((x) => words.every((w) => `${x.label} ${x.detail}`.toLowerCase().includes(w)));
+    list.innerHTML = items.length
+      ? items
+          .slice(0, 60)
+          .map(
+            (x) =>
+              `<label class="wm-app-item"><input type="checkbox" data-wm-app="${esc(x.kind + ":" + x.id)}" data-label="${esc(x.label)}" ${chosen.has(x.kind + ":" + x.id) ? "checked" : ""}><span><b>${esc(x.label)}</b><small>${esc(x.detail)}</small></span></label>`,
+          )
+          .join("")
+      : `<p class="muted">${FIN_ROLES.includes(role()) ? "Aucun élément trouvé." : "Aucun document trouvé."}</p>`;
+  }
+
+  async function fillSnippets(boxId, selectValue = "") {
+    const select = document.querySelector("#wmComposeForm [data-wm-snippet]");
+    if (!select) return;
+    let list = snippetCache.get(boxId);
+    if (!list) {
+      try {
+        list = (await api(`${enc(boxId)}/snippets`)).snippets || [];
+        snippetCache.set(boxId, list);
+      } catch {
+        list = [];
+      }
+    }
+    if (!select.isConnected) return;
+    select.innerHTML =
+      `<option value="">Réponses rapides…</option>` +
+      list.map((x) => `<option value="${esc(x.id)}">${esc(x.title)}</option>`).join("") +
+      `<option value="__save">＋ Enregistrer ce texte comme réponse rapide…</option>`;
+    select.value = selectValue;
+  }
+
+  let savedRange = null;
+  document.addEventListener("selectionchange", () => {
+    const editor = editorEl();
+    const selection = window.getSelection();
+    if (editor && selection?.rangeCount && editor.contains(selection.anchorNode)) savedRange = selection.getRangeAt(0).cloneRange();
+  });
+  // Inserts HTML where the cursor was (the browser's own command would add inline styles,
+  // which the application's security policy refuses).
+  function insertHtml(html, editor = editorEl()) {
+    if (!editor) return;
+    editor.focus();
+    const selection = window.getSelection();
+    let range = selection?.rangeCount && editor.contains(selection.anchorNode) ? selection.getRangeAt(0) : null;
+    if (!range && savedRange && editor.contains(savedRange.startContainer)) range = savedRange;
+    if (!range) {
+      range = document.createRange();
+      range.selectNodeContents(editor);
+      range.collapse(false);
+    }
+    range.deleteContents();
+    const template = document.createElement("template");
+    template.innerHTML = html;
+    const last = template.content.lastChild;
+    range.insertNode(template.content);
+    if (last) {
+      const after = document.createRange();
+      after.setStartAfter(last);
+      after.collapse(true);
+      selection.removeAllRanges();
+      selection.addRange(after);
+    }
+    saveDraft(document.getElementById("wmComposeForm"));
   }
 
   const fileData = (file) =>
@@ -893,47 +1132,205 @@
       reader.readAsDataURL(file);
     });
 
-  async function sendCompose(form) {
+  async function payloadOf(form) {
+    const uploads = [];
+    for (const f of composeFiles) uploads.push({ name: f.name, type: f.type, data: await fileData(f) });
+    const mode = form.dataset.mode;
+    const ref = form.composeRef || null;
+    return {
+      to: form.elements.to.value,
+      cc: form.elements.cc.value,
+      bcc: form.elements.bcc.value,
+      subject: form.elements.subject.value,
+      html: editorEl()?.innerHTML || "",
+      mode,
+      ref: mode === "new" ? null : ref,
+      quote: form.elements.quote ? form.elements.quote.checked : true,
+      signature: form.elements.signature.checked,
+      forwardParts: [...form.querySelectorAll("input[name=forwardPart]:checked")].map((x) => x.value),
+      draftUid: Number(form.dataset.draftUid) || 0,
+      draftParts: [...form.querySelectorAll("input[name=draftPart]:checked")].map((x) => x.value),
+      appFiles: composeApp.map(({ kind, id }) => ({ kind, id })),
+      uploads,
+    };
+  }
+
+  function checkCompose(form, { draft = false } = {}) {
     const error = document.getElementById("wmComposeError");
-    const button = form.querySelector("[type=submit]");
     error.textContent = "";
-    if (!form.elements.to.value.trim()) {
+    if (!draft && !form.elements.to.value.trim()) {
       error.textContent = "Indiquez au moins un destinataire.";
-      return form.elements.to.focus();
+      form.elements.to.focus();
+      return false;
     }
-    const total = composeFiles.reduce((n, f) => n + f.size, 0);
-    if (total > MAX_UPLOAD) {
+    if (composeFiles.reduce((n, f) => n + f.size, 0) > MAX_UPLOAD) {
       error.textContent = "Pièces jointes : 18 Mo au maximum au total (limite de Gmail).";
-      return;
+      return false;
     }
-    button.disabled = true;
-    button.querySelector("span").textContent = "Envoi…";
+    return true;
+  }
+
+  function busy(button, label) {
+    button.disabled = !!label;
+    if (label) button.dataset.label = button.querySelector("span").textContent;
+    button.querySelector("span").textContent = label || button.dataset.label || button.querySelector("span").textContent;
+  }
+
+  async function sendCompose(form) {
+    if (!checkCompose(form)) return;
+    const error = document.getElementById("wmComposeError");
+    const scheduling = !form.querySelector(".wm-schedule").hidden;
+    const sendAt = scheduling ? form.elements.sendAt.value : "";
+    if (scheduling && !sendAt) {
+      error.textContent = "Choisissez la date et l’heure d’envoi.";
+      return form.elements.sendAt.focus();
+    }
+    const button = form.querySelector("[type=submit]");
+    busy(button, scheduling ? "Programmation…" : "Envoi…");
+    const local = localDraft(form);
     try {
-      const uploads = [];
-      for (const f of composeFiles) uploads.push({ name: f.name, type: f.type, data: await fileData(f) });
-      const mode = form.dataset.mode;
+      const body = await payloadOf(form);
+      if (sendAt) body.sendAt = new Date(sendAt).toISOString();
       const boxId = form.elements.box.value;
-      await api(`${enc(boxId)}/send`, {
-        to: form.elements.to.value,
-        cc: form.elements.cc.value,
-        bcc: form.elements.bcc.value,
-        subject: form.elements.subject.value,
-        text: form.elements.text.value,
-        mode,
-        ref: mode === "new" ? null : { folder: form.dataset.folder, uid: Number(form.dataset.uid) },
-        quote: form.elements.quote ? form.elements.quote.checked : true,
-        forwardParts: [...form.querySelectorAll("input[name=forwardPart]:checked")].map((x) => x.value),
-        uploads,
-      });
+      const out = await api(`${enc(boxId)}/send`, body);
       drafts.delete(form.dataset.key);
       composeFiles = [];
+      composeApp = [];
       core().closeModal(true);
-      toast("E-mail envoyé.");
-      if (st.folder === "sent" && boxId === st.box) loadList({ quiet: true });
+      if (out.sent) {
+        toast("E-mail envoyé.");
+        afterSending(boxId, local);
+      } else if (out.kind === "scheduled") {
+        toast(`Envoi programmé : ${fullDate(out.sendAt)}.`);
+        loadExtras();
+      } else showUndo({ boxId, id: out.id, sendAt: out.sendAt, local });
     } catch (err) {
       error.textContent = err.message;
-      button.disabled = false;
-      button.querySelector("span").textContent = "Envoyer";
+      busy(button, "");
+    }
+  }
+
+  function afterSending(boxId, local) {
+    if (boxId !== st.box) return;
+    if (st.folder === "sent") loadList({ quiet: true });
+    if (st.folder === "drafts" && local?.draftUid) {
+      st.list = st.list.filter((m) => m.uid !== local.draftUid);
+      renderList();
+    }
+  }
+
+  // « Annuler » for 10 seconds after « Envoyer », then the result.
+  function undoHost() {
+    let host = document.getElementById("wmUndo");
+    if (!host) {
+      host = document.createElement("div");
+      host.id = "wmUndo";
+      host.className = "wm-undo-host";
+      host.setAttribute("aria-live", "polite");
+      document.body.append(host);
+    }
+    return host;
+  }
+  function showUndo({ boxId, id, sendAt, local }) {
+    const bar = document.createElement("div");
+    bar.className = "wm-undo";
+    bar.dataset.id = id;
+    undoHost().append(bar);
+    const subject = local.subject || "(sans objet)";
+    let finished = false;
+    const close = (delay = 0) => setTimeout(() => bar.remove(), delay);
+    const tick = () => {
+      if (finished) return;
+      const left = Math.max(0, Math.ceil((new Date(sendAt).getTime() - Date.now()) / 1000));
+      if (left > 0) {
+        bar.innerHTML = `<span>Envoi de « ${esc(subject)} » dans ${left} s</span><button type="button" class="btn secondary">Annuler</button>`;
+        bar.querySelector("button").onclick = cancel;
+        return setTimeout(tick, 250);
+      }
+      bar.innerHTML = `<span>Envoi de « ${esc(subject)} »…</span>`;
+      check(0);
+    };
+    const check = async (tries) => {
+      try {
+        const out = await api(`${enc(boxId)}/outbox/${enc(id)}`);
+        if (out.status === "sent") {
+          finished = true;
+          bar.innerHTML = `<span>${ic("check")} E-mail envoyé.</span>`;
+          afterSending(boxId, local);
+          return close(3500);
+        }
+        if (out.status === "failed") {
+          finished = true;
+          bar.classList.add("failed");
+          bar.innerHTML = `<span>Non envoyé : ${esc(out.error || "erreur")}</span><button type="button" class="btn secondary">Rouvrir le message</button><button type="button" class="wm-icon-btn" aria-label="Fermer">${ic("x")}</button>`;
+          const [reopen, dismiss] = bar.querySelectorAll("button");
+          reopen.onclick = () => {
+            bar.remove();
+            openCompose({ restore: local });
+          };
+          dismiss.onclick = () => bar.remove();
+          return;
+        }
+      } catch {
+        // network: tried again below
+      }
+      if (tries < 15) setTimeout(() => check(tries + 1), 1500);
+      else close();
+    };
+    const cancel = async () => {
+      finished = true;
+      bar.innerHTML = `<span>Annulation…</span>`;
+      try {
+        await api(`${enc(boxId)}/outbox/${enc(id)}/cancel`, {});
+        bar.remove();
+        openCompose({ restore: local });
+      } catch (error) {
+        bar.innerHTML = `<span>${esc(error.message)}</span>`;
+        close(4000);
+      }
+    };
+    tick();
+  }
+
+  async function saveServerDraft(form) {
+    if (!checkCompose(form, { draft: true })) return;
+    const button = form.querySelector('[data-wm="draft-save"]');
+    const error = document.getElementById("wmComposeError");
+    busy(button, "Enregistrement…");
+    try {
+      const boxId = form.elements.box.value;
+      const out = await api(`${enc(boxId)}/draft`, await payloadOf(form));
+      form.dataset.draftUid = out.uid || "";
+      // The draft now holds the files: they are listed as its attachments.
+      composeFiles = [];
+      composeApp = [];
+      const old = form.querySelector(".wm-forward-files");
+      const holder = document.createElement("div");
+      holder.innerHTML = (out.attachments || []).length
+        ? `<fieldset class="wm-forward-files"><legend>Pièces jointes du brouillon</legend>${out.attachments
+            .map((a) => `<label class="wm-inline"><input type="checkbox" name="draftPart" value="${esc(a.part)}" checked> ${esc(a.filename)} <small>(${esc(size(a.size))})</small></label>`)
+            .join("")}</fieldset>`
+        : "";
+      if (old) old.replaceWith(...holder.childNodes);
+      else if (holder.firstChild) form.querySelector(".wm-files").before(holder.firstChild);
+      renderFiles();
+      saveDraft(form);
+      toast("Brouillon enregistré dans Gmail.");
+      if (st.folder === "drafts" && boxId === st.box) loadList({ quiet: true });
+      loadFolders();
+    } catch (err) {
+      error.textContent = err.message;
+    } finally {
+      if (button.isConnected) busy(button, "");
+    }
+  }
+
+  async function openDraft(uid) {
+    try {
+      const draft = await api(`${boxPath()}/draft?uid=${Number(uid)}`);
+      openCompose({ fromDraft: draft });
+    } catch (error) {
+      toast(error.message);
     }
   }
 
@@ -941,30 +1338,172 @@
     if (!form) return;
     const button = form.querySelector('[data-wm="compose-ai"]');
     const error = document.getElementById("wmComposeError");
-    const textarea = form.elements.text;
-    const signatureStart = textarea.value.indexOf("\n--\n");
-    const written = (signatureStart >= 0 ? textarea.value.slice(0, signatureStart) : textarea.value).trim();
-    if (written && !confirm("Remplacer le texte déjà écrit par la proposition de l’assistant ?")) return;
-    if (button) {
-      button.disabled = true;
-      button.querySelector("span").textContent = "Rédaction…";
-    }
+    const editor = editorEl();
+    if (!button || !editor) return;
+    if (editor.innerText.trim() && !confirm("Remplacer le texte déjà écrit par la proposition de l’assistant ?")) return;
+    busy(button, "Rédaction…");
     error.textContent = "";
     try {
-      const out = await api(`${boxPath()}/ai`, { folder: form.dataset.folder, uid: Number(form.dataset.uid), mode: "reply", instruction: form.elements.instruction?.value || "" });
-      const signature = signatureStart >= 0 ? textarea.value.slice(signatureStart) : "";
-      textarea.value = String(out.text || "").trim() + "\n" + signature;
-      textarea.focus();
-      textarea.setSelectionRange(0, 0);
+      const ref = form.composeRef || {};
+      const out = await api(`${boxPath()}/ai`, { folder: ref.folder, uid: Number(ref.uid), mode: "reply", instruction: form.elements.instruction?.value || "" });
+      editor.innerHTML = textToHtml(out.text);
+      placeCaret(editor, true);
       saveDraft(form);
     } catch (err) {
       error.textContent = err.message;
     } finally {
-      if (button?.isConnected) {
-        button.disabled = false;
-        button.querySelector("span").textContent = "Proposer une réponse";
-      }
+      if (button.isConnected) busy(button, "");
     }
+  }
+
+  // Quick replies of the mailbox: list, change, delete (outside the compose window).
+  async function openSnippets() {
+    const box = currentBox();
+    if (!box) return;
+    let list = [];
+    try {
+      list = (await api(`${boxPath()}/snippets`)).snippets || [];
+      snippetCache.set(box.id, list);
+    } catch (error) {
+      return toast(error.message);
+    }
+    core().modal(
+      `Réponses rapides · ${box.label}`,
+      `<div class="wm-snippets">
+        <p class="muted">Des textes prêts à insérer dans un e-mail (menu « Réponses rapides » quand vous écrivez). Ils sont partagés par tous ceux qui ouvrent cette boîte.</p>
+        <div class="wm-snippet-list">${
+          list.length
+            ? list
+                .map(
+                  (x) =>
+                    `<div class="wm-snippet-row"><b>${esc(x.title)}</b><span class="wm-snippet-actions"><button type="button" class="btn secondary" data-wm="snippet-edit" data-id="${esc(x.id)}">Modifier</button><button type="button" class="btn danger" data-wm="snippet-delete" data-id="${esc(x.id)}">Supprimer</button></span></div>`,
+                )
+                .join("")
+            : '<p class="muted">Aucune réponse rapide pour l’instant.</p>'
+        }</div>
+        <form id="wmSnippetForm" class="wm-compose" novalidate>
+          <h4>Nouvelle réponse rapide</h4>
+          <input type="hidden" name="id">
+          <label>Nom<input name="title" maxlength="80" placeholder="Ex. : Envoi du devis"></label>
+          <div class="wm-editor-wrap">
+            <div class="wm-toolbar" role="toolbar" aria-label="Mise en forme">
+              <button type="button" class="wm-tool" data-wm-cmd="bold" title="Gras" aria-label="Gras"><b>G</b></button><button type="button" class="wm-tool" data-wm-cmd="italic" title="Italique" aria-label="Italique"><i>I</i></button><button type="button" class="wm-tool" data-wm-cmd="insertUnorderedList" title="Liste à puces" aria-label="Liste à puces">${ic("list")}</button>
+            </div>
+            <div id="wmSnippetEditor" class="wm-editor wm-editor-small" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Texte de la réponse rapide" data-placeholder="Bonjour, merci pour votre demande…"></div>
+          </div>
+          <p id="wmSnippetError" class="error" role="alert"></p>
+          <div class="form-actions"><button type="button" class="btn secondary" data-action="close-modal">Fermer</button><button type="submit" class="btn primary">Enregistrer</button></div>
+        </form>
+      </div>`,
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // Programmed messages and reminders (shown as two extra folders)
+  // -------------------------------------------------------------------------
+  async function loadExtras() {
+    const box = st.box;
+    if (!box) return;
+    try {
+      const [outbox, reminders] = await Promise.all([api(`${boxPath(box)}/outbox`), api(`${boxPath(box)}/reminders`)]);
+      if (st.box !== box) return;
+      st.extras = { outbox: outbox.messages || [], reminders: reminders.reminders || [] };
+    } catch {
+      st.extras = st.extras || { outbox: [], reminders: [] };
+    }
+    renderFolders();
+    if (st.folder.startsWith("x:")) renderList();
+  }
+
+  function extraList() {
+    if (st.folder === "x:outbox") {
+      const list = st.extras?.outbox || [];
+      if (!list.length) return `<p class="muted wm-none">Aucun e-mail programmé.</p>`;
+      return list
+        .map(
+          (m) => `<div class="wm-x-row${m.status === "failed" ? " failed" : ""}">
+            <div class="wm-x-main"><b>${esc(m.subject || "(sans objet)")}</b><small>À : ${esc(m.recipients || "")}</small>
+            <small>${m.status === "failed" ? `<span class="wm-x-error">Non envoyé : ${esc(m.error || "")}</span>` : `${ic("clock")} Envoi ${esc(fullDate(m.sendAt))}`}${m.by ? " · " + esc(m.by) : ""}</small></div>
+            <button type="button" class="btn secondary" data-wm="outbox-cancel" data-id="${esc(m.id)}">${m.status === "failed" ? "Remettre en brouillon" : "Annuler l’envoi"}</button>
+          </div>`,
+        )
+        .join("");
+    }
+    const list = st.extras?.reminders || [];
+    if (!list.length) return `<p class="muted wm-none">Aucun rappel. Ouvrez un e-mail puis « Me le rappeler » pour le faire revenir plus tard.</p>`;
+    return list
+      .map(
+        (r) => `<div class="wm-x-row">
+          <div class="wm-x-main"><b>${esc(r.subject || "(sans objet)")}</b><small>${esc(r.sender || "")}</small><small>${ic("bell")} Revient ${esc(fullDate(r.remindAt))}${r.by ? " · " + esc(r.by) : ""}</small></div>
+          <button type="button" class="btn secondary" data-wm="reminder-cancel" data-id="${esc(r.id)}">Faire revenir maintenant</button>
+        </div>`,
+      )
+      .join("");
+  }
+
+  // -------------------------------------------------------------------------
+  // « Classer » and « Me le rappeler »
+  // -------------------------------------------------------------------------
+  function openFile(key) {
+    const m = findMessage(key);
+    const s = core()?.getState?.() || {};
+    if (!m) return;
+    const same = core().same || ((a, b) => String(a) === String(b));
+    const projects = (s.projects || []).filter((p) => !p.deletedAt && p.status !== "Archivé");
+    const clients = (s.clients || []).filter((c) => !c.deletedAt);
+    if (!projects.length && !clients.length) return toast("Aucun chantier ni client disponible.");
+    const people = unique([m.from?.address, ...(m.to || []).map((a) => a.address)]).filter((a) => a !== ownAddress());
+    const client = clients.find((c) => people.includes(String(c.email || "").trim().toLowerCase()));
+    const theirs = client ? projects.filter((p) => same(p.clientId, client.id)) : [];
+    const option = (value, label) => `<option value="${esc(value)}">${esc(label)}</option>`;
+    const groups = [
+      client ? `<optgroup label="${esc(client.name)}">${option("client:" + client.id, "Client : " + client.name)}${theirs.map((p) => option("project:" + p.id, "Chantier : " + (p.title || p.id))).join("")}</optgroup>` : "",
+      projects.length ? `<optgroup label="Chantiers">${projects.filter((p) => !theirs.includes(p)).map((p) => option("project:" + p.id, p.title || p.id)).join("")}</optgroup>` : "",
+      clients.length ? `<optgroup label="Clients">${clients.filter((c) => c !== client).map((c) => option("client:" + c.id, c.name)).join("")}</optgroup>` : "",
+    ].join("");
+    core().modal(
+      "Classer dans les documents",
+      `<form id="wmFileForm" class="wm-compose" data-mkey="${esc(key)}" novalidate>
+        <p class="muted">« ${esc(m.subject || "(sans objet)")} » de ${esc(m.from?.name || m.from?.address || "")}</p>
+        <label>Où l’enregistrer<select name="target">${groups}</select></label>
+        <fieldset class="wm-forward-files"><legend>Quoi</legend>
+          <label class="wm-inline"><input type="checkbox" name="message" checked> Le message (en PDF)</label>
+          ${(m.attachments || []).map((a) => `<label class="wm-inline"><input type="checkbox" name="part" value="${esc(a.part)}" checked> ${esc(a.filename)} <small>(${esc(size(a.size))})</small></label>`).join("")}
+        </fieldset>
+        <p id="wmFileError" class="error" role="alert"></p>
+        <div class="form-actions"><button type="button" class="btn secondary" data-action="close-modal">Annuler</button><button type="submit" class="btn primary">${ic("folder")}<span>Enregistrer</span></button></div>
+      </form>`,
+    );
+  }
+
+  function openRemind() {
+    if (!st.openRef || !st.conv) return;
+    const s = core()?.getState?.() || {};
+    const projects = (s.projects || []).filter((p) => !p.deletedAt && !["Terminé", "Archivé"].includes(p.status));
+    const choices = [];
+    const now = new Date();
+    if (now.getHours() < 16) choices.push(["Cet après-midi (17:00)", atHour(0, 17)]);
+    choices.push(["Demain matin (8:00)", atHour(1, 8)], ["Lundi matin (8:00)", nextMonday(8)], ["Dans une semaine", atHour(7, 8)]);
+    const subject = st.conv.subject || "";
+    core().modal(
+      "Me le rappeler",
+      `<form id="wmRemindForm" class="wm-compose" novalidate>
+        <p class="muted">La conversation quitte la boîte de réception et revient, non lue, au moment choisi, avec une notification.</p>
+        <div class="wm-schedule-choices">${choices.map(([label, d]) => `<button type="button" class="btn secondary" data-wm="remind-pick" data-value="${esc(localInput(d))}">${esc(label)}</button>`).join("")}</div>
+        <label>Le<input type="datetime-local" name="at" min="${esc(localInput(new Date(Date.now() + 2 * 60000)))}" value="${esc(localInput(atHour(1, 8)))}"></label>
+        ${
+          projects.length && role() !== "client"
+            ? `<label class="wm-inline"><input type="checkbox" name="task"> Créer aussi une tâche sur un chantier</label>
+               <div class="wm-task" hidden>
+                 <label>Chantier<select name="project">${projects.map((p) => `<option value="${esc(p.id)}">${esc(p.title || p.id)}</option>`).join("")}</select></label>
+                 <label>Tâche<input name="taskTitle" maxlength="200" value="${esc(("E-mail : " + subject).slice(0, 200))}"></label>
+               </div>`
+            : ""
+        }
+        <p id="wmRemindError" class="error" role="alert"></p>
+        <div class="form-actions"><button type="button" class="btn secondary" data-action="close-modal">Annuler</button><button type="submit" class="btn primary">${ic("bell")}<span>Me le rappeler</span></button></div>
+      </form>`,
+    );
   }
 
   async function summarize() {
@@ -1070,7 +1609,10 @@
       return loadList();
     }
     if (what === "more") return loadList({ append: true });
-    if (what === "open") return openThread(el.dataset.key);
+    if (what === "open") {
+      if (st.folder === "drafts") return openDraft(threads().find((x) => x.key === el.dataset.key)?.latest.uid);
+      return openThread(el.dataset.key);
+    }
     if (what === "star") {
       const t = threads().find((x) => x.key === el.dataset.key);
       return t && act(t.flagged ? "unstar" : "star", [t.key]);
@@ -1117,14 +1659,130 @@
       composeFiles.splice(Number(el.dataset.index), 1);
       return renderFiles();
     }
+    if (what === "app-remove") {
+      composeApp.splice(Number(el.dataset.index), 1);
+      renderFiles();
+      return renderAppPicker();
+    }
+    if (what === "app-files") {
+      const picker = document.getElementById("wmAppPicker");
+      picker.hidden = !picker.hidden;
+      el.setAttribute("aria-expanded", String(!picker.hidden));
+      if (!picker.hidden) {
+        renderAppPicker();
+        document.getElementById("wmAppSearch")?.focus();
+      }
+      return;
+    }
+    if (what === "draft-save") return saveServerDraft(el.closest("form"));
+    if (what === "schedule-toggle") {
+      const form = el.closest("form");
+      const box = form.querySelector(".wm-schedule");
+      box.hidden = !box.hidden;
+      el.setAttribute("aria-expanded", String(!box.hidden));
+      form.querySelector("[type=submit] span").textContent = box.hidden ? "Envoyer" : "Programmer l’envoi";
+      if (!box.hidden && !form.elements.sendAt.value) form.elements.sendAt.value = localInput(atHour(1, 8));
+      return;
+    }
+    if (what === "schedule-pick") {
+      el.closest("form").elements.sendAt.value = el.dataset.value;
+      return;
+    }
+    if (what === "remind-pick") {
+      el.closest("form").elements.at.value = el.dataset.value;
+      return;
+    }
     if (what === "compose-cancel") {
       const form = el.closest("form");
-      const text = form.elements.text.value;
-      const empty = !text.replace(String(currentBox()?.signature || ""), "").trim() && !form.elements.subject.value.trim();
-      if (!empty && !confirm("Abandonner ce message ? Le texte écrit sera perdu.")) return;
+      const empty = !editorEl()?.innerText.trim() && !form.elements.subject.value.trim() && !composeFiles.length && !composeApp.length;
+      if (!empty && !confirm("Abandonner ce message ? Le texte écrit sera perdu (un brouillon enregistré dans Gmail reste dans « Brouillons »).")) return;
       drafts.delete(form.dataset.key);
       composeFiles = [];
+      composeApp = [];
       return core().closeModal(true);
+    }
+    if (what === "snippets") return openSnippets();
+    if (what === "snippet-edit") {
+      const snippet = (snippetCache.get(st.box) || []).find((x) => x.id === el.dataset.id);
+      const form = document.getElementById("wmSnippetForm");
+      if (!snippet || !form) return;
+      form.querySelector("h4").textContent = "Modifier « " + snippet.title + " »";
+      form.elements.id.value = snippet.id;
+      form.elements.title.value = snippet.title;
+      document.getElementById("wmSnippetEditor").innerHTML = snippet.html;
+      return form.elements.title.focus();
+    }
+    if (what === "snippet-delete") {
+      if (!confirm("Supprimer cette réponse rapide ?")) return;
+      try {
+        await api(`${boxPath()}/snippets/${enc(el.dataset.id)}/delete`, {});
+        toast("Réponse rapide supprimée.");
+        return openSnippets();
+      } catch (error) {
+        return toast(error.message);
+      }
+    }
+    if (what === "outbox-cancel") {
+      el.disabled = true;
+      try {
+        await api(`${boxPath()}/outbox/${enc(el.dataset.id)}/cancel`, { draft: true });
+        toast("Envoi annulé : le message est dans « Brouillons ».");
+        loadFolders();
+      } catch (error) {
+        toast(error.message);
+        el.disabled = false;
+      }
+      return loadExtras();
+    }
+    if (what === "reminder-cancel") {
+      el.disabled = true;
+      try {
+        await api(`${boxPath()}/reminders/${enc(el.dataset.id)}/cancel`, {});
+        toast("La conversation est revenue dans la boîte de réception.");
+        loadFolders();
+      } catch (error) {
+        toast(error.message);
+        el.disabled = false;
+      }
+      return loadExtras();
+    }
+    if (what === "file") return openFile(el.dataset.mkey);
+    if (what === "remind") return openRemind();
+  });
+
+  document.addEventListener("mousedown", (event) => {
+    if (event.target.closest?.("[data-wm-cmd]")) event.preventDefault();
+  });
+  document.addEventListener("click", (event) => {
+    const button = event.target.closest?.("[data-wm-cmd]");
+    if (!button) return;
+    const editor = button.closest(".wm-editor-wrap")?.querySelector(".wm-editor");
+    if (!editor) return;
+    editor.focus();
+    const cmd = button.dataset.wmCmd;
+    document.execCommand("styleWithCSS", false, false);
+    if (cmd === "createLink") {
+      const url = String(prompt("Adresse du lien (https://… ou une adresse e-mail) :", "https://") || "").trim();
+      if (!url || url === "https://") return;
+      const href = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(url) ? "mailto:" + url : /^(https?:|mailto:|tel:)/i.test(url) ? url : "https://" + url;
+      if (window.getSelection()?.isCollapsed) insertHtml(`<a href="${esc(href)}">${esc(url)}</a>`, editor);
+      else document.execCommand("createLink", false, href);
+    } else document.execCommand(cmd, false, null);
+    saveDraft(document.getElementById("wmComposeForm"));
+  });
+  // Pasted text arrives without the formatting of where it came from (Word, web pages…).
+  document.addEventListener("paste", (event) => {
+    const editor = event.target.closest?.(".wm-editor");
+    if (!editor) return;
+    event.preventDefault();
+    const text = event.clipboardData?.getData("text/plain") || "";
+    document.execCommand("insertText", false, text);
+  });
+  document.addEventListener("keydown", (event) => {
+    const form = event.target.closest?.("#wmComposeForm");
+    if (form && event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+      event.preventDefault();
+      form.requestSubmit();
     }
   });
 
@@ -1137,6 +1795,10 @@
     renderTop();
     renderFolders();
     renderReader();
+    if (id.startsWith("x:")) {
+      renderList();
+      return loadExtras();
+    }
     loadList();
   }
 
@@ -1155,6 +1817,32 @@
     if (t.matches?.("[data-wm-move]") && t.value) return act("move", [...st.selected], { target: t.value });
     if (t.matches?.("[data-wm-move-conv]") && t.value && st.openRef) return act("move", [st.openRef.key], { folder: st.openRef.folder, target: t.value });
     if (t.dataset?.wmAccess) return saveAccess(t);
+    if (t.matches?.("[data-wm-snippet]")) {
+      const value = t.value;
+      t.value = "";
+      if (!value) return;
+      const form = t.closest("form");
+      const boxId = form.elements.box.value;
+      if (value === "__save") return saveAsSnippet(boxId);
+      const snippet = (snippetCache.get(boxId) || []).find((x) => x.id === value);
+      if (snippet) insertHtml(snippet.html);
+      return;
+    }
+    if (t.dataset?.wmApp) {
+      const [kind, ...rest] = t.dataset.wmApp.split(":");
+      const id = rest.join(":");
+      composeApp = composeApp.filter((a) => !(a.kind === kind && a.id === id));
+      if (t.checked) composeApp.push({ kind, id, label: t.dataset.label || id });
+      return renderFiles();
+    }
+    if (t.name === "signature" && t.closest("#wmComposeForm")) {
+      t.closest("form").querySelector(".wm-signature-preview").hidden = !t.checked;
+      return saveDraft(t.closest("form"));
+    }
+    if (t.name === "task" && t.closest("#wmRemindForm")) {
+      t.closest("form").querySelector(".wm-task").hidden = !t.checked;
+      return;
+    }
     if (t.id === "wmFiles") {
       composeFiles.push(...t.files);
       t.value = "";
@@ -1166,6 +1854,7 @@
   });
 
   document.addEventListener("input", (event) => {
+    if (event.target.id === "wmAppSearch") return renderAppPicker();
     const form = event.target.closest?.("#wmComposeForm");
     if (form) saveDraft(form);
   });
@@ -1182,6 +1871,7 @@
     const form = event.target;
     if (form.id === "wmSearch") {
       event.preventDefault();
+      if (st.folder.startsWith("x:")) st.folder = "inbox";
       st.query = form.elements.q.value.trim();
       st.selected.clear();
       closeReader();
@@ -1192,7 +1882,110 @@
       event.preventDefault();
       sendCompose(form);
     }
+    if (form.id === "wmFileForm") {
+      event.preventDefault();
+      submitFile(form);
+    }
+    if (form.id === "wmRemindForm") {
+      event.preventDefault();
+      submitRemind(form);
+    }
+    if (form.id === "wmSnippetForm") {
+      event.preventDefault();
+      submitSnippet(form);
+    }
   });
+
+  async function submitFile(form) {
+    const m = findMessage(form.dataset.mkey);
+    const error = document.getElementById("wmFileError");
+    const [type, ...rest] = String(form.elements.target.value || "").split(":");
+    const parts = [...form.querySelectorAll("input[name=part]:checked")].map((x) => x.value);
+    if (!form.elements.message.checked && !parts.length) {
+      error.textContent = "Choisissez le message ou au moins une pièce jointe.";
+      return;
+    }
+    const button = form.querySelector("[type=submit]");
+    busy(button, "Enregistrement…");
+    try {
+      const out = await api(`${boxPath()}/file`, { folder: m.folder, uid: m.uid, target: { type, id: rest.join(":") }, message: form.elements.message.checked, parts });
+      core().closeModal(true);
+      toast(`${out.saved.length > 1 ? out.saved.length + " fichiers enregistrés" : "Enregistré"} dans les documents de ${out.target}.`);
+      core().refresh?.(false);
+    } catch (err) {
+      error.textContent = err.message;
+      busy(button, "");
+    }
+  }
+
+  async function submitRemind(form) {
+    const error = document.getElementById("wmRemindError");
+    const value = form.elements.at.value;
+    if (!value) {
+      error.textContent = "Choisissez la date et l’heure.";
+      return;
+    }
+    const at = new Date(value);
+    const ref = st.openRef;
+    const button = form.querySelector("[type=submit]");
+    busy(button, "Enregistrement…");
+    try {
+      await api(`${boxPath()}/remind`, { folder: ref.folder, uid: ref.uid, threadId: ref.threadId || "", at: at.toISOString() });
+      let task = "";
+      if (form.elements.task?.checked) {
+        const latest = st.conv?.messages.at(-1);
+        await core().api("operations/tasks", {
+          projectId: form.elements.project.value,
+          title: form.elements.taskTitle.value.trim() || "E-mail à traiter",
+          description: `E-mail de ${latest?.from?.name || latest?.from?.address || ""} : ${st.conv?.subject || ""}`.slice(0, 3000),
+          dueDate: value.slice(0, 10),
+          priority: "normal",
+        });
+        task = " Tâche ajoutée au chantier.";
+      }
+      core().closeModal(true);
+      toast(`Rappel ${fullDate(at.toISOString())}.${task}`);
+      if (ref.folder === "inbox") {
+        st.list = st.list.filter((m) => (m.threadId ? "t" + m.threadId : "u" + m.uid) !== ref.key);
+        closeReader();
+        renderList();
+        renderReader();
+      }
+      loadExtras();
+      loadFolders();
+    } catch (err) {
+      error.textContent = err.message;
+      busy(button, "");
+    }
+  }
+
+  async function saveAsSnippet(boxId) {
+    const html = editorEl()?.innerHTML || "";
+    if (!editorEl()?.innerText.trim()) return toast("Écrivez d’abord le texte à enregistrer.");
+    const title = String(prompt("Nom de la réponse rapide (ex. : Envoi du devis) :") || "").trim();
+    if (!title) return;
+    try {
+      const out = await api(`${enc(boxId)}/snippets`, { title, html });
+      snippetCache.delete(boxId);
+      await fillSnippets(boxId);
+      toast(`Réponse rapide « ${title} » enregistrée.`);
+      return out;
+    } catch (error) {
+      toast(error.message);
+    }
+  }
+
+  async function submitSnippet(form) {
+    const error = document.getElementById("wmSnippetError");
+    error.textContent = "";
+    try {
+      await api(`${boxPath()}/snippets`, { id: form.elements.id.value || undefined, title: form.elements.title.value, html: document.getElementById("wmSnippetEditor").innerHTML });
+      toast("Réponse rapide enregistrée.");
+      openSnippets();
+    } catch (err) {
+      error.textContent = err.message;
+    }
+  }
 
   window.addEventListener("resize", () => {
     if (core()?.getPage?.() === "mailbox") fitHeight();

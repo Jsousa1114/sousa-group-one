@@ -851,9 +851,106 @@ async function checkNewMail(db, state, { notify = async () => {} } = {}) {
   return result;
 }
 
+// ---------------------------------------------------------------------------
+// Drafts (kept in Gmail's « Brouillons ») and reminders
+// ---------------------------------------------------------------------------
+async function draftsFolder(box) {
+  const folder = (await folderList(box)).find((f) => f.id === "drafts");
+  if (!folder) D.fail("Le dossier « Brouillons » est introuvable dans cette boîte.", 404);
+  return folder;
+}
+
+// Saves a draft (a complete message) and removes the version it replaces.
+async function saveDraft(box, raw, replaces = 0) {
+  const folder = await draftsFolder(box);
+  const uid = await withFolder(box, folder.path, async (client) => {
+    const out = await client.append(folder.path, raw, ["\\Draft", "\\Seen"]);
+    const old = Number.parseInt(replaces, 10);
+    if (old > 0 && old !== Number(out?.uid)) await client.messageDelete([old], { uid: true }).catch(() => {});
+    return Number(out?.uid) || 0;
+  });
+  return { uid, folder: folder.id };
+}
+
+async function removeDraft(box, uid) {
+  const id = Number.parseInt(uid, 10);
+  if (!(id > 0)) return;
+  const folder = await draftsFolder(box);
+  await withFolder(box, folder.path, (client) => client.messageDelete([id], { uid: true }));
+}
+
+// A draft as the compose window needs it: recipients, subject, HTML, attachments and what it
+// answers (stored by the application in its own header).
+async function readDraft(box, uid) {
+  const id = Number.parseInt(uid, 10);
+  if (!(id > 0)) D.fail("Brouillon introuvable.", 404);
+  const folder = await draftsFolder(box);
+  return withFolder(box, folder.path, async (client) => {
+    const m = await client.fetchOne(String(id), { uid: true, bodyStructure: true, size: true }, { uid: true });
+    if (!m) D.fail("Brouillon introuvable : il a peut-être été envoyé ou supprimé.", 404);
+    const got = await client.download(String(id), undefined, { uid: true, maxBytes: 40 * 1024 * 1024 });
+    if (!got?.content) D.fail("Brouillon introuvable.", 404);
+    const parsed = await simpleParser(await streamToBuffer(got.content), { skipImageLinks: true, skipTextLinks: true });
+    let meta = {};
+    try {
+      meta = JSON.parse(Buffer.from(String(parsed.headers.get("x-sgo-compose") || ""), "base64").toString("utf8") || "{}");
+    } catch {
+      meta = {};
+    }
+    const list = (field) => addresses(parsed[field]?.value).map((a) => a.address).filter(Boolean);
+    return {
+      uid: id,
+      folder: folder.id,
+      to: list("to"),
+      cc: list("cc"),
+      bcc: list("bcc"),
+      subject: String(parsed.subject || ""),
+      html: parsed.html ? String(parsed.html) : "",
+      text: String(parsed.text || ""),
+      meta: meta && typeof meta === "object" ? meta : {},
+      attachments: partsOf(m.bodyStructure).attachments.filter((a) => !a.inline).map(({ part, filename, contentType, size }) => ({ part, filename, contentType, size })),
+    };
+  });
+}
+
+// Puts a conversation back in the inbox, unread (end of a reminder).
+async function resurface(box, { threadId = "", messageId = "" }) {
+  const folders = await folderList(box);
+  const all = folders.find((f) => f.id === "all");
+  const inbox = folders.find((f) => f.id === "inbox");
+  if (all && threadId) {
+    const done = await withFolder(box, all.path, async (client) => {
+      if (!isGmail(client)) return false;
+      const uids = (await client.search({ threadId: String(threadId) }, { uid: true })) || [];
+      if (!uids.length) return true;
+      await client.messageFlagsAdd(uids, ["\\Inbox"], { uid: true, useLabels: true });
+      await client.messageFlagsRemove([Math.max(...uids)], ["\\Seen"], { uid: true });
+      return true;
+    });
+    if (done) return setUnread(box, null);
+  }
+  // Other servers: the archived message is moved back.
+  const archive = folders.find((f) => f.id === "archive");
+  if (!archive || !inbox || !messageId) return;
+  await withFolder(box, archive.path, async (client) => {
+    const uids = (await client.search({ header: { "message-id": messageId } }, { uid: true })) || [];
+    if (!uids.length) return;
+    await client.messageFlagsRemove(uids, ["\\Seen"], { uid: true });
+    await client.messageMove(uids, inbox.path, { uid: true });
+  });
+  setUnread(box, null);
+}
+
 module.exports = {
   PAGE_SIZE,
   mailboxes,
+  withFolder,
+  folderOf,
+  isGmail,
+  saveDraft,
+  removeDraft,
+  readDraft,
+  resurface,
   accessible,
   openable,
   automaticAccess,
