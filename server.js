@@ -60,6 +60,8 @@ function createApp(db = pool) {
         compression.filter(req, res),
     }),
   );
+  // Messages written in the mailbox may carry up to 18 MB of attachments (Gmail's limit).
+  app.use("/api/webmail", express.json({ limit: "26mb" }));
   app.use(express.json({ limit: "8mb" }));
   app.get("/healthz", async (req, res) => {
     try {
@@ -85,6 +87,7 @@ function createApp(db = pool) {
   app.use("/api/pro", require("./pro-routes").routes(db));
   app.use("/api/mail-public", require("./mail-routes").publicRoutes(db));
   app.use("/api/mail", require("./mail-routes").routes(db));
+  app.use("/api/webmail", require("./webmail-routes").routes(db));
   app.use("/api/public/v1", require("./p2-routes").publicRoutes(db));
   app.get(["/favicon.ico", "/icon.svg"], (req, res) => {
     res.set("Cache-Control", "no-cache");
@@ -105,6 +108,8 @@ function createApp(db = pool) {
     "p2-center.js",
     "pro-suite.js",
     "mail-center.js",
+    "webmail-center.js",
+    "webmail.css",
     "supplier-suite.js",
     "supplier.css",
     "styles.css",
@@ -236,6 +241,14 @@ if (require.main === module) {
           .catch((e) => console.error("E-mail inbox failed", e?.code || e?.status || "unknown"));
       const inboxTimer = setInterval(runInbox, 10 * 60 * 1000);
       inboxTimer.unref?.();
+      // « Boîte mail »: new messages in the Gmail inboxes (notification + unread counter).
+      const runWebmail = async () =>
+        require("./webmail-routes")
+          .checkNewMail(pool)
+          .catch((e) => console.error("Mailbox check failed", e?.code || e?.status || "unknown"));
+      setTimeout(runWebmail, 30 * 1000).unref?.();
+      const webmailTimer = setInterval(runWebmail, 2 * 60 * 1000);
+      webmailTimer.unref?.();
       return server;
     })
     .catch((e) => {

@@ -817,6 +817,26 @@ async function migrate(db = pool) {
     )`,
   );
   await db.query("CREATE INDEX IF NOT EXISTS email_inbox_entity_idx ON email_inbox(entity_type,entity_id)");
+  // « Boîte mail »: who may open which Gmail mailbox, and where each inbox stood at the last
+  // new-mail check. The messages themselves stay in Gmail.
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS mailbox_access(
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      mailbox TEXT NOT NULL,
+      granted_by INTEGER,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY(user_id,mailbox)
+    )`,
+  );
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS webmail_state(
+      account TEXT PRIMARY KEY,
+      uid_validity TEXT,
+      last_uid BIGINT NOT NULL DEFAULT 0,
+      checked_at TIMESTAMPTZ,
+      last_error TEXT
+    )`,
+  );
   await db.query(
     `CREATE TABLE IF NOT EXISTS email_inbox_state(
       account TEXT PRIMARY KEY,
@@ -885,7 +905,8 @@ async function migrate(db = pool) {
       ('2026-11-24-ai-usage'),
       ('2026-11-24-ai-briefings'),
       ('2026-11-25-email-log'),
-      ('2026-11-25-email-settings-inbox')
+      ('2026-11-25-email-settings-inbox'),
+      ('2026-11-25-webmail')
       ON CONFLICT(version) DO NOTHING`,
   );
   // Disable the previously published demo credentials, even on an existing installation.

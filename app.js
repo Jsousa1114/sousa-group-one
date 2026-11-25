@@ -102,6 +102,7 @@ const menus = {
   maintenance: ["Maintenance", [...ops, "accounting", "client"]],
   documents: ["Documents", Object.keys(roles)],
   messages: ["Messages", Object.keys(roles)],
+  mailbox: ["Boîte mail", Object.keys(roles).filter((r) => r !== "client")],
   reports: ["Rapports", [...core, "hr", "accounting", "manager"]],
   pilotage: ["Pilotage", [...core, "hr", "manager", "accounting", "employee"]],
   pro: ["Centre de gestion", [...core, "hr", "manager", "accounting", "employee"]],
@@ -112,7 +113,7 @@ const menus = {
 };
 // Presentation-only navigation. Existing role and fine-permission checks remain authoritative.
 const navigationGroups = [
-  ["Vue d’ensemble", ["dashboard", "messages"]],
+  ["Vue d’ensemble", ["dashboard", "messages", "mailbox"]],
   ["Équipe", ["employees", "planning", "time", "absences"]],
   ["Activité", ["projects", "clients", "maintenance", "documents"]],
   ["Finances", ["quotes", "invoices", "payments", "expenses"]],
@@ -123,6 +124,7 @@ function navigationIcon(key) {
   const paths = {
     dashboard: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
     messages: '<path d="M21 11a8 8 0 0 1-8 8H7l-4 3V11a8 8 0 0 1 8-8h2a8 8 0 0 1 8 8Z"/><path d="M8 9h8M8 13h5"/>',
+    mailbox: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3.5 7 8.5 6 8.5-6"/>',
     employees: '<circle cx="9" cy="8" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3M17 5a3 3 0 0 1 0 6M18 14a5 5 0 0 1 3 5v2"/>',
     planning: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 3v4M17 3v4M3 11h18M7 15h3M14 15h3"/>',
     time: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
@@ -145,6 +147,14 @@ function navigationIcon(key) {
 }
 // Shared line icons, same drawing style as the navigation. Used instead of emoji in the interface chrome.
 const UI_ICONS = {
+  star: '<path d="m12 3.5 2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8-4.3-4.1 5.9-.9L12 3.5Z"/>',
+  reply: '<path d="M9 7 4 12l5 5"/><path d="M4 12h10a6 6 0 0 1 6 6v1"/>',
+  "reply-all": '<path d="M11 7l-5 5 5 5"/><path d="M7 7l-5 5 5 5"/><path d="M6 12h9a6 6 0 0 1 6 6v1"/>',
+  forward: '<path d="m15 7 5 5-5 5"/><path d="M20 12H10a6 6 0 0 0-6 6v1"/>',
+  inbox: '<path d="M3 13h5l1.5 3h5L16 13h5"/><path d="M5.5 5h13L21 13v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-5L5.5 5Z"/>',
+  edit: '<path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16v4Z"/><path d="m13.5 6.5 4 4"/>',
+  image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 16-5-5-9 9"/>',
+  "mail-open": '<path d="M3 10 12 4l9 6v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-9Z"/><path d="m3 10 9 6 9-6"/>',
   speaker: '<path d="M4 9v6h4l5 4V5L8 9H4Z"/><path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/>',
   check: '<path d="m5 12.5 4.5 4.5L19 7.5"/>',
   copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>',
@@ -530,7 +540,7 @@ async function refresh(renderNow = true) {
 // Pages that load their own data and hold user input or results: Pilotage (with the AI assistant),
 // advanced tools, management centre, account and supplier catalogue. An automatic refresh updates
 // the data but must not rebuild them, which scrolls back to the top and wipes answers and drafts.
-const SELF_MANAGED_PAGES = new Set(["pilotage", "advanced", "pro", "settings", "suppliers"]);
+const SELF_MANAGED_PAGES = new Set(["pilotage", "advanced", "pro", "settings", "suppliers", "mailbox"]);
 function userIsTypingInContent() {
   const active = document.activeElement;
   return !!(
@@ -711,7 +721,10 @@ function render() {
   const navScroll = $("nav").scrollTop;
   $("nav").innerHTML = navigationGroups
     .map(([group, keys]) => {
-      const available = keys.filter((k) => menus[k] && can(menus[k][1]) && k !== "users");
+      // « Boîte mail » only appears for people allowed to open at least one Gmail mailbox.
+      const available = keys.filter(
+        (k) => menus[k] && can(menus[k][1]) && k !== "users" && (k !== "mailbox" || window.SGOWebmail?.hasAccess?.()),
+      );
       if (!available.length) return "";
       return `<div class="nav-section"><p class="nav-group">${esc(group)}</p>${available
         .map((k) => {
@@ -722,7 +735,9 @@ function render() {
                   (total, stat) => total + Number(stat?.unread || 0),
                   0,
                 )
-              : 0;
+              : k === "mailbox"
+                ? Number(window.SGOWebmail?.unreadTotal?.() || 0)
+                : 0;
           return `<button class="nav-item ${page === k ? "active" : ""}" data-page="${k}" ${page === k ? 'aria-current="page"' : ""}>${navigationIcon(k)}<span>${esc(label)}</span>${unread ? ` <span class="nav-unread">${unread > 99 ? "99+" : unread}</span>` : ""}</button>`;
         })
         .join("")}</div>`;
@@ -742,6 +757,7 @@ function render() {
   $("content").innerHTML = views[page] ? views[page]() : genericPage(page);
   if (page === "suppliers" && window.SGOSuppliers?.render)
     window.SGOSuppliers.render($("supplierCatalog")).catch((e) => notice(e.message));
+  if (page === "mailbox") window.SGOWebmail?.render?.($("webmailRoot"));
   if (page === "advanced" && window.SGOP2Center?.render)
     window.SGOP2Center.render($("p2Standalone")).catch((e) => notice(e.message));
   if (page === "pro" && window.SGOProSuite?.render)
@@ -785,6 +801,7 @@ function render() {
     window.SGOProSuite?.afterRender?.();
     window.SGOP3Center?.afterRender?.();
     window.SGOMailCenter?.afterRender?.();
+    window.SGOWebmail?.afterRender?.();
   });
 }
 function projectRows(list) {
@@ -1959,6 +1976,7 @@ const views = {
   invoices: () => financeView("invoices"),
   documents: documentsView,
   messages: messagesView,
+  mailbox: () => '<div id="webmailRoot" class="wm-root"></div>',
   reports: reportsView,
   pilotage: () =>
     heading("Pilotage") +
