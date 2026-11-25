@@ -37,8 +37,25 @@ services:
       - "${APP_BIND:-0.0.0.0}:${APP_PORT:-3000}:3000"
     volumes:
       - ./backups:/app/backups
+      - sgo_telephony:/app/telephony
+    # « Téléphone »: the exchange (service asterisk) listens on the Docker host.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - sgo
+
+  # « Téléphone »: the company's telephone exchange (Asterisk). It uses the server's network
+  # directly (calls and voice need many ports); its control interface is only offered to the
+  # application. It waits until the application has written its settings.
+  asterisk:
+    build:
+      context: ../..
+      dockerfile: deploy/local/asterisk/Dockerfile
+    image: sousa-group-one-asterisk:local
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - sgo_telephony:/sgo
 
   cloudflared:
     image: cloudflare/cloudflared:latest
@@ -53,6 +70,7 @@ services:
 
 volumes:
   sgo_postgres:
+  sgo_telephony:
 
 networks:
   sgo:

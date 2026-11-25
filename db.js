@@ -1020,6 +1020,75 @@ async function migrate(db = pool) {
     )`,
   );
 
+  // « Téléphone »: the exchange's settings (operator, relay; secrets sealed), one line per
+  // person (their own numbers), calls with their summaries, SMS from Android phones.
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS phone_settings(
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`,
+  );
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS phone_lines(
+      user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      did TEXT,
+      mobile TEXT,
+      sip_secret TEXT NOT NULL,
+      ring_seconds INTEGER NOT NULL DEFAULT 25,
+      sms_mode TEXT NOT NULL DEFAULT 'none',
+      sms_secret TEXT,
+      sms_token TEXT,
+      sms_status TEXT,
+      enabled BOOLEAN NOT NULL DEFAULT true,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`,
+  );
+  await db.query("CREATE UNIQUE INDEX IF NOT EXISTS phone_lines_did_idx ON phone_lines(did) WHERE did IS NOT NULL");
+  await db.query("CREATE UNIQUE INDEX IF NOT EXISTS phone_lines_sms_token_idx ON phone_lines(sms_token) WHERE sms_token IS NOT NULL");
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS phone_calls(
+      id BIGSERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      direction TEXT NOT NULL,
+      number TEXT NOT NULL DEFAULT '',
+      started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      answered_at TIMESTAMPTZ,
+      ended_at TIMESTAMPTZ,
+      status TEXT NOT NULL DEFAULT 'ringing',
+      recording TEXT,
+      recorded BOOLEAN NOT NULL DEFAULT false,
+      ai_status TEXT NOT NULL DEFAULT 'none',
+      ai_error TEXT,
+      transcript TEXT,
+      summary TEXT,
+      actions JSONB NOT NULL DEFAULT '[]'::jsonb,
+      client_id TEXT,
+      callback_at TIMESTAMPTZ,
+      callback_note TEXT,
+      seen BOOLEAN NOT NULL DEFAULT false
+    )`,
+  );
+  await db.query("CREATE INDEX IF NOT EXISTS phone_calls_callback_idx ON phone_calls(callback_at) WHERE callback_at IS NOT NULL");
+  await db.query("CREATE INDEX IF NOT EXISTS phone_calls_user_idx ON phone_calls(user_id,started_at DESC)");
+  await db.query("CREATE INDEX IF NOT EXISTS phone_calls_ai_idx ON phone_calls(ai_status)");
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS phone_sms(
+      id BIGSERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      number TEXT NOT NULL,
+      direction TEXT NOT NULL,
+      body TEXT NOT NULL DEFAULT '',
+      at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      status TEXT NOT NULL DEFAULT 'received',
+      external_id TEXT,
+      seen BOOLEAN NOT NULL DEFAULT false
+    )`,
+  );
+  await db.query("CREATE INDEX IF NOT EXISTS phone_sms_user_idx ON phone_sms(user_id,number,at DESC)");
+  await db.query("CREATE UNIQUE INDEX IF NOT EXISTS phone_sms_external_idx ON phone_sms(user_id,external_id) WHERE external_id IS NOT NULL");
+
   await db.query(
     "INSERT INTO app_state(id,data) VALUES(1,$1) ON CONFLICT(id) DO NOTHING",
     [JSON.stringify(emptyState())],
@@ -1068,7 +1137,8 @@ async function migrate(db = pool) {
       ('2026-11-25-email-settings-inbox'),
       ('2026-11-25-webmail'),
       ('2026-11-26-webmail-2'),
-      ('2026-11-26-whatsapp')
+      ('2026-11-26-whatsapp'),
+      ('2026-11-27-phone')
       ON CONFLICT(version) DO NOTHING`,
   );
   // Disable the previously published demo credentials, even on an existing installation.

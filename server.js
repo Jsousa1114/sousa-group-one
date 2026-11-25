@@ -63,6 +63,8 @@ function createApp(db = pool) {
   // Messages written in the mailbox may carry up to 18 MB of attachments (Gmail's limit).
   app.use("/api/webmail", express.json({ limit: "26mb" }));
   app.use("/api/whatsapp", express.json({ limit: "26mb" }));
+  // SMS from the phones arrive signed: the exact bytes are kept to check the signature.
+  app.use("/api/phone/sms/hook", express.raw({ type: "*/*", limit: "2mb" }));
   app.use(express.json({ limit: "8mb" }));
   app.get("/healthz", async (req, res) => {
     try {
@@ -90,6 +92,7 @@ function createApp(db = pool) {
   app.use("/api/mail", require("./mail-routes").routes(db));
   app.use("/api/webmail", require("./webmail-routes").routes(db));
   app.use("/api/whatsapp", require("./whatsapp-routes").routes(db));
+  app.use("/api/phone", require("./phone-routes").routes(db));
   app.use("/api/public/v1", require("./p2-routes").publicRoutes(db));
   app.get(["/favicon.ico", "/icon.svg"], (req, res) => {
     res.set("Cache-Control", "no-cache");
@@ -114,6 +117,8 @@ function createApp(db = pool) {
     "webmail.css",
     "whatsapp-center.js",
     "whatsapp.css",
+    "phone-center.js",
+    "phone.css",
     "supplier-suite.js",
     "supplier.css",
     "styles.css",
@@ -147,6 +152,12 @@ function createApp(db = pool) {
       res.type("text/javascript");
       res.sendFile(path.join(path.dirname(require.resolve("pdfjs-dist/package.json")), "build", file));
     });
+  // The browser telephone (SIP over WebSocket), MIT licence, bundled once (see its header).
+  app.get("/vendor/jssip.min.js", (req, res) => {
+    res.set("Cache-Control", "public, max-age=604800");
+    res.type("text/javascript");
+    res.sendFile(path.join(__dirname, "vendor", "jssip-3.13.9.min.js"));
+  });
   app.get("/", (req, res) => res.sendFile(path.join(__dirname, "index.html")));
   app.use((req, res) => res.status(404).json({ error: "Page introuvable." }));
   app.use((err, req, res, next) => {
@@ -192,6 +203,8 @@ if (require.main === module) {
     .then(() => {
       const app = createApp();
       const server = app.listen(process.env.PORT || 3000);
+      // « Téléphone »: the browsers' connection to the exchange goes through this server.
+      require("./phone-routes").attach(server);
       require("./backup-service").startBackupScheduler(pool);
       readiness(pool)
         .then((report) => {
@@ -265,7 +278,20 @@ if (require.main === module) {
         const wa = require("./whatsapp-routes");
         await wa.processOutbox(pool).catch((e) => console.error("WhatsApp outbox failed", e?.code || e?.status || "unknown"));
         await wa.processReminders(pool).catch((e) => console.error("WhatsApp reminders failed", e?.code || e?.status || "unknown"));
+        await require("./phone-routes").processCallbacks(pool).catch((e) => console.error("Phone call-backs failed", e?.code || e?.status || "unknown"));
       };
+      // « Téléphone »: connects to the exchange when it is installed (ASTERISK_ARI_URL or the
+      // Docker host), keeps the office's public address up to date, removes old recordings.
+      if (process.env.PHONE_DISABLED !== "true") {
+        require("./telephony-ai");
+        const T = require("./telephony");
+        T.start(pool).catch((e) => console.error("Phone start failed", e?.code || e?.message || "unknown"));
+        const phoneTimer = setInterval(() => {
+          T.maintain(pool).catch(() => {});
+          require("./telephony-ai").cleanup(pool).catch(() => {});
+        }, 10 * 60 * 1000);
+        phoneTimer.unref?.();
+      }
       // WhatsApp: reconnects the linked phone, if any.
       require("./whatsapp")
         .boot(pool)

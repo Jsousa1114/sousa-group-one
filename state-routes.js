@@ -1382,6 +1382,12 @@ function routes(db) {
           username: process.env.RTC_TURN_USERNAME,
           credential: process.env.RTC_TURN_CREDENTIAL,
         });
+      else {
+        // The relay set for « Téléphone » serves the internal calls too.
+        const relay = await require("./telephony").setting(db, "relay").catch(() => null);
+        const urls = (relay?.turnUrls || []).filter((u) => /^turns?:/i.test(u));
+        if (urls.length && relay?.turnUser) iceServers.push({ urls, username: relay.turnUser, credential: relay.turnPassword || "" });
+      }
       res.set("Cache-Control", "no-store").json({
         iceServers,
         turnAvailable: iceServers.some((server) =>

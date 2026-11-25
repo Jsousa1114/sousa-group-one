@@ -233,13 +233,15 @@ async function requestAi(model, messages, json, timeoutMs) {
 
 // history: earlier turns of the same conversation ({ role: "user" | "assistant", content }).
 // images: data URLs (photos or rendered PDF pages) sent with the request.
-async function callAi({ system, user, history = [], imageDataUrl = "", images = [], json = false, timeoutMs = 30000 }) {
+// audio: recordings ({ data: base64, format: "wav" | "mp3" }), for models that listen (Gemini).
+async function callAi({ system, user, history = [], imageDataUrl = "", images = [], audio = [], json = false, timeoutMs = 30000 }) {
   if (!aiConfigured()) D.fail("Le fournisseur IA n'est pas configuré (AI_API_URL, AI_API_KEY/OPENAI_API_KEY et AI_MODEL).", 424);
   const pictures = [...(imageDataUrl ? [imageDataUrl] : []), ...images];
-  const userContent = pictures.length
+  const userContent = pictures.length || audio.length
     ? [
         { type: "text", text: user },
         ...pictures.map((url) => ({ type: "image_url", image_url: { url } })),
+        ...audio.map((a) => ({ type: "input_audio", input_audio: { data: a.data, format: a.format || "wav" } })),
       ]
     : user;
   const messages = [
@@ -1785,6 +1787,8 @@ function routes(db) {
 
 module.exports = {
   aiConfigured,
+  transcriptionConfigured,
+  aiApiKey,
   meteredAi,
   emailFacts,
   runDailyBriefings,
