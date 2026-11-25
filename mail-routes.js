@@ -953,4 +953,6 @@ module.exports = {
   sendLogged,
   log,
   tokenHash,
+  financeParts,
+  financePdf,
 };

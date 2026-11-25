@@ -20,7 +20,7 @@
 .wm-search .ui-icon { width:18px; height:18px; flex:none; }
 .wm-search input { flex:1; min-width:0; min-height:40px; border:0; background:transparent; color:var(--text); font:inherit; outline:none; box-shadow:none; padding:0; }
 .wm-top-actions { display:flex; flex-wrap:wrap; gap:8px; }
-.wm .btn, .wm-compose .btn, .wm-access .btn { display:inline-flex; align-items:center; justify-content:center; gap:8px; }
+.wm .btn, .wm-compose .btn, .wm-access .btn, .wm-snippets .btn, .wm-undo .btn { display:inline-flex; align-items:center; justify-content:center; gap:8px; }
 .wm .btn .ui-icon, .wm-compose .btn .ui-icon { width:18px; height:18px; flex:none; }
 .wm-icon-btn { display:inline-grid; place-items:center; flex:none; width:36px; height:36px; padding:0; border:1px solid transparent; border-radius:8px; background:transparent; color:var(--muted); cursor:pointer; }
 .wm-icon-btn:hover { background:var(--panel2); color:var(--text); }
@@ -165,6 +165,69 @@
 .wm-access-box input { width:16px; height:16px; margin:0; }
 .wm-access-box.auto { cursor:default; opacity:.8; }
 
+/* Writing: editor, signature, pieces of the application, programmed sending */
+.wm-editor-wrap { display:grid; border:1px solid var(--border); border-radius:10px; background:var(--panel); overflow:hidden; }
+.wm-editor-wrap:focus-within { border-color:var(--action); box-shadow:0 0 0 2px color-mix(in srgb,var(--action) 25%,transparent); }
+.wm-toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:2px; padding:4px 6px; border-bottom:1px solid var(--border); background:var(--soft); }
+.wm-tool { display:inline-grid; place-items:center; min-width:34px; height:34px; padding:0 6px; border:0; border-radius:6px; background:transparent; color:var(--text); font:inherit; font-size:.95rem; cursor:pointer; }
+.wm-tool:hover { background:var(--panel2); }
+.wm-tool .ui-icon { width:18px; height:18px; }
+.wm-snippet-select { box-sizing:border-box; margin-left:auto; min-height:34px; max-width:220px; padding:2px 8px; border:1px solid var(--border); border-radius:8px; background:var(--panel); color:var(--text); font:inherit; font-size:.85rem; }
+.wm-compose select.wm-snippet-select { width:auto; }
+.wm-editor { min-height:220px; max-height:50vh; overflow-y:auto; padding:12px 14px; color:var(--text); line-height:1.55; outline:none; overflow-wrap:anywhere; }
+.wm-editor-small { min-height:120px; }
+.wm-editor:empty::before { content:attr(data-placeholder); color:var(--muted); }
+.wm-editor p { margin:0 0 10px; }
+.wm-editor ul, .wm-editor ol { margin:0 0 10px; padding-left:22px; }
+.wm-editor a { color:var(--action); }
+.wm-signature-preview { display:flex; align-items:flex-start; gap:10px; padding:10px 12px; border:1px dashed var(--border); border-radius:10px; color:var(--muted); font-size:.85rem; line-height:1.45; }
+.wm-signature-preview[hidden] { display:none; }
+.wm-signature-preview img { flex:none; border-radius:8px; }
+.wm-signature-preview b { color:var(--text); }
+.wm-file-buttons { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+.wm-compose .wm-file-buttons .btn, .wm-compose .wm-file-buttons label.wm-file-btn { min-height:42px; padding:8px 14px; margin:0; line-height:1.2; }
+.wm-app-picker { display:grid; gap:8px; padding:10px; border:1px solid var(--border); border-radius:10px; background:var(--soft); }
+.wm-app-picker[hidden] { display:none; }
+.wm-app-list { display:grid; gap:2px; max-height:240px; overflow-y:auto; }
+.wm-compose label.wm-app-item { display:flex; align-items:center; gap:10px; padding:6px 8px; border-radius:8px; cursor:pointer; }
+.wm-app-item:hover { background:var(--panel); }
+.wm-app-item input { width:16px; height:16px; margin:0; flex:none; }
+.wm-app-item span { display:grid; min-width:0; }
+.wm-app-item small { color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.wm-schedule { display:grid; gap:8px; padding:10px 12px; border:1px solid var(--border); border-radius:10px; background:var(--soft); }
+.wm-schedule[hidden], .wm-task[hidden] { display:none; }
+.wm-schedule-choices { display:flex; flex-wrap:wrap; gap:6px; }
+.wm-schedule-choices .btn { min-height:36px; padding:4px 12px; font-size:.85rem; }
+.wm-task { display:grid; gap:10px; }
+.wm-compose-actions { flex-wrap:wrap; }
+
+/* « Annuler » after sending */
+.wm-undo-host { position:fixed; left:16px; bottom:16px; z-index:60; display:grid; gap:8px; max-width:min(460px,calc(100vw - 32px)); }
+.wm-undo { display:flex; align-items:center; gap:12px; padding:10px 12px 10px 16px; border-radius:10px; background:#1f2a37; color:#fff; box-shadow:0 8px 24px rgba(0,0,0,.25); font-size:.9rem; }
+.wm-undo span { flex:1; min-width:0; overflow-wrap:anywhere; }
+.wm-undo .ui-icon { width:16px; height:16px; vertical-align:-3px; }
+.wm-undo .btn { min-height:34px; padding:4px 12px; border-color:#55657a; background:transparent; color:#fff; }
+.wm-undo .wm-icon-btn { color:#cfd8e3; }
+.wm-undo.failed { background:#8a1c1c; }
+
+/* Programmed messages and reminders */
+.wm-x-row { display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px; padding:12px 14px; border-bottom:1px solid var(--border); }
+.wm-x-main { display:grid; flex:1 1 220px; gap:2px; min-width:0; }
+.wm-x-main b { overflow-wrap:anywhere; }
+.wm-x-main small { color:var(--muted); overflow-wrap:anywhere; }
+.wm-x-main .ui-icon { width:14px; height:14px; vertical-align:-2px; }
+.wm-x-error { color:#c62828; font-weight:600; }
+.wm-folder-count.failed { color:#c62828; }
+
+/* Quick replies */
+.wm-snippets { display:grid; gap:12px; }
+.wm-snippets > p { margin:0; }
+.wm-snippet-list { display:grid; }
+.wm-snippet-row { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px; padding:8px 0; border-bottom:1px solid var(--border); }
+.wm-snippet-actions { display:flex; gap:6px; }
+.wm-snippet-actions .btn { min-height:34px; padding:4px 10px; font-size:.82rem; }
+.wm-snippets h4 { margin:6px 0 0; }
+
 @media (max-width:1280px) {
   .wm-main { grid-template-columns:minmax(270px,340px) minmax(0,1fr); grid-template-rows:auto minmax(0,1fr); }
   .wm-folders { grid-column:1 / -1; overflow:visible; }
@@ -194,5 +257,7 @@
   .wm-frame { width:calc(100% - 16px); margin:0 8px 8px; }
   .wm-attachments { padding:0 8px 8px; }
   .wm-att-name { max-width:150px; }
+  .wm-snippet-select { margin-left:0; max-width:100%; flex:1 1 100%; }
+  .wm-compose-actions .btn { flex:1 1 auto; }
   .wm-box { min-width:136px; }
 }

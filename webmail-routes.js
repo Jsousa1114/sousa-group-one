@@ -1,18 +1,20 @@
 "use strict";
 // Routes of the « Boîte mail » page (/api/webmail). The mailbox itself is read from Gmail by
-// webmail.js; this file checks who may open which mailbox, sends the messages written in the
-// application (through the same Gmail account, so Gmail keeps them in « Messages envoyés »),
-// and asks the assistant for a summary or a reply when the reader clicks the button.
+// webmail.js; this file checks who may open which mailbox, and hands what is written to
+// webmail-compose.js (formatting, signature, drafts, outbox: 10 seconds to cancel or a time
+// chosen) and the links with the application to webmail-organize.js (documents, reminders).
+// The assistant summarises a conversation or proposes a reply when the reader asks.
 const express = require("express");
+const { randomUUID } = require("node:crypto");
 const D = require("./domain");
 const { auth } = require("./auth-middleware");
 const { loadState } = require("./db");
-const mailer = require("./mailer");
-const MS = require("./mail-settings");
 const W = require("./webmail");
 
+const C = require("./webmail-compose");
+const O = require("./webmail-organize");
+
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
-const MAX_ATTACHMENTS = 18 * 1024 * 1024; // Gmail refuses messages over 25 MB once encoded
 
 const companyRef = (state, id) => {
   const c = (state?.companies || []).find((x) => D.same(x.id, id));
@@ -24,51 +26,6 @@ const swissDateTime = (iso) => {
   if (Number.isNaN(d.getTime())) return "";
   return d.toLocaleString("fr-CH", { timeZone: "Europe/Zurich", weekday: "short", day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
 };
-const asHtml = (text) => W.linkify(W.escapeHtml(String(text || ""))).replace(/\r?\n/g, "<br>");
-
-// Signature proposed in a new message: the person, the company and its contact details
-// (taken from the company's e-mail settings).
-function signatureFor(user, box, settings) {
-  const s = settings?.signature || {};
-  const contact = [s.phone, s.website].filter(Boolean).join(" · ");
-  return ["", "--", user.name || "", box.own ? box.names[0] : "", contact].filter((line, i) => i < 2 || line).join("\n");
-}
-
-// The text quoted under a reply or a forward, in text and in HTML.
-function quoteOf(original, mode) {
-  if (!original) return { text: "", html: "" };
-  if (mode === "forward") {
-    const lines = [
-      "---------- Message transféré ----------",
-      `De : ${who(original.from)}`,
-      `Date : ${swissDateTime(original.date)}`,
-      `Objet : ${original.subject || ""}`,
-      `À : ${original.to.map(who).join(", ")}`,
-      ...(original.cc.length ? [`Cc : ${original.cc.map(who).join(", ")}`] : []),
-    ];
-    return {
-      text: lines.join("\n") + "\n\n" + original.text,
-      html: `<div class="gmail_quote"><div class="gmail_attr">${lines.map(W.escapeHtml).join("<br>")}</div><br>${asHtml(original.text)}</div>`,
-    };
-  }
-  const header = `Le ${swissDateTime(original.date)}, ${who(original.from)} a écrit :`;
-  return {
-    text: header + "\n" + original.text.split("\n").map((line) => "> " + line).join("\n"),
-    html: `<div class="gmail_quote"><div class="gmail_attr">${W.escapeHtml(header)}<br></div><blockquote class="gmail_quote" style="margin:0 0 0 .8ex;border-left:1px solid #ccc;padding-left:1ex">${asHtml(original.text)}</blockquote></div>`,
-  };
-}
-
-// Addresses typed by the person: "a@b.ch, Jean <c@d.ch>; e@f.ch".
-function addressesFrom(value, label) {
-  const list = mailer
-    .addressList(value)
-    .map((a) => (a.match(/<([^<>]+)>\s*$/)?.[1] || a).trim())
-    .filter(Boolean);
-  const bad = list.find((a) => !mailer.validEmail(a));
-  if (bad) D.fail(`Adresse e-mail invalide (${label}) : ${bad.slice(0, 80)}`);
-  return [...new Map(list.map((a) => [a.toLowerCase(), a])).values()];
-}
-
 const sendTimes = new Map(); // user id -> send times of the last hour
 function checkSendRate(userId) {
   const now = Date.now();
@@ -102,10 +59,10 @@ function routes(db) {
       const state = await stateOf();
       const out = [];
       for (const box of await W.accessible(db, state, req.user)) {
-        const settings = await MS.getSettings(db, box.companies[0]).catch(() => null);
-        out.push({ id: box.id, label: box.label, address: box.address, companies: box.companies, unread: W.unreadOf(box), signature: signatureFor(req.user, box, settings) });
+        const { companyRecord, ...signature } = await C.signatureParts(db, state, req.user.name, box);
+        out.push({ id: box.id, label: box.label, address: box.address, companies: box.companies, unread: W.unreadOf(box), signature });
       }
-      res.json({ mailboxes: out, canManage: groupAdmin(req.user), configured: W.mailboxes(state).length > 0 });
+      res.json({ mailboxes: out, canManage: groupAdmin(req.user), configured: W.mailboxes(state).length > 0, undoSeconds: C.undoSeconds() });
     }),
   );
 
@@ -223,76 +180,192 @@ function routes(db) {
     }),
   );
 
-  // New message, reply, reply to all or forward, sent from the mailbox's Gmail account.
+  // New message, reply, reply to all or forward, sent from the mailbox's Gmail account: it
+  // leaves after 10 seconds (« Annuler ») or at the time chosen (sendAt).
   r.post(
     "/:box/send",
     wrap(async (req, res) => {
       const { state, box } = await open(req);
       const b = req.body || {};
-      const to = addressesFrom(b.to, "destinataire");
-      const cc = addressesFrom(b.cc, "copie");
-      const bcc = addressesFrom(b.bcc, "copie cachée");
-      if (!to.length) D.fail("Indiquez au moins un destinataire.");
-      if (to.length + cc.length + bcc.length > 50) D.fail("50 destinataires au maximum.");
-      const subject = String(b.subject || "").replace(/[\r\n]+/g, " ").trim().slice(0, 250);
-      const message = String(b.text || "").replace(/\r/g, "").slice(0, 100000);
-      if (!subject && !message.trim()) D.fail("Écrivez un objet ou un message.");
-      const mode = ["reply", "replyAll", "forward"].includes(b.mode) ? b.mode : "new";
-      const ref = b.ref && typeof b.ref === "object" ? b.ref : null;
-      const original = mode !== "new" && ref ? await W.messageView(box, ref.folder, ref.uid) : null;
-      if (mode !== "new" && !original) D.fail("Message d’origine introuvable.", 404);
-
-      const uploads = Array.isArray(b.uploads) ? b.uploads : [];
-      if (uploads.length > 10) D.fail("10 fichiers ajoutés au maximum.");
-      const attachments = [];
-      let total = 0;
-      for (const u of uploads) {
-        const content = Buffer.from(String(u?.data || ""), "base64");
-        if (!content.length) D.fail("Un fichier ajouté est vide.");
-        total += content.length;
-        if (total > MAX_ATTACHMENTS) D.fail("Pièces jointes : 18 Mo au maximum au total (limite de Gmail).", 413);
-        const type = String(u?.type || "").toLowerCase();
-        attachments.push({
-          filename: String(u?.name || "fichier").replace(/[\r\n"\\/]+/g, "_").slice(0, 150) || "fichier",
-          content,
-          contentType: /^[a-z0-9.+-]+\/[a-z0-9.+-]+$/.test(type) ? type : "application/octet-stream",
-        });
+      let sendAt = null;
+      if (b.sendAt) {
+        const at = new Date(b.sendAt);
+        if (Number.isNaN(at.getTime())) D.fail("Date d’envoi invalide.");
+        if (at.getTime() < Date.now() + 60 * 1000) D.fail("Choisissez un moment dans le futur pour l’envoi programmé.");
+        if (at.getTime() > Date.now() + 366 * 86400000) D.fail("Un envoi se programme au plus un an à l’avance.");
+        sendAt = at;
       }
-      if (mode === "forward") {
-        const wanted = Array.isArray(b.forwardParts) ? b.forwardParts.map(String) : original.attachments.map((a) => a.part);
-        const parts = original.attachments.map((a) => a.part).filter((p) => wanted.includes(p));
-        attachments.push(...(await W.attachmentsFor(box, ref.folder, ref.uid, parts, MAX_ATTACHMENTS - total)));
-      }
+      const payload = await C.prepare(db, state, req.user, box, b);
       checkSendRate(req.user.id);
+      if (!sendAt && !C.undoSeconds()) {
+        const info = await C.deliver(db, state, box, payload);
+        return res.json({ ok: true, sent: true, messageId: info?.messageId || "" });
+      }
+      res.json({ ok: true, sent: false, ...(await C.queue(db, box, req.user, payload, { sendAt })) });
+    }),
+  );
 
-      const quote = mode !== "new" && b.quote !== false ? quoteOf(original, mode) : { text: "", html: "" };
-      const text = message + (quote.text ? "\n\n" + quote.text : "");
-      const html =
-        `<div dir="ltr" style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;color:#1f2328">${asHtml(message)}</div>` +
-        (quote.html ? "<br>" + quote.html : "");
-      const references = original ? [...original.references, original.messageId].filter(Boolean) : [];
-      const recipients = [...to, ...cc].map((a) => a.toLowerCase());
-      const client = (state.clients || []).find((c) => !c.deletedAt && recipients.includes(String(c.email || "").trim().toLowerCase()));
-      const info = await require("./mail-routes").sendLogged(
-        db,
-        { kind: "webmail", company: box.companies[0], entityType: client ? "clients" : null, entityId: client ? client.id : null, createdBy: req.user.id },
-        {
-          to: to.join(", "),
-          cc,
-          bcc,
-          subject,
-          text,
-          html,
-          attachments,
-          company: companyRef(state, box.companies[0]),
-          fromName: box.own ? box.names[0] : "",
-          replyTo: box.address,
-          inReplyTo: original?.messageId || "",
-          references,
-        },
-      );
-      if (original && mode !== "forward") await W.markAnswered(box, ref.folder, ref.uid);
-      res.json({ ok: true, messageId: info?.messageId || "" });
+  // Messages waiting to leave (programmed), and those that could not be sent.
+  r.get(
+    "/:box/outbox",
+    wrap(async (req, res) => {
+      const { box } = await open(req);
+      const rows = (
+        await db.query(
+          `SELECT o.id,o.kind,o.status,o.send_at,o.subject,o.recipients,o.error,o.user_id,u.name AS user_name FROM webmail_outbox o LEFT JOIN users u ON u.id=o.user_id
+           WHERE o.mailbox=$1 AND ((o.status='scheduled' AND o.kind='scheduled') OR (o.status='failed' AND o.created_at > NOW() - INTERVAL '7 days'))
+           ORDER BY o.send_at LIMIT 200`,
+          [box.id],
+        )
+      ).rows;
+      res.json({ messages: rows.map((r) => ({ id: r.id, kind: r.kind, status: r.status, sendAt: new Date(r.send_at).toISOString(), subject: r.subject, recipients: r.recipients, error: r.error, by: r.user_name || "", mine: Number(r.user_id) === Number(req.user.id) })) });
+    }),
+  );
+
+  r.get(
+    "/:box/outbox/:id",
+    wrap(async (req, res) => {
+      const { box } = await open(req);
+      const row = (await db.query("SELECT id,status,error,send_at FROM webmail_outbox WHERE id=$1 AND mailbox=$2", [req.params.id, box.id])).rows[0];
+      if (!row) D.fail("Envoi introuvable.", 404);
+      res.json({ id: row.id, status: row.status, error: row.error, sendAt: new Date(row.send_at).toISOString() });
+    }),
+  );
+
+  // « Annuler » (in the 10 seconds) or cancelling a programmed message. With draft: true the
+  // message goes back to « Brouillons », attachments included.
+  r.post(
+    "/:box/outbox/:id/cancel",
+    wrap(async (req, res) => {
+      const { box } = await open(req);
+      const row = (
+        await db.query("UPDATE webmail_outbox SET status='cancelled' WHERE id=$1 AND mailbox=$2 AND status IN ('scheduled','failed') AND payload IS NOT NULL AND (user_id=$3 OR $4) RETURNING *", [
+          req.params.id,
+          box.id,
+          req.user.id,
+          groupAdmin(req.user),
+        ])
+      ).rows[0];
+      if (!row) {
+        const current = (await db.query("SELECT status FROM webmail_outbox WHERE id=$1 AND mailbox=$2", [req.params.id, box.id])).rows[0];
+        if (current?.status === "sent" || current?.status === "sending") D.fail("Trop tard : l’e-mail est déjà parti.", 409);
+        D.fail("Envoi introuvable.", 404);
+      }
+      const payload = JSON.parse(row.payload);
+      let draft = null;
+      if (req.body?.draft) draft = await C.saveDraft(box, { ...payload, draftUid: 0 });
+      res.json({
+        ok: true,
+        draft,
+        compose: { to: payload.to, cc: payload.cc, bcc: payload.bcc, subject: payload.subject, html: payload.html, mode: payload.mode, ref: payload.ref, quote: payload.quote, signature: payload.signature, files: payload.files.map((f) => f.name) },
+      });
+    }),
+  );
+
+  // Drafts, kept in Gmail's « Brouillons ».
+  r.post(
+    "/:box/draft",
+    wrap(async (req, res) => {
+      const { state, box } = await open(req);
+      const payload = await C.prepare(db, state, req.user, box, req.body || {}, { draft: true });
+      const saved = await C.saveDraft(box, payload);
+      const attachments = saved.uid ? (await C.openDraft(box, saved.uid).catch(() => null))?.attachments || [] : [];
+      res.json({ ok: true, ...saved, attachments });
+    }),
+  );
+
+  r.get(
+    "/:box/draft",
+    wrap(async (req, res) => {
+      const { box } = await open(req);
+      res.json(await C.openDraft(box, req.query.uid));
+    }),
+  );
+
+  r.post(
+    "/:box/draft/delete",
+    wrap(async (req, res) => {
+      const { box } = await open(req);
+      await W.removeDraft(box, req.body?.uid);
+      res.json({ ok: true });
+    }),
+  );
+
+  // Quick replies of a mailbox, shared by everyone who may open it.
+  r.get(
+    "/:box/snippets",
+    wrap(async (req, res) => {
+      const { box } = await open(req);
+      const rows = (await db.query("SELECT id,title,body FROM webmail_snippets WHERE mailbox=$1 ORDER BY lower(title) LIMIT 100", [box.id])).rows;
+      res.json({ snippets: rows.map((r) => ({ id: r.id, title: r.title, html: r.body })) });
+    }),
+  );
+
+  r.post(
+    "/:box/snippets",
+    wrap(async (req, res) => {
+      const { box } = await open(req);
+      const title = String(req.body?.title || "").replace(/\s+/g, " ").trim().slice(0, 80);
+      const html = C.cleanComposeHtml(String(req.body?.html || "").slice(0, 20000));
+      if (!title) D.fail("Donnez un nom à la réponse rapide.");
+      if (!C.htmlToText(html)) D.fail("Écrivez le texte de la réponse rapide.");
+      const id = String(req.body?.id || "");
+      if (id) {
+        const updated = (await db.query("UPDATE webmail_snippets SET title=$3,body=$4,updated_at=NOW() WHERE id=$1 AND mailbox=$2 RETURNING id", [id, box.id, title, html])).rows[0];
+        if (!updated) D.fail("Réponse rapide introuvable.", 404);
+        return res.json({ ok: true, id });
+      }
+      const count = Number((await db.query("SELECT COUNT(*)::int AS n FROM webmail_snippets WHERE mailbox=$1", [box.id])).rows[0].n);
+      if (count >= 100) D.fail("100 réponses rapides au maximum par boîte.");
+      const created = randomUUID();
+      await db.query("INSERT INTO webmail_snippets(id,mailbox,title,body,created_by) VALUES($1,$2,$3,$4,$5)", [created, box.id, title, html, req.user.id]);
+      res.json({ ok: true, id: created });
+    }),
+  );
+
+  r.post(
+    "/:box/snippets/:id/delete",
+    wrap(async (req, res) => {
+      const { box } = await open(req);
+      await db.query("DELETE FROM webmail_snippets WHERE id=$1 AND mailbox=$2", [req.params.id, box.id]);
+      res.json({ ok: true });
+    }),
+  );
+
+  // « Classer » : the e-mail (PDF) and/or attachments saved in a site's or a client's documents.
+  r.post(
+    "/:box/file",
+    wrap(async (req, res) => {
+      const { box } = await open(req);
+      const b = req.body || {};
+      const result = await O.fileMessage(db, req.user, box, { folder: b.folder, uid: b.uid, target: b.target, message: b.message !== false, parts: b.parts });
+      res.json({ ok: true, saved: result.saved, target: result.targetName });
+    }),
+  );
+
+  // « Me le rappeler »
+  r.post(
+    "/:box/remind",
+    wrap(async (req, res) => {
+      const { box } = await open(req);
+      const b = req.body || {};
+      res.json({ ok: true, ...(await O.remind(db, req.user, box, { folder: b.folder, uid: b.uid, threadId: b.threadId, at: b.at })) });
+    }),
+  );
+
+  r.get(
+    "/:box/reminders",
+    wrap(async (req, res) => {
+      const { box } = await open(req);
+      res.json({ reminders: await O.listReminders(db, box) });
+    }),
+  );
+
+  r.post(
+    "/:box/reminders/:id/cancel",
+    wrap(async (req, res) => {
+      const { box } = await open(req);
+      res.json(await O.cancelReminder(db, box, req.params.id));
     }),
   );
 
@@ -380,4 +453,4 @@ async function checkNewMail(db) {
   }
 }
 
-module.exports = { routes, checkNewMail, quoteOf, signatureFor, addressesFrom };
+module.exports = { routes, checkNewMail };

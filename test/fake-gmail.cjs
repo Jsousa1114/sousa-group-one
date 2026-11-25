@@ -35,12 +35,14 @@ function fakeGmail({ password }) {
   };
   const messagesIn = (path) => store.messages.filter((m) => inFolder(m, path)).sort((a, b) => a.id - b.id);
 
-  async function add({ from, to = ["moving@sousa.test"], cc = [], subject = "", text = "", html, date = new Date(), threadId, labels = ["\\Inbox"], flags = [], attachments = [], messageId, inReplyTo, references }) {
+  async function add({ from, to = ["moving@sousa.test"], cc = [], subject = "", text = "", html, date = new Date(), threadId, labels = ["\\Inbox"], flags = [], attachments = [], messageId, inReplyTo, references, raw }) {
     const id = store.nextId++;
     const mid = messageId || `<m${id}@fake.test>`;
-    const source = await new Promise((resolve, reject) =>
-      new MailComposer({ from, to, cc, subject, text, html, date, messageId: mid, inReplyTo, references, attachments }).compile().build((e, m) => (e ? reject(e) : resolve(m))),
-    );
+    const source =
+      raw ||
+      (await new Promise((resolve, reject) =>
+        new MailComposer({ from, to, cc, subject, text, html, date, messageId: mid, inReplyTo, references, attachments }).compile().build((e, m) => (e ? reject(e) : resolve(m))),
+      ));
     const parts = {};
     const childNodes = [{ part: "1", type: html ? "text/html" : "text/plain" }];
     attachments.forEach((a, i) => {
@@ -204,6 +206,26 @@ function fakeGmail({ password }) {
         else if (!FOLDERS.find((f) => f.path === from)?.specialUse && from !== "INBOX") m.labels.delete(from);
       }
       return { path: from, destination };
+    }
+    // APPEND (drafts): the message as sent by the application, kept as it is.
+    async append(path, content, flags = []) {
+      const parsed = await require("mailparser").simpleParser(content);
+      const list = (field) => (parsed[field]?.value || []).map((a) => (a.name ? `${a.name} <${a.address}>` : a.address));
+      const m = await add({
+        raw: Buffer.from(content),
+        from: list("from")[0] || "",
+        to: list("to"),
+        cc: list("cc"),
+        subject: parsed.subject || "",
+        text: parsed.text || "",
+        html: parsed.html || undefined,
+        labels: path === "INBOX" ? ["\\Inbox"] : [],
+        flags,
+        attachments: (parsed.attachments || []).map((a) => ({ filename: a.filename, content: a.content, contentType: a.contentType })),
+        messageId: parsed.messageId,
+        inReplyTo: parsed.inReplyTo,
+      });
+      return { destination: path, uid: m.id, uidValidity: 7n };
     }
     async messageDelete(range, options = {}) {
       for (const m of this.resolve(range, options)) m.deleted = true;
