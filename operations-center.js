@@ -956,6 +956,7 @@
         const p = target.searchParams.get("open");
         if (p === "mailbox") window.SGOWebmail?.prepare?.({ box: target.searchParams.get("box") || "" });
         if (p === "whatsapp") window.SGOWhatsApp?.prepare?.({ chat: target.searchParams.get("chat") || "" });
+        if (p === "phone") window.SGOPhone?.prepare?.({ call: target.searchParams.get("call") || "", sms: target.searchParams.get("sms") || "" });
         if (p) core().setPage(p);
       }
     } catch (e) {

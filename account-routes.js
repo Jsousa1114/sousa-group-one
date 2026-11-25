@@ -33,6 +33,7 @@ const DEFAULT_PREFS = Object.freeze({
     assistant: true,
     mail: true,
     whatsapp: true,
+    phone: true,
     push: true,
     sound: true,
     vibration: true,

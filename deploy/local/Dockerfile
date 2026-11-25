@@ -7,7 +7,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 
 COPY . .
-RUN mkdir -p /app/backups && chown -R node:node /app
+RUN mkdir -p /app/backups /app/telephony && chown -R node:node /app
 
 USER node
 

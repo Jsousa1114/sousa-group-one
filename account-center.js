@@ -187,6 +187,7 @@
             ${core()?.getProfile?.()?.role !== "client" ? switchRow("assistant", "Point du jour de l’assistant (en semaine le matin)", notif.assistant !== false) : ""}
             ${window.SGOWebmail?.hasAccess?.() ? switchRow("mail", "Nouveaux e-mails (Boîte mail)", notif.mail !== false) : ""}
             ${window.SGOWhatsApp?.hasAccess?.() ? switchRow("whatsapp", "Nouveaux messages WhatsApp", notif.whatsapp !== false) : ""}
+            ${window.SGOPhone?.hasAccess?.() ? switchRow("phone", "Appels manqués, messages vocaux, SMS et résumés d’appels", notif.phone !== false) : ""}
             ${switchRow("push", "Notifications push", notif.push)}
             ${switchRow("sound", "Son", notif.sound)}
             ${switchRow("vibration", "Vibration", notif.vibration)}

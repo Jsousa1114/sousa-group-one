@@ -225,3 +225,28 @@ docker compose --env-file deploy/local/.env \
 ```
 
 Always make a database backup before a major update.
+
+## 11. Telephone (« Téléphone » page)
+
+The `asterisk` service is the company's telephone exchange (Asterisk 20). It connects to the
+Swiss operator (SIP account), rings the browsers of each person (WebRTC), records the calls
+after the announcement and hands everything to the application, which drives each call.
+
+- It uses the server's network directly (`network_mode: host`): SIP on UDP 5060 and the voice
+  on UDP 10000–10299. No port needs to be opened on the router: the exchange registers with
+  the operator, and calls away from the office go through the relay (TURN) set in the page.
+- Its control interface (port 8188) only listens on the Docker host address (`docker0`); the
+  browsers reach it through the application (`/api/phone/sip`, with a signed pass).
+- Settings (operator, lines, relay, announcement) are entered in the application
+  (« Téléphone » → « Réglages »); the application writes them into the `sgo_telephony` volume.
+  Recordings are kept there for the number of days chosen, then deleted; summaries stay.
+- SMS come from each person's Android phone (« SMS Gateway for Android »): `APP_URL` must be
+  the public HTTPS address of the application.
+
+Start or update it with the application:
+
+```bash
+docker compose --env-file deploy/local/.env \
+  -f deploy/local/docker-compose.yml up -d --build app asterisk
+docker compose -f deploy/local/docker-compose.yml logs asterisk --since 10m
+```
