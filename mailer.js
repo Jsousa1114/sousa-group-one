@@ -90,6 +90,19 @@ function getTransport(s) {
   return transports.get(key);
 }
 
+// IMAP settings of an account (same address and app password), to read the clients' replies.
+function imapSettings(company) {
+  const s = settings(company);
+  if (!s.user || !s.pass) return null;
+  return {
+    host: String(process.env.IMAP_HOST || (s.host === "smtp.gmail.com" ? "imap.gmail.com" : "")).trim(),
+    port: Number(process.env.IMAP_PORT || 993),
+    secure: String(process.env.IMAP_SECURE || "true") === "true",
+    user: s.user,
+    pass: s.pass,
+  };
+}
+
 // Errors are turned into plain French, without passwords or server messages.
 function friendlyError(error, address = "") {
   const code = String(error?.code || "");
@@ -109,7 +122,8 @@ const userError = (message, status) => Object.assign(new Error(message), { statu
 
 // company: whose Gmail account sends; fromName: the name shown (usually the company name).
 // attachments: [{ filename, content: Buffer, contentType }]
-async function sendMail({ to, subject, text, attachments = [], replyTo = "", company = "", fromName = "" }) {
+// html: the laid-out version (the text stays the fallback); bcc: hidden copy.
+async function sendMail({ to, subject, text, html = "", attachments = [], replyTo = "", company = "", fromName = "", bcc = "" }) {
   const s = settings(company);
   if (!s.user || !s.pass) throw userError("L’envoi d’e-mails n’est pas configuré sur le serveur pour cette entreprise.", 503);
   if (!validEmail(to)) throw userError("Adresse e-mail du destinataire invalide.", 400);
@@ -119,8 +133,10 @@ async function sendMail({ to, subject, text, attachments = [], replyTo = "", com
       from: { name, address: s.user },
       to: to.trim(),
       replyTo: validEmail(replyTo) ? replyTo.trim() : s.replyTo || undefined,
+      bcc: validEmail(bcc) && bcc.trim().toLowerCase() !== to.trim().toLowerCase() ? bcc.trim() : undefined,
       subject: String(subject || "").replace(/[\r\n]+/g, " ").slice(0, 250),
       text: String(text || ""),
+      html: html || undefined,
       attachments,
     });
     return { messageId: String(info?.messageId || ""), from: s.user };
@@ -130,4 +146,4 @@ async function sendMail({ to, subject, text, attachments = [], replyTo = "", com
   }
 }
 
-module.exports = { configured, sender, sendMail, validEmail, friendlyError, envKey, accountKeys, _reset: () => transports.clear() };
+module.exports = { configured, sender, sendMail, imapSettings, validEmail, friendlyError, envKey, accountKeys, _reset: () => transports.clear() };

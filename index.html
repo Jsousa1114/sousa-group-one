@@ -5,11 +5,11 @@
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <meta name="theme-color" content="#111111" />
     <title>Sousa Group One</title>
-    <link rel="stylesheet" href="styles.css?v=20261125-ml1" />
-    <link rel="stylesheet" href="p1.css?v=20261125-ml1" />
-    <link rel="stylesheet" href="p2.css?v=20261125-ml1" />
-    <link rel="stylesheet" href="pro.css?v=20261125-ml1" />
-    <link rel="stylesheet" href="visual-refresh.css?v=20261125-ml1" />
+    <link rel="stylesheet" href="styles.css?v=20261125-ml2" />
+    <link rel="stylesheet" href="p1.css?v=20261125-ml2" />
+    <link rel="stylesheet" href="p2.css?v=20261125-ml2" />
+    <link rel="stylesheet" href="pro.css?v=20261125-ml2" />
+    <link rel="stylesheet" href="visual-refresh.css?v=20261125-ml2" />
     <link
       rel="icon"
       type="image/png"
@@ -21,21 +21,21 @@
       href="/assets/logos/group.png?v=group-20260926"
     />
     <link rel="manifest" href="manifest.webmanifest?v=group-20260926" />
-    <script src="finance.js?v=20261125-ml1" defer></script>
-    <script src="app.js?v=20261125-ml1" defer></script>
-    <script src="messaging-crypto.js?v=20261125-ml1" defer></script>
-    <script src="messaging-suite.js?v=20261125-ml1" defer></script>
-    <script src="account-center.js?v=20261125-ml1" defer></script>
-    <script src="passkeys.js?v=20261125-ml1" defer></script>
-    <script src="p2-runtime.js?v=20261125-ml1" defer></script>
-    <script src="p2-center.js?v=20261125-ml1" defer></script>
-    <script src="p3-center.js?v=20261125-ml1" defer></script>
-    <script src="operations-center.js?v=20261125-ml1" defer></script>
-    <script src="p1-suite.js?v=20261125-ml1" defer></script>
-    <link rel="stylesheet" href="supplier.css?v=20261125-ml1">
-    <script src="supplier-suite.js?v=20261125-ml1" defer></script>
-    <script src="pro-suite.js?v=20261125-ml1" defer></script>
-    <script src="mail-center.js?v=20261125-ml1" defer></script>
+    <script src="finance.js?v=20261125-ml2" defer></script>
+    <script src="app.js?v=20261125-ml2" defer></script>
+    <script src="messaging-crypto.js?v=20261125-ml2" defer></script>
+    <script src="messaging-suite.js?v=20261125-ml2" defer></script>
+    <script src="account-center.js?v=20261125-ml2" defer></script>
+    <script src="passkeys.js?v=20261125-ml2" defer></script>
+    <script src="p2-runtime.js?v=20261125-ml2" defer></script>
+    <script src="p2-center.js?v=20261125-ml2" defer></script>
+    <script src="p3-center.js?v=20261125-ml2" defer></script>
+    <script src="operations-center.js?v=20261125-ml2" defer></script>
+    <script src="p1-suite.js?v=20261125-ml2" defer></script>
+    <link rel="stylesheet" href="supplier.css?v=20261125-ml2">
+    <script src="supplier-suite.js?v=20261125-ml2" defer></script>
+    <script src="pro-suite.js?v=20261125-ml2" defer></script>
+    <script src="mail-center.js?v=20261125-ml2" defer></script>
   </head>
   <body data-brand="group">
     <a class="skip-link" href="#content">Aller au contenu</a>
@@ -99,10 +99,31 @@
           </div>
           <p id="loginError" class="error" role="alert"></p>
           <button class="btn primary wide" type="submit">Se connecter</button>
-          <p class="muted">
-            Pour obtenir un accès ou réinitialiser votre mot de passe, contactez
-            l’administrateur du groupe.
+          <p class="muted login-help">
+            <button type="button" class="link-button" data-login="forgot">Mot de passe oublié ?</button>
+            Pour obtenir un accès, contactez l’administrateur du groupe.
           </p>
+        </form>
+        <form id="forgotForm" class="login-card hidden" novalidate>
+          <img class="login-logo" src="/assets/logos/group.png" alt="Sousa Group" />
+          <p class="eyebrow">SOUSA GROUP ONE</p>
+          <h2>Mot de passe oublié</h2>
+          <p class="muted">Indiquez l’adresse e-mail de votre compte : vous recevrez un lien pour choisir un nouveau mot de passe.</p>
+          <label for="forgotEmail">E-mail</label><input id="forgotEmail" type="email" autocomplete="username" required />
+          <p id="forgotMessage" class="muted" role="status"></p>
+          <button class="btn primary wide" type="submit">Recevoir le lien</button>
+          <p class="muted"><button type="button" class="link-button" data-login="back">Retour à la connexion</button></p>
+        </form>
+        <form id="setPasswordForm" class="login-card hidden" novalidate>
+          <img class="login-logo" src="/assets/logos/group.png" alt="Sousa Group" />
+          <p class="eyebrow">SOUSA GROUP ONE</p>
+          <h2 id="setPasswordTitle">Choisir un mot de passe</h2>
+          <p id="setPasswordIntro" class="muted"></p>
+          <label for="newPassword">Nouveau mot de passe (12 caractères minimum)</label><input id="newPassword" type="password" autocomplete="new-password" minlength="12" required />
+          <label for="newPassword2">Confirmer le mot de passe</label><input id="newPassword2" type="password" autocomplete="new-password" minlength="12" required />
+          <p id="setPasswordError" class="error" role="alert"></p>
+          <button class="btn primary wide" type="submit">Enregistrer le mot de passe</button>
+          <p class="muted"><button type="button" class="link-button" data-login="back">Retour à la connexion</button></p>
         </form>
       </div>
     </section>

@@ -770,6 +770,63 @@ async function migrate(db = pool) {
     )`,
   );
   await db.query("CREATE INDEX IF NOT EXISTS email_log_entity_idx ON email_log(entity_type,entity_id,kind)");
+  // Message-ID of each sent e-mail, to recognise the client's replies.
+  await db.query("ALTER TABLE email_log ADD COLUMN IF NOT EXISTS message_id TEXT");
+  await db.query("CREATE INDEX IF NOT EXISTS email_log_message_idx ON email_log(message_id)");
+  // E-mail settings of each company: texts, signature, delays, copy, automatic sendings.
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS mail_settings(
+      company TEXT PRIMARY KEY,
+      config JSONB NOT NULL DEFAULT '{}'::jsonb,
+      updated_by INTEGER,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`,
+  );
+  // One-time links (forgotten password, client portal invitation): only a hash is kept.
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS password_tokens(
+      token_hash TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      purpose VARCHAR(20) NOT NULL,
+      expires_at TIMESTAMPTZ NOT NULL,
+      used_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`,
+  );
+  // Client replies read from the companies' Gmail inboxes (only replies and known clients).
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS email_inbox(
+      id TEXT PRIMARY KEY,
+      company TEXT,
+      account TEXT NOT NULL,
+      message_id TEXT NOT NULL,
+      in_reply_to TEXT,
+      from_address TEXT NOT NULL,
+      from_name TEXT,
+      subject TEXT,
+      body TEXT,
+      attachments JSONB NOT NULL DEFAULT '[]'::jsonb,
+      received_at TIMESTAMPTZ,
+      client_id TEXT,
+      entity_type VARCHAR(20),
+      entity_id TEXT,
+      read_at TIMESTAMPTZ,
+      read_by INTEGER,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(account,message_id)
+    )`,
+  );
+  await db.query("CREATE INDEX IF NOT EXISTS email_inbox_entity_idx ON email_inbox(entity_type,entity_id)");
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS email_inbox_state(
+      account TEXT PRIMARY KEY,
+      uid_validity TEXT,
+      last_uid BIGINT NOT NULL DEFAULT 0,
+      since TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      last_error TEXT,
+      checked_at TIMESTAMPTZ
+    )`,
+  );
   // One "point du jour" per person and per day (Zurich date), kept to avoid regenerating it.
   await db.query(
     `CREATE TABLE IF NOT EXISTS ai_briefings(
@@ -827,7 +884,8 @@ async function migrate(db = pool) {
       ('2026-09-30-reliable-recurrences'),
       ('2026-11-24-ai-usage'),
       ('2026-11-24-ai-briefings'),
-      ('2026-11-25-email-log')
+      ('2026-11-25-email-log'),
+      ('2026-11-25-email-settings-inbox')
       ON CONFLICT(version) DO NOTHING`,
   );
   // Disable the previously published demo credentials, even on an existing installation.

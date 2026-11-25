@@ -570,3 +570,31 @@ body.light .notice.warning { color:#7a4300; background:#fcefd6; border-color:#f1
 .mail-center h3 { display:flex; align-items:center; gap:8px; margin:0; }
 .mail-center h3 .ui-icon { width:18px; height:18px; color:var(--action); }
 .mail-center p { margin:0; }
+/* ===== E-mails 2 : réglages, aperçu, réponses, espace client (25.11.2026) ===== */
+.link-button { padding:0; border:0; background:none; color:var(--action); font:inherit; font-weight:600; text-decoration:underline; text-underline-offset:2px; cursor:pointer; }
+.login-help { display:grid; gap:6px; }
+.mail-closing { font-size:.8125rem; }
+.mail-attachments { display:grid; gap:6px; margin:0; padding:10px 12px; border:1px solid var(--border); border-radius:10px; }
+.mail-attachments legend { padding:0 4px; font-weight:600; }
+.mail-settings { display:grid; gap:14px; }
+.mail-settings > h3 { margin:0; }
+.mail-settings > .card { display:grid; gap:10px; margin:0; }
+.mail-settings h4 { margin:0; }
+.mail-auto { display:grid; gap:4px; padding:10px 0; border-top:1px solid var(--border); }
+.mail-auto:first-of-type { border-top:0; }
+.mail-auto .mail-inline input { width:72px; flex:none; }
+.mail-fields { display:flex; flex-wrap:wrap; gap:6px; }
+.mail-row-actions { display:flex; flex-wrap:wrap; gap:6px; }
+.mail-badge { display:inline-grid; place-items:center; min-width:20px; height:20px; padding:0 6px; border-radius:999px; background:#c62828; color:#fff; font-size:.75rem; font-weight:700; }
+.mail-replies { display:grid; gap:6px; }
+.mail-reply { border:1px solid var(--border); border-radius:10px; background:var(--panel); }
+.mail-reply.unread { border-left:3px solid var(--action); }
+.mail-reply.unread summary b { font-weight:800; }
+.mail-reply summary { display:grid; gap:2px; padding:10px 12px; cursor:pointer; }
+.mail-reply-meta { color:var(--muted); font-size:.8125rem; }
+.mail-reply-body { padding:0 12px 12px; overflow-wrap:anywhere; line-height:1.5; }
+.mail-doc-replies { margin-top:10px; }
+.mail-doc-replies h4 { margin:0 0 6px; }
+.mail-preview { display:grid; gap:8px; margin-top:14px; }
+.mail-preview-head { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.mail-preview iframe { width:100%; height:min(70vh,640px); border:1px solid var(--border); border-radius:10px; background:#f2f4f7; }
