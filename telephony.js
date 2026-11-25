@@ -167,10 +167,20 @@ async function apply(db, { reload = true } = {}) {
     return [];
   }
   if (reload && runtime.connected) {
-    if (changed.includes("pjsip.conf")) await quiet(ari("PUT", "/asterisk/modules/res_pjsip.so"));
+    if (changed.includes("pjsip.conf")) {
+      await quiet(ari("PUT", "/asterisk/modules/res_pjsip.so"));
+      await follow(list, operator);
+    }
     if (changed.includes("rtp.conf")) await quiet(ari("PUT", "/asterisk/modules/res_rtp_asterisk.so"));
   }
   return changed;
+}
+
+// The presence of each line (browsers signed in or not) and of the operator, followed by name:
+// a line added later is followed as soon as it exists in the exchange.
+async function follow(list, operator) {
+  const names = [...(operator?.host ? ["operator"] : []), ...list.map((l) => config.endpointOf(l.user_id))];
+  for (const name of names) await quiet(ari("POST", `/applications/${APP}/subscription`, { eventSource: `endpoint:PJSIP/${name}` }));
 }
 
 function connect(db) {
@@ -184,10 +194,10 @@ function connect(db) {
     runtime.retry = 0;
     runtime.error = "";
     console.log("[telephone] central connecté.");
-    await quiet(ari("POST", `/applications/${APP}/subscription`, { eventSource: "endpoint:PJSIP" }));
     // Settings written while the exchange was away are taken now.
     await quiet(ari("PUT", "/asterisk/modules/res_pjsip.so"));
     await quiet(ari("PUT", "/asterisk/modules/res_rtp_asterisk.so"));
+    await follow(await lines(db).catch(() => []), await setting(db, "operator").catch(() => null));
     operatorState().catch(() => {});
   });
   ws.on("message", (raw) => {
@@ -595,7 +605,10 @@ async function maintain(db) {
   const before = runtime.publicIp;
   await refreshPublicIp(db).catch(() => {});
   if (runtime.publicIp !== before) await apply(db);
-  if (runtime.connected) await operatorState().catch(() => {});
+  if (runtime.connected) {
+    await operatorState().catch(() => {});
+    await follow(await lines(db), await setting(db, "operator")).catch(() => {});
+  }
 }
 
 // Declined on one device: the call goes to voicemail, and every device stops ringing.
