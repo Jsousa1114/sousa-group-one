@@ -19,7 +19,7 @@ const load = async () => (baileys ||= await import("baileys"));
 let socketFactory = null; // tests use a stand-in for WhatsApp
 let downloader = null;
 
-const runtime = { status: "idle", qr: "", qrAt: 0, pairingCode: "", me: null, error: "", sock: null, timer: null, retries: 0, history: null, since: null };
+const runtime = { status: "idle", qr: "", qrAt: 0, pairingCode: "", me: null, error: "", sock: null, timer: null, retries: 0, history: null, since: null, identity: "" };
 let chain = Promise.resolve();
 const serial = (fn) => {
   chain = chain.then(fn).catch((error) => console.warn("whatsapp.event.failed", error?.code || error?.message?.slice(0, 80) || "unknown"));
@@ -477,7 +477,46 @@ async function onUpsert(db, { messages, type }) {
 // ---------------------------------------------------------------------------
 const logger = () => require("pino")({ level: process.env.WHATSAPP_LOG || "silent" });
 
-async function start(db, { fresh = false, phone = "" } = {}) {
+// How the application introduces itself to WhatsApp. « desktop » is the Windows application:
+// WhatsApp then sends the whole history. Since mid-2026 WhatsApp refuses the identities the
+// published library still sends for it (Mac « DARWIN », Windows « WIN32 »: closed with 428 before
+// the QR code), so the Windows one is corrected to « WIN_HYBRID », as upstream did (Baileys #2741,
+// not in a published release yet). « chrome » (WhatsApp Web in a browser) is the fallback.
+const IDENTITIES = ["desktop", "chrome"];
+const browserFor = (B, identity) => (identity === "chrome" ? B.Browsers.windows("Chrome") : B.Browsers.windows("Desktop"));
+function correctDesktopIdentity(B) {
+  const payload = B.proto?.ClientPayload;
+  const kinds = payload?.WebInfo?.WebSubPlatform;
+  if (!payload || payload.sgoCorrected || kinds?.WIN32 == null || kinds?.WIN_HYBRID == null) return;
+  const encode = payload.encode;
+  payload.encode = function (message, writer) {
+    if (message?.webInfo?.webSubPlatform === kinds.WIN32) message.webInfo.webSubPlatform = kinds.WIN_HYBRID;
+    return encode.call(this, message, writer);
+  };
+  payload.sgoCorrected = true;
+}
+const within = (ms, promise) => Promise.race([promise, new Promise((resolve) => setTimeout(resolve, ms).unref?.())]);
+// The version of WhatsApp Web of the day: the one built into the library ages, and WhatsApp
+// refuses versions that are too old.
+async function webVersion(B) {
+  const live = await within(8000, B.fetchLatestWaWebVersion({ signal: AbortSignal.timeout(8000) }).catch(() => null));
+  if (live?.isLatest && Array.isArray(live.version)) return live.version;
+  const known = await within(8000, B.fetchLatestBaileysVersion().catch(() => null));
+  return Array.isArray(known?.version) ? known.version : undefined;
+}
+async function savedIdentity(db) {
+  const row = (await db.query("SELECT value FROM whatsapp_auth WHERE account=$1 AND key='sgo-identity'", [ACCOUNT])).rows[0];
+  try {
+    const value = row ? JSON.parse(unseal(row.value)) : "";
+    return IDENTITIES.includes(value) ? value : "";
+  } catch {
+    return "";
+  }
+}
+const keepIdentity = (db, identity) =>
+  db.query("INSERT INTO whatsapp_auth(account,key,value) VALUES($1,'sgo-identity',$2) ON CONFLICT(account,key) DO UPDATE SET value=EXCLUDED.value", [ACCOUNT, seal(JSON.stringify(identity))]);
+
+async function start(db, { fresh = false, phone = "", identity = "" } = {}) {
   clearTimeout(runtime.timer);
   if (runtime.sock && !fresh) return publicStatus();
   if (fresh) {
@@ -487,21 +526,20 @@ async function start(db, { fresh = false, phone = "" } = {}) {
   await loadLids(db);
   const B = await load();
   const auth = await authState(db);
+  // A linked phone keeps the identity it was linked with; a new link starts with « desktop ».
+  identity = IDENTITIES.includes(identity) ? identity : (auth.linked && (await savedIdentity(db))) || IDENTITIES[0];
   const log = logger();
   let options;
-  if (socketFactory) options = { auth };
+  if (socketFactory) options = { auth, identity };
   else {
-    let version;
-    try {
-      version = (await B.fetchLatestBaileysVersion()).version;
-    } catch {
-      version = undefined;
-    }
+    correctDesktopIdentity(B);
+    const version = await webVersion(B);
+    console.log(`[whatsapp] connexion à WhatsApp (${identity === "chrome" ? "comme WhatsApp Web" : "comme l’application Windows"}, version ${version ? version.join(".") : "par défaut"})`);
     options = {
       auth: { creds: auth.creds, keys: B.makeCacheableSignalKeyStore(auth.keys, log) },
       logger: log,
       ...(version ? { version } : {}),
-      browser: B.Browsers.macOS("Desktop"),
+      browser: browserFor(B, identity),
       syncFullHistory: true,
       // The phone keeps its notifications only while this device stays « offline ».
       markOnlineOnConnect: false,
@@ -510,6 +548,7 @@ async function start(db, { fresh = false, phone = "" } = {}) {
   }
   const sock = (socketFactory || B.makeWASocket)(options);
   runtime.sock = sock;
+  runtime.identity = identity;
   runtime.status = auth.linked ? "connecting" : "waiting";
   runtime.qr = "";
   runtime.qrShown = false;
@@ -558,6 +597,7 @@ async function onConnection(db, sock, u, linked) {
     runtime.since = new Date().toISOString();
     runtime.me = { id: bare(sock.user?.id), name: sock.user?.name || sock.user?.verifiedName || "" };
     sock.sendPresenceUpdate?.("unavailable").catch?.(() => {});
+    await keepIdentity(db, runtime.identity || IDENTITIES[0]);
   }
   if (u.connection === "close") {
     const code = u.lastDisconnect?.error?.output?.statusCode;
@@ -573,18 +613,31 @@ async function onConnection(db, sock, u, linked) {
       return;
     }
     const stillLinked = linked || (await hasSession(db));
+    const unreachable = /ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ETIMEDOUT|ENETUNREACH|EHOSTUNREACH/.test(String(u.lastDisconnect?.error?.message || ""));
     if (!stillLinked && code !== 515) {
-      // The QR code was not scanned in time, or WhatsApp could not be reached at all:
+      const next = IDENTITIES[IDENTITIES.indexOf(runtime.identity) + 1];
+      if (!runtime.qrShown && !unreachable && next) {
+        // WhatsApp closed before giving a QR code: the next identity is tried at once.
+        const phone = runtime.phone;
+        runtime.status = "waiting";
+        runtime.timer = setTimeout(() => start(db, { fresh: true, phone, identity: next }).catch(() => {}), 300);
+        runtime.timer.unref?.();
+        return;
+      }
+      // The QR code was not scanned in time, WhatsApp refused, or could not be reached at all:
       // nothing more until someone asks again.
       const why = runtime.qrShown
         ? "Le QR code a expiré. Cliquez à nouveau sur « Relier WhatsApp »."
-        : "Le serveur n’arrive pas à joindre WhatsApp (connexion Internet du serveur ?). Réessayez dans un instant.";
+        : unreachable
+          ? "Le serveur n’arrive pas à joindre WhatsApp (connexion Internet du serveur ?). Réessayez dans un instant."
+          : `WhatsApp a fermé la connexion avant de donner un QR code (code ${code ?? "?"}). Réessayez dans quelques minutes ; si cela continue, prévenez-nous.`;
       Object.assign(runtime, { status: "idle", qr: "", pairingCode: "", error: runtime.error || why });
       return;
     }
     runtime.status = "reconnecting";
     const delay = code === 515 ? 0 : Math.min(60000, 3000 * 2 ** Math.min(runtime.retries++, 5));
-    runtime.timer = setTimeout(() => start(db).catch(() => {}), delay);
+    const identity = runtime.identity;
+    runtime.timer = setTimeout(() => start(db, { identity }).catch(() => {}), delay);
     runtime.timer.unref?.();
   }
 }
@@ -745,6 +798,7 @@ async function media(db, jid, id) {
 
 module.exports = {
   ACCOUNT,
+  _correctDesktopIdentity: correctDesktopIdentity,
   LABEL,
   start,
   stop,
@@ -771,7 +825,7 @@ module.exports = {
   },
   async _reset() {
     await stop();
-    Object.assign(runtime, { status: "idle", qr: "", qrAt: 0, pairingCode: "", me: null, error: "", retries: 0, history: null, since: null });
+    Object.assign(runtime, { status: "idle", qr: "", qrAt: 0, pairingCode: "", me: null, error: "", retries: 0, history: null, since: null, identity: "" });
     lids.clear();
     lidsLoaded = false;
     groupNames.clear();

@@ -113,6 +113,21 @@ test.after(async () => {
   else process.env[k] = v;
 });
 
+test("the application introduces itself as WhatsApp accepts it in 2026 (desktop « WIN_HYBRID », or WhatsApp Web)", async () => {
+  const B = await import("baileys");
+  W._correctDesktopIdentity(B);
+  W._correctDesktopIdentity(B);
+  const kinds = B.proto.ClientPayload.WebInfo.WebSubPlatform;
+  const sent = (browser) => {
+    const config = { version: [2, 3000, 1], browser, syncFullHistory: true, countryCode: "CH" };
+    const login = B.proto.ClientPayload.decode(B.proto.ClientPayload.encode(B.generateLoginNode("41790000000:7@s.whatsapp.net", config)).finish());
+    const register = B.proto.ClientPayload.decode(B.proto.ClientPayload.encode(B.generateRegistrationNode(B.initAuthCreds(), config)).finish());
+    return [login.webInfo.webSubPlatform, register.webInfo.webSubPlatform];
+  };
+  assert.deepEqual(sent(B.Browsers.windows("Desktop")), [kinds.WIN_HYBRID, kinds.WIN_HYBRID], "not the retired WIN32");
+  assert.deepEqual(sent(B.Browsers.windows("Chrome")), [kinds.WEB_BROWSER, kinds.WEB_BROWSER]);
+});
+
 test("only administrators of the group link the number; the QR code and the code stay with them", async () => {
   assert.deepEqual((await call("whatsapp/status", "manager")).data, { access: false });
   assert.deepEqual((await call("whatsapp/status", "client")).data, { access: false });
@@ -124,8 +139,12 @@ test("only administrators of the group link the number; the QR code and the code
 
   // WhatsApp out of reach is said plainly; a QR code shown and never scanned has « expiré ».
   assert.equal((await call("whatsapp/link", "admin", { method: "qr" })).status, 200);
-  wa.close(408);
+  assert.equal(wa.socket().options.identity, "desktop", "a new link starts as the desktop application (whole history)");
+  let count = wa.calls.sockets;
+  wa.close(408, "WebSocket Error (getaddrinfo ENOTFOUND web.whatsapp.com)");
   await settle();
+  await pause(400);
+  assert.equal(wa.calls.sockets, count, "no other try when the server has no way out");
   const unreachable = await call("whatsapp/status", "admin");
   assert.equal(unreachable.data.status, "idle");
   assert.match(unreachable.data.error, /n’arrive pas à joindre WhatsApp/);
@@ -135,6 +154,33 @@ test("only administrators of the group link the number; the QR code and the code
   wa.close(408);
   await settle();
   assert.match((await call("whatsapp/status", "admin")).data.error, /QR code a expiré/);
+
+  // WhatsApp closes before any QR code (428): tried again at once as WhatsApp Web, then said.
+  assert.equal((await call("whatsapp/link", "admin", { method: "qr" })).status, 200);
+  count = wa.calls.sockets;
+  wa.close(428, "Connection Terminated");
+  await settle();
+  for (let i = 0; i < 100 && wa.calls.sockets === count; i++) await pause(10);
+  assert.equal(wa.calls.sockets, count + 1);
+  assert.equal(wa.socket().options.identity, "chrome");
+  assert.equal((await call("whatsapp/status", "admin")).data.status, "waiting", "still waiting for the QR code");
+  wa.showQr();
+  await settle();
+  assert.match((await call("whatsapp/status", "admin")).data.qrSvg, /^<svg /, "the QR code of the second try is shown");
+  wa.close(428, "Connection Terminated");
+  await settle();
+  await call("whatsapp/link", "admin", { method: "qr" });
+  count = wa.calls.sockets;
+  wa.close(428, "Connection Terminated");
+  await settle();
+  for (let i = 0; i < 100 && wa.calls.sockets === count; i++) await pause(10);
+  wa.close(428, "Connection Terminated");
+  await settle();
+  await pause(400);
+  assert.equal(wa.calls.sockets, count + 1, "two tries, no loop");
+  const refused = await call("whatsapp/status", "admin");
+  assert.equal(refused.data.status, "idle");
+  assert.match(refused.data.error, /fermé la connexion avant de donner un QR code \(code 428\)/);
 
   assert.equal((await call("whatsapp/link", "admin", { method: "code", phone: "12" })).status, 400);
   assert.equal((await call("whatsapp/link", "admin", { method: "code", phone: "+41 79 000 00 00" })).status, 200);
@@ -430,6 +476,7 @@ test("unlinking keeps the messages; WhatsApp removing the device is reported; th
   await W.stop();
   await W.boot(db);
   assert.equal(wa.calls.sockets, sockets + 1, "a linked phone reconnects at server start");
+  assert.equal(wa.socket().options.identity, "desktop", "with the identity it was linked with");
   wa.open();
   await settle();
   assert.equal((await call("whatsapp/status", "admin")).data.connected, true);
