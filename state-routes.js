@@ -516,6 +516,11 @@ function routes(db) {
                 ? "finance"
                 : "projects",
         }).catch(() => {});
+      // Sending at issue, when the company switched it on (in the background, never blocking).
+      if (["invoice.issue", "quote.issue"].includes(req.body.action) && req.body.payload?.id)
+        require("./mail-routes")
+          .autoSendIssued(db, req.user.id, req.body.action === "quote.issue" ? "quotes" : "invoices", req.body.payload.id)
+          .catch(() => {});
       res.json(out);
     }),
   );

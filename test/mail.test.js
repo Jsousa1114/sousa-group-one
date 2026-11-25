@@ -279,16 +279,16 @@ test("automatic reminders are opt-in, never retroactive, and sent once per stage
   configure();
   const { processEmailReminders } = require("../mail-routes");
   const wednesday = new Date("2026-11-25T09:00:00Z"); // 10:00 in Zurich
-  assert.equal((await processEmailReminders(db, wednesday)).sent, 0, "off by default");
+  assert.equal((await processEmailReminders(db, wednesday)).reminders, 0, "off by default");
   assert.equal((await call("mail/reminders", "manager", { enabled: true })).status, 403);
   const on = await call("mail/reminders", "admin", { enabled: true });
   assert.equal(on.data.enabled, true);
   // Pretend the reminders were switched on a few days ago.
-  await db.query("UPDATE integration_settings SET config=jsonb_set(config,'{enabledAt}','\"2026-11-20T08:00:00Z\"') WHERE provider='invoice_email_reminders'");
+  await db.query("UPDATE mail_settings SET config=jsonb_set(config,'{automations,invoiceReminders,enabledAt}','\"2026-11-20T08:00:00Z\"')");
   const before = messages.length;
-  assert.equal((await processEmailReminders(db, new Date("2026-11-28T09:00:00Z"))).sent, 0, "not on Saturdays");
+  assert.equal((await processEmailReminders(db, new Date("2026-11-28T09:00:00Z"))).reminders, 0, "not on Saturdays");
   const first = await processEmailReminders(db, wednesday);
-  assert.equal(first.sent, 1, "only the invoice that reached J+7 after activation");
+  assert.equal(first.reminders, 1, "only the invoice that reached J+7 after activation");
   const reminder = messages[before];
   assert.match(reminder.raw, /Subject: Rappel : facture/);
   assert.match(reminder.raw, /application\/pdf/);
@@ -297,15 +297,15 @@ test("automatic reminders are opt-in, never retroactive, and sent once per stage
   assert.deepEqual(
     rows.map((r) => [r.entity_id, r.kind, r.status]).sort(),
     [
-      [ids.noEmail, "reminder-7", "skipped"],
-      [ids.recent, "reminder-7", "sent"],
+      [ids.noEmail, "reminder-1", "skipped"],
+      [ids.recent, "reminder-1", "sent"],
     ].sort(),
     "the old invoice (J+30 reached before activation) gets nothing; no e-mail address is recorded once",
   );
-  assert.equal((await processEmailReminders(db, new Date("2026-11-25T14:00:00Z"))).sent, 0, "once per stage");
+  assert.equal((await processEmailReminders(db, new Date("2026-11-25T14:00:00Z"))).reminders, 0, "once per stage");
   // A week later, the second reminder.
   const second = await processEmailReminders(db, new Date("2026-12-02T09:00:00Z"));
-  assert.equal(second.sent, 1);
+  assert.equal(second.reminders, 1);
   assert.match(messages.at(-1).raw, /Subject: Deuxi=C3=A8me rappel|Subject: =\?UTF-8\?[QB]\?/);
   const overview = await call("mail/reminders", "admin");
   assert.ok(overview.data.overdue.some((i) => i.id === ids.noEmail && i.email === ""));

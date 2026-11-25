@@ -83,6 +83,7 @@ function createApp(db = pool) {
   app.use("/api/p2", require("./p2-routes").routes(db));
   app.use("/api/suppliers", require("./supplier-routes").routes(db));
   app.use("/api/pro", require("./pro-routes").routes(db));
+  app.use("/api/mail-public", require("./mail-routes").publicRoutes(db));
   app.use("/api/mail", require("./mail-routes").routes(db));
   app.use("/api/public/v1", require("./p2-routes").publicRoutes(db));
   app.get(["/favicon.ico", "/icon.svg"], (req, res) => {
@@ -221,12 +222,20 @@ if (require.main === module) {
       const briefingTimer = setInterval(runBriefings, 15 * 60 * 1000);
       briefingTimer.unref?.();
       // Automatic payment reminders by e-mail (when switched on), weekdays during office hours.
-      const runMailReminders = async () =>
+      // Automatic e-mails (reminders, quote follow-ups, appointments) when switched on.
+      const runMailAutomations = async () =>
         require("./mail-routes")
-          .processEmailReminders(pool)
-          .catch((e) => console.error("E-mail reminders failed", e?.code || e?.status || "unknown"));
-      const mailTimer = setInterval(runMailReminders, 30 * 60 * 1000);
+          .processEmailAutomations(pool)
+          .catch((e) => console.error("E-mail automations failed", e?.code || e?.status || "unknown"));
+      const mailTimer = setInterval(runMailAutomations, 30 * 60 * 1000);
       mailTimer.unref?.();
+      // Client replies read from the companies' Gmail inboxes.
+      const runInbox = async () =>
+        require("./mail-inbox")
+          .processInbox(pool)
+          .catch((e) => console.error("E-mail inbox failed", e?.code || e?.status || "unknown"));
+      const inboxTimer = setInterval(runInbox, 10 * 60 * 1000);
+      inboxTimer.unref?.();
       return server;
     })
     .catch((e) => {
