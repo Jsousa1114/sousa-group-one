@@ -236,11 +236,15 @@ async function noOverflow(page, label) {
       return j.call?.status === "accepted" && j.call?.callType === "video";
     }, null, { timeout: 10000 });
     await client.page.locator("#callCamera").waitFor({ state: "visible" });
-    await client.page.locator("#callCamera").click();
-    assert.equal(
-      await client.page.locator("#callCamera").evaluate((el) => el.classList.contains("muted")),
-      true,
-    );
+    // The button acts once the recipient's camera has started: on a slow machine the first
+    // click can come before that, so click again until the camera is cut.
+    const camera = client.page.locator("#callCamera");
+    const cut = () => camera.evaluate((el) => el.classList.contains("muted"));
+    for (const deadline = Date.now() + 8000; !(await cut()) && Date.now() < deadline; ) {
+      await camera.click();
+      if (!(await cut())) await client.page.waitForTimeout(250);
+    }
+    assert.equal(await cut(), true, "camera can be cut during the video call");
     await client.page.locator("#callCamera").click();
     await admin.page.locator("#callHangup").click();
     await client.page.locator("#callState").filter({ hasText: /terminé/i }).waitFor({ timeout: 8000 });

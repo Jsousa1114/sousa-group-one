@@ -100,6 +100,7 @@ const menus = {
   vehicles: ["Véhicules", [...ops, "accounting"]],
   tools: ["Outillage", [...ops, "accounting", "employee"]],
   maintenance: ["Maintenance", [...ops, "accounting", "client"]],
+  trade: ["Démarches", [...ops, "accounting"]],
   documents: ["Documents", Object.keys(roles)],
   messages: ["Messages", Object.keys(roles)],
   mailbox: ["Boîte mail", Object.keys(roles).filter((r) => r !== "client")],
@@ -118,7 +119,7 @@ const menus = {
 const navSections = [
   { id: "home", label: "Accueil", icon: "dashboard", pages: ["dashboard"] },
   { id: "communication", label: "Communication", icon: "messages", pages: ["messages", "mailbox", "whatsapp", "phone"] },
-  { id: "work", label: "Chantiers", icon: "projects", pages: ["projects", "clients", "maintenance", "documents"] },
+  { id: "work", label: "Chantiers", icon: "projects", pages: ["projects", "clients", "maintenance", "trade", "documents"] },
   { id: "team", label: "Équipe", icon: "planning", pages: ["planning", "time", "absences", "employees"] },
   { id: "money", label: "Finances", icon: "invoices", pages: ["quotes", "invoices", "payments", "expenses"] },
   { id: "stock", label: "Matériel", icon: "inventory", pages: ["inventory", "tools", "vehicles", "suppliers"] },
@@ -135,9 +136,17 @@ function pageLabel(k) {
   if (k === "dashboard") return "Accueil";
   return menus[k]?.[0] || k;
 }
+// The trade of a company (électricité, solaire, déménagement), from its sector or name.
+function tradeKind(c) {
+  const t = [c?.type, c?.name, c?.id].join(" ").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  return /electric/.test(t) ? "electricite" : /solai|solar/.test(t) ? "solaire" : /demenag|moving/.test(t) ? "demenagement" : "";
+}
+const hasTrade = (...kinds) => (state?.companies || []).some((c) => c.id !== "group" && kinds.includes(tradeKind(c)) && (profile?.company === "group" || profile?.company === c.id || (profile?.companies || []).includes(c.id)));
+window.SGOTradeKind = tradeKind;
 function pageAvailable(k) {
   return (
     !!menus[k] &&
+    (k !== "trade" || hasTrade("electricite", "solaire")) &&
     can(menus[k][1]) &&
     k !== "users" &&
     (k !== "mailbox" || !!window.SGOWebmail?.hasAccess?.()) &&
@@ -183,6 +192,8 @@ const BOTTOM_SECTIONS = {
 function navigationIcon(key) {
   const paths = {
     dashboard: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
+    go: '<path d="m3 11 18-8-8 18-2-8-8-2Z"/>',
+    trade: '<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V3h6v1M9 12l2 2 4-4"/>',
     messages: '<path d="M21 11a8 8 0 0 1-8 8H7l-4 3V11a8 8 0 0 1 8-8h2a8 8 0 0 1 8 8Z"/><path d="M8 9h8M8 13h5"/>',
     mailbox: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3.5 7 8.5 6 8.5-6"/>',
     whatsapp: '<path d="M4 20.5l1.2-3.9A8.5 8.5 0 1 1 8.3 19.6L4 20.5Z"/><path d="M9.2 8.6c.3 2.6 2.4 4.8 5.1 5.4l1-1.2-1.7-1-.8.7a4.6 4.6 0 0 1-2.1-2.1l.7-.8-1-1.7-1.2.7Z"/>',
@@ -260,6 +271,7 @@ const UI_ICONS = {
   alert: '<path d="M12 4 2.5 20h19L12 4Z"/><path d="M12 10v4M12 17h.01"/>',
   archive: '<rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9v11h14V9M10 13h4"/>',
   pin: '<path d="M9 4h6l-1 6 3 3H7l3-3-1-6ZM12 13v8"/>',
+  go: '<path d="m3 11 18-8-8 18-2-8-8-2Z"/>',
   download: '<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>',
   trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>',
   more: '<circle cx="5" cy="12" r="1.4" fill="currentColor"/><circle cx="12" cy="12" r="1.4" fill="currentColor"/><circle cx="19" cy="12" r="1.4" fill="currentColor"/>',
@@ -324,6 +336,57 @@ const name = (k, id) => {
 };
 const btn = (label, action, id = "", kind = "secondary") =>
   `<button type="button" class="btn ${kind}" data-action="${esc(action)}" data-id="${esc(id)}">${esc(label)}</button>`;
+// « Y aller »: an address opens in the navigation app chosen on this device (asked the first time).
+const NAV_APPS = { google: "Google Maps", waze: "Waze", apple: "Plans (Apple)" };
+function navApp() {
+  try {
+    const v = localStorage.getItem("sgo-nav-app");
+    return NAV_APPS[v] ? v : "";
+  } catch {
+    return "";
+  }
+}
+function navUrl(address, app = navApp() || "google") {
+  const q = encodeURIComponent(String(address).trim());
+  return app === "waze"
+    ? `https://waze.com/ul?q=${q}&navigate=yes`
+    : app === "apple"
+      ? `https://maps.apple.com/?daddr=${q}`
+      : `https://www.google.com/maps/dir/?api=1&destination=${q}`;
+}
+// Several stops in a row (Google Maps: Waze and Plans take one destination at a time).
+function tourUrl(addresses) {
+  const stops = [...new Set(addresses.map((a) => String(a || "").trim()).filter(Boolean))].slice(0, 10);
+  const destination = stops.pop();
+  return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destination)}${stops.length ? "&waypoints=" + encodeURIComponent(stops.join("|")) : ""}&travelmode=driving`;
+}
+const clientAddress = (c) => (c ? [[c.street, c.buildingNumber].filter(Boolean).join(" "), [c.zip, c.city].filter(Boolean).join(" ")].filter(Boolean).join(", ") : "");
+const planningAddress = (p) => find("projects", p.project)?.address || p.location || "";
+const goButton = (address, label = "Y aller") =>
+  String(address || "").trim()
+    ? `<button type="button" class="btn secondary go-btn" data-action="go-to" data-id="${esc(String(address).trim())}" title="Itinéraire vers ${esc(address)}">${uiIcon("go")}<span>${esc(label)}</span></button>`
+    : "";
+function todayStops(employeeId) {
+  return visible("planning")
+    .filter((x) => x.date === today() && same(x.employeeId, employeeId))
+    .sort((a, b) => a.start.localeCompare(b.start))
+    .map(planningAddress)
+    .filter(Boolean);
+}
+function openNavigation(url) {
+  const w = window.open(url, "_blank", "noopener");
+  if (!w) location.href = url;
+}
+function chooseNavApp(address) {
+  modal(
+    "Ouvrir l’itinéraire avec…",
+    `<p class="muted">${esc(address)}</p><div class="go-apps">${Object.entries(NAV_APPS)
+      .map(([id, label]) => `<button type="button" class="btn ${id === "google" ? "primary" : "secondary"}" data-action="go-app" data-id="${id}">${esc(label)}</button>`)
+      .join("")}</div><label class="go-remember"><input type="checkbox" id="goRemember" checked> Toujours utiliser cette application sur cet appareil</label><p class="muted">Vous pourrez changer d’application depuis le planning (« Changer d’application »).</p>`,
+  );
+  goPending = address;
+}
+let goPending = "";
 // Statuses in colour: done in green, under way in blue, waiting in orange, a problem in red.
 const STATUS_TONE = {
   ok: ["Payée", "Payé", "Accepté", "Acceptée", "Validée", "Validé", "Approuvée", "Approuvé", "Terminé", "Terminée", "Actif", "Active", "Signé", "Signée", "En service", "Livré", "Livrée", "Encaissé"],
@@ -846,6 +909,7 @@ function render() {
   if (page === "mailbox") window.SGOWebmail?.render?.($("webmailRoot"));
   if (page === "whatsapp") window.SGOWhatsApp?.render?.($("whatsappRoot"));
   if (page === "phone") window.SGOPhone?.render?.($("phoneRoot"));
+  if (page === "trade") window.SGOTrade?.render?.($("tradeRoot"));
   if (page === "advanced" && window.SGOP2Center?.render)
     window.SGOP2Center.render($("p2Standalone")).catch((e) => notice(e.message));
   if (page === "pro" && window.SGOProSuite?.render)
@@ -892,6 +956,8 @@ function render() {
     window.SGOWebmail?.afterRender?.();
     window.SGOWhatsApp?.afterRender?.();
     window.SGOPhone?.afterRender?.();
+    window.SGOTrade?.afterRender?.();
+    window.SGOMoving?.afterRender?.();
   });
 }
 function projectRows(list) {
@@ -930,6 +996,8 @@ function dashboard() {
     if (can(ops)) action("projects", "Nouveau chantier", 'data-action="new" data-id="projects"');
     if (can(ops)) action("clients", "Nouveau client", 'data-action="new" data-id="clients"');
     if (can(ops)) action("planning", "Planifier", 'data-action="new" data-id="planning"');
+    if (role === "employee" && has("planning") && todayStops(profile.employee_id).length)
+      action("go", "Y aller", `data-action="go-tour" data-id="${esc(profile.employee_id)}"`);
     if (role === "employee" && has("planning")) action("planning", "Mon planning", 'data-shortcut="planning"');
     if (can([...hr, "manager", "employee"]) && has("time")) action("time", "Ajouter des heures", 'data-action="time-add"');
     if (role === "employee" && has("absences")) action("absences", "Demander une absence", 'data-action="absence-form"');
@@ -1186,6 +1254,12 @@ function planningView() {
         btn("Exporter CSV", "export", "planning"),
     ) +
     controls +
+    (() => {
+      // « Tournée du jour »: today's stops of one person, in order, in Google Maps.
+      const who = profile.role === "employee" ? profile.employee_id : planningEmployee;
+      const stops = who ? todayStops(who) : [];
+      return `<div class="go-bar">${stops.length ? `<button type="button" class="btn primary go-btn" data-action="go-tour" data-id="${esc(who)}">${uiIcon("go")}<span>Tournée du jour (${stops.length} ${stops.length > 1 ? "arrêts" : "arrêt"})</span></button>` : who ? '<span class="muted">Aucune adresse prévue aujourd’hui.</span>' : '<span class="muted">Choisissez un salarié pour sa tournée du jour.</span>'}<button type="button" class="link-btn" data-action="go-app-reset">${navApp() ? "Itinéraires : " + esc(NAV_APPS[navApp()]) + " · Changer d’application" : "Itinéraires : choisir l’application"}</button></div>`;
+    })() +
     (selected.length
       ? mode === "week"
         ? calendar
@@ -1200,7 +1274,7 @@ function planningView() {
               esc(name("employees", p.employeeId)),
               esc(name("projects", p.project)),
               esc(p.location),
-              btn("Détails", "planning-detail", p.id),
+              btn("Détails", "planning-detail", p.id) + " " + goButton(planningAddress(p)),
             ]),
           )
       : '<p class="empty">Aucun salarié dans cette vue.</p>') +
@@ -1244,6 +1318,7 @@ function financeView(k) {
       can(fin)
         ? btn("Créer", "new", k, "primary") +
             " " +
+            (quote && hasTrade("demenagement") ? `<button type="button" class="btn primary" data-moving-action="open">Devis déménagement</button> ` : "") +
             btn("Exporter CSV", "export", k) +
             " " +
             btn("Paramètres de facturation", "billing-settings") +
@@ -2131,6 +2206,7 @@ const views = {
   mailbox: () => '<div id="webmailRoot" class="wm-root"></div>',
   whatsapp: () => '<div id="whatsappRoot" class="wa-root"></div>',
   phone: () => '<div id="phoneRoot" class="ph-root"></div>',
+  trade: () => '<div id="tradeRoot" class="trade-root"><p class="muted">Chargement des démarches…</p></div>',
   reports: reportsView,
   pilotage: () =>
     heading("Pilotage") +
@@ -2274,8 +2350,14 @@ function genericPage(k) {
   return (
     heading(
       menus[k][0],
-      (createRoles[k] && can(createRoles[k])
-        ? btn("Ajouter", "new", k, "primary") + " "
+      (k === "payments" && can(fin)
+        ? `<button type="button" class="btn primary" data-bank-action="open">Importer le relevé bancaire</button> `
+        : "") +
+        (k === "clients" && can([...ops, ...fin])
+        ? `<button type="button" class="btn secondary" data-review-action="settings">Avis Google</button> `
+        : "") +
+        (createRoles[k] && can(createRoles[k])
+        ? btn("Ajouter", "new", k, k === "payments" ? "secondary" : "primary") + " "
         : "") + btn("Exporter CSV", "export", k),
     ) +
     (k === "suppliers" ? '<div id="supplierCatalog"></div>' : "") +
@@ -2327,7 +2409,9 @@ function genericPage(k) {
           : []),
         ...(k === "clients" && can(createRoles.clients)
           ? [
-              (profile.role === "admin"
+              goButton(clientAddress(r)) +
+                " " +
+                (profile.role === "admin"
                 ? btn("Créer un compte", "linked-user", k + ":" + r.id) + " "
                 : "") +
                 btn("Modifier", "client-edit", r.id) +
@@ -2740,7 +2824,7 @@ function projectModal(id) {
         .filter((i) => find("invoices", i))
         .map((i) => btn("Ouvrir la facture " + i, "invoice", i))
         .join(" ") +
-      `${p.description ? `<p>${esc(p.description)}</p>` : ""}${p.address ? `<p>${esc(p.address)}</p>` : ""}<p class="project-summary">${[p.clientId ? esc(name("clients", p.clientId)) : "", p.status ? badge(p.status) : "", p.start && p.end ? `${date(p.start)} – ${date(p.end)}` : p.start ? "Début " + date(p.start) : p.end ? "Fin " + date(p.end) : "", "Avancement " + esc(p.progress ?? 0) + " %"].filter(Boolean).join(" · ")}</p><p>Équipe : ${(p.team || []).map((id) => esc(name("employees", id))).join(", ") || "Non affectée"}</p>${p.budget !== undefined ? `<p>Budget ${money(p.budget)} · Coûts ${money(p.cost)}</p>` : ""}${can(ops) ? btn("Modifier le suivi", "project-edit", id) + " " + btn("Supprimer le chantier", "project-delete", id, "danger") : ""} ${(() => { const thread = (state.messageThreads || []).find((t) => same(t.projectId, id)); return thread ? btn("Ouvrir la discussion", "chat-open-project", thread.id, "primary") : can(ops) ? btn("Créer la discussion chantier", "chat-create-project", id) : ""; })()}<h4 class="spaced">Documents et photos</h4>${table(
+      `${p.description ? `<p>${esc(p.description)}</p>` : ""}${p.address ? `<p class="go-line"><span>${esc(p.address)}</span> ${goButton(p.address)}</p>` : ""}<p class="project-summary">${[p.clientId ? esc(name("clients", p.clientId)) : "", p.status ? badge(p.status) : "", p.start && p.end ? `${date(p.start)} – ${date(p.end)}` : p.start ? "Début " + date(p.start) : p.end ? "Fin " + date(p.end) : "", "Avancement " + esc(p.progress ?? 0) + " %"].filter(Boolean).join(" · ")}</p><p>Équipe : ${(p.team || []).map((id) => esc(name("employees", id))).join(", ") || "Non affectée"}</p>${p.budget !== undefined ? `<p>Budget ${money(p.budget)} · Coûts ${money(p.cost)}</p>` : ""}${can(ops) ? btn("Modifier le suivi", "project-edit", id) + " " + btn("Supprimer le chantier", "project-delete", id, "danger") : ""} ${(() => { const thread = (state.messageThreads || []).find((t) => same(t.projectId, id)); return thread ? btn("Ouvrir la discussion", "chat-open-project", thread.id, "primary") : can(ops) ? btn("Créer la discussion chantier", "chat-create-project", id) : ""; })()}<h4 class="spaced">Documents et photos</h4>${table(
         ["Fichier", ""],
         state.documents
           .filter((x) => same(x.project, id))
@@ -2750,8 +2834,9 @@ function projectModal(id) {
               " " +
               deleteRecordButton("documents", d),
           ]),
-      )}`,
+      )}<div data-trade-project="${esc(id)}"></div>`,
   );
+  window.SGOTrade?.projectModal?.(p);
 }
 function documentModal(k, id) {
   const r = find(k, id);
@@ -3581,12 +3666,42 @@ document.addEventListener("click", async (e) => {
       render();
     } else if (a === "planning-slot") {
       planningForm(b.dataset.employee, b.dataset.date);
+    } else if (a === "go-to") {
+      if (navApp()) openNavigation(navUrl(id));
+      else chooseNavApp(id);
+    } else if (a === "go-app") {
+      try {
+        if ($("goRemember")?.checked) localStorage.setItem("sgo-nav-app", id);
+      } catch {}
+      const address = goPending;
+      goPending = "";
+      closeModal(true);
+      if (address) openNavigation(navUrl(address, id));
+      if (page === "planning") render();
+    } else if (a === "go-app-reset") {
+      try {
+        localStorage.removeItem("sgo-nav-app");
+      } catch {}
+      goPending = "";
+      modal(
+        "Application pour les itinéraires",
+        `<p class="muted">Choisissez l’application qui s’ouvre avec « Y aller » sur cet appareil.</p><div class="go-apps">${Object.entries(NAV_APPS)
+          .map(([key, label]) => `<button type="button" class="btn secondary" data-action="go-app" data-id="${key}">${esc(label)}</button>`)
+          .join("")}</div><input type="checkbox" id="goRemember" checked hidden>`,
+      );
+    } else if (a === "go-tour") {
+      const stops = todayStops(id);
+      if (!stops.length) toast("Aucune adresse prévue aujourd’hui.");
+      else if (stops.length === 1) {
+        if (navApp()) openNavigation(navUrl(stops[0]));
+        else chooseNavApp(stops[0]);
+      } else openNavigation(tourUrl(stops));
     } else if (a === "planning-detail") {
       const p = find("planning", id);
       if (p)
         modal(
           "Affectation",
-          `<p><b>${esc(name("employees", p.employeeId))}</b></p><p>${date(p.date)} · ${esc(p.start)}–${esc(p.end)}</p><p>${esc(name("projects", p.project))}</p><p>${esc(p.location)}</p>${can(ops) ? btn("Copier vers un autre créneau", "planning-copy", p.id) + " " + btn("Supprimer", "planning.delete", p.id, "danger") : ""}`,
+          `<p><b>${esc(name("employees", p.employeeId))}</b></p><p>${date(p.date)} · ${esc(p.start)}–${esc(p.end)}</p><p>${esc(name("projects", p.project))}</p><p>${esc(p.location)}</p>${planningAddress(p) && planningAddress(p) !== p.location ? `<p class="muted">${esc(planningAddress(p))}</p>` : ""}<p>${goButton(planningAddress(p))}</p>${can(ops) ? btn("Copier vers un autre créneau", "planning-copy", p.id) + " " + btn("Supprimer", "planning.delete", p.id, "danger") : ""}`,
         );
     } else if (a === "planning-copy") {
       const p = find("planning", id);

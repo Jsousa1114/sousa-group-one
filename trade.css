@@ -1,0 +1,159 @@
+/* Sousa Group One — work in the field and by trade: « Y aller », bank statements,
+   OIBT controls, solar paperwork, moving inventories and review requests. */
+
+/* ---- « Y aller » ---- */
+.go-btn { display:inline-flex; align-items:center; gap:6px; white-space:nowrap; }
+.go-btn .ui-icon { width:17px; height:17px; flex:0 0 17px; }
+.go-bar { display:flex; flex-wrap:wrap; align-items:center; gap:10px 16px; margin:0 0 14px; }
+.go-line { display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px; }
+.go-apps { display:grid; gap:10px; margin:14px 0; }
+.go-apps .btn { min-height:48px; font-size:1rem; }
+.go-remember { display:flex; align-items:center; gap:8px; font-weight:500; }
+.go-remember input { width:20px; height:20px; }
+.link-btn { padding:4px 0; border:0; background:none; color:var(--action); font:inherit; font-size:.9rem; text-decoration:underline; text-underline-offset:3px; cursor:pointer; }
+.link-btn:hover { color:var(--text); }
+
+/* ---- Bank statement ---- */
+.bank-steps { margin:0 0 14px; padding-left:20px; display:grid; gap:6px; color:var(--muted); }
+.bank-steps b { color:var(--text); }
+.bank-file { display:grid; gap:6px; font-weight:600; margin-bottom:12px; }
+.bank-summary { margin:6px 0 10px; }
+.bank-error { color:#b42318; font-weight:600; }
+.bank-group { margin:10px 0; border:1px solid var(--border); border-radius:12px; background:var(--panel); }
+.bank-group > summary { display:flex; flex-wrap:wrap; align-items:center; gap:6px 8px; padding:12px 14px; cursor:pointer; }
+.bank-count { display:inline-grid; place-items:center; min-width:24px; height:22px; padding:0 7px; border-radius:999px; background:var(--accent-soft); font-size:.8rem; font-weight:700; }
+.bank-lines { list-style:none; margin:0; padding:0 10px 10px; display:grid; gap:8px; }
+.bank-line { display:grid; grid-template-columns:auto minmax(0,1fr) minmax(220px,320px); gap:10px 12px; align-items:center; padding:10px 12px; border:1px solid var(--border); border-radius:10px; background:var(--soft); }
+.bank-sure { border-left:4px solid #1f9e50; }
+.bank-tick { width:22px; height:22px; }
+.bank-line.bank-check { border-left:4px solid #dc8a00; }
+.bank-done { opacity:.7; }
+.bank-what { display:grid; gap:2px; min-width:0; }
+.bank-what b { font-size:1.05rem; }
+.bank-what small { color:var(--muted); overflow-wrap:anywhere; }
+.bank-note { font-style:italic; }
+.bank-to select { width:100%; min-height:42px; }
+.bank-actions { position:sticky; bottom:0; display:flex; justify-content:flex-end; padding:12px 0 2px; background:linear-gradient(transparent, var(--panel) 30%); }
+@media (max-width:700px) {
+  .bank-line { grid-template-columns:auto minmax(0,1fr); }
+  .bank-to { grid-column:1 / -1; }
+  .bank-actions .btn { width:100%; }
+}
+
+/* ---- Démarches (OIBT, solaire) ---- */
+.trade-tabs { display:flex; gap:6px; margin:0 0 16px; flex-wrap:wrap; }
+.trade-tab { min-height:44px; padding:8px 16px; border:1px solid var(--border); border-radius:999px; background:var(--panel); color:var(--text); font:inherit; font-weight:600; cursor:pointer; }
+.trade-tab.active { background:var(--action); border-color:var(--action); color:#fff; }
+.trade-head { display:flex; flex-wrap:wrap; justify-content:space-between; align-items:flex-start; gap:12px 20px; margin-bottom:14px; }
+.trade-head h2 { margin:0 0 4px; font-size:1.2rem; }
+.trade-head p { margin:0; max-width:70ch; }
+.trade-card { padding:18px; margin-bottom:16px; }
+.trade-card h3 { margin:0 0 4px; }
+.trade-filters { display:flex; gap:8px; flex-wrap:wrap; margin:0 0 12px; }
+.trade-chip { min-height:40px; padding:6px 14px; border:1px solid var(--border); border-radius:999px; background:var(--panel); color:var(--text); font:inherit; cursor:pointer; }
+.trade-chip.active { border-color:var(--action); background:var(--accent-soft); font-weight:650; }
+.trade-list { list-style:none; margin:0; padding:0; display:grid; gap:10px; }
+.trade-item { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:10px 16px; align-items:center; padding:14px 16px; border:1px solid var(--border); border-radius:12px; background:var(--panel); }
+.trade-item.trade-late { border-left:4px solid #d92d20; }
+.trade-item.trade-soon { border-left:4px solid #dc8a00; }
+.trade-what { display:grid; gap:2px; min-width:0; }
+.trade-what span, .trade-what small { color:var(--muted); overflow-wrap:anywhere; }
+.trade-due { display:grid; justify-items:end; gap:4px; text-align:right; }
+.trade-due small { color:var(--muted); }
+.trade-actions { grid-column:1 / -1; display:flex; flex-wrap:wrap; gap:8px; }
+.trade-actions .btn { display:inline-flex; align-items:center; gap:6px; }
+.trade-actions .ui-icon { width:16px; height:16px; }
+.trade-error { color:#b42318; font-weight:600; }
+.trade-form { display:grid; gap:12px; }
+.trade-form label { display:grid; gap:6px; }
+.trade-form-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:8px; }
+.trade-check { display:flex !important; align-items:center; gap:8px; }
+.trade-check input { width:20px; height:20px; }
+progress.trade-progress { width:120px; height:10px; border:0; border-radius:999px; overflow:hidden; background:var(--soft); accent-color:var(--action); }
+progress.trade-progress::-webkit-progress-bar { background:var(--soft); border-radius:999px; }
+progress.trade-progress::-webkit-progress-value { background:#1f9e50; border-radius:999px; }
+progress.trade-progress::-moz-progress-bar { background:#1f9e50; border-radius:999px; }
+progress.trade-progress.wide { width:100%; margin:4px 0 12px; }
+.trade-steps { list-style:none; margin:0; padding:0; display:grid; gap:8px; counter-reset:step; }
+.trade-step { padding:10px 12px; border:1px solid var(--border); border-radius:10px; background:var(--soft); }
+.trade-step.done { background:color-mix(in srgb,#1f9e50 7%,var(--panel)); }
+.trade-step-name { display:flex; flex-wrap:wrap; align-items:center; gap:6px 10px; }
+.trade-step-name b { counter-increment:step; }
+.trade-step-name b::before { content:counter(step) ". "; color:var(--muted); font-weight:600; }
+.trade-step-fields { display:grid; grid-template-columns:150px 160px minmax(0,1fr); gap:8px; margin-top:8px; }
+.trade-step-fields label { display:grid; gap:4px; font-size:.85rem; color:var(--muted); }
+.trade-tick { display:inline-grid; place-items:center; width:22px; height:22px; border-radius:50%; border:2px solid var(--border); color:#167a3d; }
+.trade-step.done .trade-tick { border-color:#1f9e50; }
+.trade-tick .ui-icon { width:14px; height:14px; }
+.trade-add-step { display:flex; gap:8px; margin-top:10px; }
+.trade-add-step input { flex:1; min-width:0; }
+.trade-report p { display:flex; align-items:center; gap:6px; }
+.trade-report .ui-icon { width:18px; height:18px; color:#167a3d; }
+@media (max-width:700px) {
+  .trade-item { grid-template-columns:minmax(0,1fr); }
+  .trade-due { justify-items:start; text-align:left; }
+  .trade-step-fields { grid-template-columns:1fr 1fr; }
+  .trade-step-fields .grow { grid-column:1 / -1; }
+  .trade-actions .btn { flex:1 1 auto; justify-content:center; }
+}
+
+/* ---- Devis déménagement ---- */
+.mv-list-actions, .mv-actions { display:flex; flex-wrap:wrap; gap:8px; margin:12px 0; }
+.mv-actions { position:sticky; bottom:-1px; padding:12px 0 4px; background:linear-gradient(transparent, var(--panel) 25%); justify-content:flex-end; }
+.mv-editor { display:grid; gap:14px; }
+.mv-editor h2 { margin:10px 0 0; font-size:1.15rem; }
+.mv-editor h4 { margin:6px 0 0; }
+.mv-editor label { display:grid; gap:6px; }
+.mv-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:10px 12px; align-items:end; }
+.mv-access { display:grid; grid-template-columns:minmax(0,2fr) minmax(90px,1fr); gap:8px 12px; margin:0; padding:12px 14px; border:1px solid var(--border); border-radius:12px; }
+.mv-access legend { padding:0 6px; font-weight:700; }
+.mv-access .wide { grid-column:1 / -1; }
+.mv-check { display:flex !important; align-items:center; gap:8px; font-weight:500; }
+.mv-check input { width:20px; height:20px; flex:none; }
+.mv-room { border:1px solid var(--border); border-radius:12px; background:var(--panel); }
+.mv-room > summary { padding:12px 14px; cursor:pointer; min-height:48px; display:flex; align-items:center; gap:8px; }
+.mv-items { list-style:none; margin:0; padding:0 10px 10px; display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:6px 12px; }
+.mv-item { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:6px 8px; border-radius:10px; }
+.mv-item.has { background:var(--accent-soft); }
+.mv-item-name { display:grid; min-width:0; }
+.mv-item-name small { color:var(--muted); }
+.mv-stepper { display:inline-flex; align-items:center; gap:4px; flex:none; }
+.mv-stepper output { min-width:28px; text-align:center; font-weight:700; font-variant-numeric:tabular-nums; }
+.mv-step { width:40px; height:40px; border:1px solid var(--border); border-radius:10px; background:var(--panel); color:var(--text); font-size:1.3rem; line-height:1; cursor:pointer; }
+.mv-step:disabled { opacity:.35; cursor:default; }
+.mv-add { display:flex; flex-wrap:wrap; gap:8px; padding:0 10px 12px; }
+.mv-add input { flex:1 1 180px; min-width:0; }
+.mv-photos { padding:12px 14px; border:1px dashed var(--border); border-radius:12px; }
+.mv-photos p { margin:4px 0 10px; }
+.mv-photo-btn { display:inline-flex; cursor:pointer; }
+.mv-estimate { padding:14px 16px; border:1px solid var(--border); border-radius:12px; background:var(--soft); }
+.mv-figures { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:10px; margin:8px 0 12px; }
+.mv-figures div { display:grid; gap:2px; padding:10px 12px; border-radius:10px; background:var(--panel); }
+.mv-figures span { color:var(--muted); font-size:.85rem; }
+.mv-figures b { font-size:1.15rem; }
+.mv-lines { width:100%; margin-top:10px; border-collapse:collapse; font-size:.92rem; }
+.mv-lines td { padding:6px 4px; border-top:1px solid var(--border); vertical-align:top; }
+.mv-lines td:nth-child(2), .mv-lines td:nth-child(3) { text-align:right; white-space:nowrap; }
+.mv-lines tfoot td { font-weight:700; }
+.mv-locked { padding:10px 12px; border-radius:10px; background:var(--accent-soft); }
+.mv-truck { padding-bottom:6px; border-bottom:1px solid var(--border); }
+
+/* ---- Public pages (inventory, review) ---- */
+body.public-page { min-height:100dvh; background:var(--bg); }
+.pub-page { width:min(760px,100%); margin:0 auto; padding:24px 16px 160px; }
+.pub-head h1 { margin:4px 0 6px; font-size:clamp(1.5rem,5vw,2rem); }
+.pub-head .eyebrow { font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); font-size:.8rem; }
+.pub-ok { padding:12px 14px; border-radius:12px; background:#e3f5eb; color:#0f6b3d; font-weight:600; }
+.pub-error { padding:12px 14px; border-radius:12px; background:#fdeaec; color:#a5202e; font-weight:600; }
+.pub-bar { position:fixed; left:0; right:0; bottom:0; z-index:5; display:grid; gap:6px; padding:12px 16px calc(12px + env(safe-area-inset-bottom)); background:var(--panel); border-top:1px solid var(--border); box-shadow:0 -6px 22px rgba(16,24,40,.08); }
+.pub-bar p { margin:0; text-align:center; }
+.pub-actions { display:grid; grid-template-columns:1fr 2fr; gap:8px; width:min(728px,100%); margin:0 auto; }
+.pub-actions .btn { min-height:48px; }
+.review-choices { display:grid; gap:12px; margin:18px 0; }
+.review-choices .btn { min-height:56px; font-size:1.05rem; display:inline-flex; align-items:center; justify-content:center; text-decoration:none; }
+.review-form { display:grid; gap:10px; }
+.review-form textarea { min-height:120px; }
+.review-panel p { margin:6px 0; }
+.review-quote { margin:6px 0 0; padding:8px 12px; border-left:3px solid #dc8a00; background:var(--soft); border-radius:0 8px 8px 0; white-space:pre-wrap; overflow-wrap:anywhere; }
+#reviewMsg { min-height:110px; }
+html:has(.pub-bar) { scroll-padding-bottom:150px; }

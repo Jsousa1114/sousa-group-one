@@ -63,6 +63,10 @@ function createApp(db = pool) {
   // Messages written in the mailbox may carry up to 18 MB of attachments (Gmail's limit).
   app.use("/api/webmail", express.json({ limit: "26mb" }));
   app.use("/api/whatsapp", express.json({ limit: "26mb" }));
+  // Bank statements (camt XML or ZIP) arrive base64-encoded.
+  app.use("/api/bank", express.json({ limit: "24mb" }));
+  // Photos of the rooms for a moving inventory.
+  app.use("/api/moving", express.json({ limit: "20mb" }));
   // SMS from the phones arrive signed: the exact bytes are kept to check the signature.
   app.use("/api/phone/sms/hook", express.raw({ type: "*/*", limit: "2mb" }));
   app.use(express.json({ limit: "8mb" }));
@@ -87,6 +91,12 @@ function createApp(db = pool) {
   app.use("/api/p1", require("./p1-routes").routes(db));
   app.use("/api/p2", require("./p2-routes").routes(db));
   app.use("/api/suppliers", require("./supplier-routes").routes(db));
+  app.use("/api/bank", require("./bank-routes").routes(db));
+  app.use("/api/trade", require("./trade-routes").routes(db));
+  app.use("/api/moving-public", require("./moving-routes").publicRoutes(db));
+  app.use("/api/moving", require("./moving-routes").routes(db));
+  app.use("/api/reviews-public", require("./review-routes").publicRoutes(db));
+  app.use("/api/reviews", require("./review-routes").routes(db));
   app.use("/api/pro", require("./pro-routes").routes(db));
   app.use("/api/mail-public", require("./mail-routes").publicRoutes(db));
   app.use("/api/mail", require("./mail-routes").routes(db));
@@ -120,6 +130,12 @@ function createApp(db = pool) {
     "phone-center.js",
     "phone.css",
     "ui-simple.css",
+    "trade.css",
+    "bank-suite.js",
+    "trade-suite.js",
+    "moving-suite.js",
+    "inventaire.js",
+    "avis.js",
     "supplier-suite.js",
     "supplier.css",
     "styles.css",
@@ -159,6 +175,12 @@ function createApp(db = pool) {
     res.type("text/javascript");
     res.sendFile(path.join(__dirname, "vendor", "jssip-3.13.9.min.js"));
   });
+  // Pages opened from a link, without an account: the moving inventory and the review request.
+  for (const [route, file] of [["/inventaire", "inventaire.html"], ["/avis", "avis.html"]])
+    app.get(route, (req, res) => {
+      res.set({ "Cache-Control": "no-store", "X-Robots-Tag": "noindex, nofollow" });
+      res.sendFile(path.join(__dirname, file));
+    });
   app.get("/", (req, res) => res.sendFile(path.join(__dirname, "index.html")));
   app.use((req, res) => res.status(404).json({ error: "Page introuvable." }));
   app.use((err, req, res, next) => {
@@ -252,6 +274,13 @@ if (require.main === module) {
           .catch((e) => console.error("E-mail automations failed", e?.code || e?.status || "unknown"));
       const mailTimer = setInterval(runMailAutomations, 30 * 60 * 1000);
       mailTimer.unref?.();
+      // « Avis Google »: jobs finished and paid get their review request, once, on weekdays.
+      const runReviews = async () =>
+        require("./review-routes")
+          .processReviewRequests(pool)
+          .catch((e) => console.error("Review requests failed", e?.code || e?.status || "unknown"));
+      const reviewTimer = setInterval(runReviews, 60 * 60 * 1000);
+      reviewTimer.unref?.();
       // Client replies read from the companies' Gmail inboxes.
       const runInbox = async () =>
         require("./mail-inbox")
