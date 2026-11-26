@@ -944,6 +944,7 @@ function publicRoutes(db) {
 module.exports = {
   routes,
   publicRoutes,
+  publicUrl,
   processEmailAutomations,
   processEmailReminders: processEmailAutomations,
   autoSendIssued,
