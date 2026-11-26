@@ -395,6 +395,16 @@ test("calling out: the mobile number shown, busy lines and refused numbers", asy
   const hung = await until(() => ast.last("DELETE", /^\/channels\/b1$/), "browser told");
   assert.equal(hung.query.reason, "busy");
   assert.equal((await lastCall()).status, "busy");
+  // refused by the operator: the browser is given the same cause (403 for « rejected »)
+  ast.calls.length = 0;
+  ast.emit({ type: "StasisStart", args: ["outbound", "0798887766"], channel: ast.channel("b3", `PJSIP/sgo${ids.lea}-0000000b`) });
+  await until(() => ast.last("POST", /^\/channels$/), "operator called again");
+  const refusedId = ast.lastOriginated();
+  ast.channels.delete(refusedId);
+  ast.emit({ type: "ChannelDestroyed", cause: 21, cause_txt: "Call Rejected", channel: { id: refusedId } });
+  const told = await until(() => ast.last("DELETE", /^\/channels\/b3$/), "browser told why");
+  assert.equal(told.query.reason_code, "21");
+  assert.equal((await lastCall()).status, "failed");
   // a premium number never reaches the operator
   const before = (await db.query("SELECT COUNT(*)::int AS n FROM phone_calls")).rows[0].n;
   ast.calls.length = 0;
