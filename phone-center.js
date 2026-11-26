@@ -367,10 +367,22 @@
       clearTimeout(readyTimer);
       if (phone.session !== session) return;
       const reason = e?.cause;
+      // The code the operator (or the exchange) answered, shown to tell the causes apart.
+      const code = e?.message?.status_code ? ` (code ${e.message.status_code})` : "";
       if (phone.direction === "out" && phone.state === "calling") {
-        const text = { Busy: "Le correspondant est occupé.", Rejected: "Appel refusé.", "Unavailable": "Correspondant injoignable.", "Not Found": "Numéro introuvable.", "No Answer": "Pas de réponse.", "User Denied Media Access": "Le micro est bloqué : autorisez-le dans le navigateur." }[reason];
+        const text = {
+          Busy: "Le correspondant est occupé.",
+          Rejected: "Appel refusé par l’opérateur" + code + ". Vérifiez l’état de l’opérateur dans Réglages.",
+          Unavailable: "Correspondant injoignable" + code + ".",
+          "Not Found": "Numéro introuvable" + code + ".",
+          "Address Incomplete": "Numéro incomplet.",
+          "No Answer": "Pas de réponse.",
+          "Request Timeout": "Pas de réponse.",
+          "User Denied Media Access": "Le micro est bloqué : autorisez-le dans le navigateur.",
+          "SIP Failure Code": "L’appel n’a pas abouti" + code + ".",
+        }[reason];
         if (text) toast(text);
-        else if (reason && reason !== "Canceled" && reason !== "Terminated") toast("L’appel n’a pas abouti (" + reason + ").");
+        else if (reason && reason !== "Canceled" && reason !== "Terminated") toast("L’appel n’a pas abouti (" + reason + code + ").");
       } else if (reason === "User Denied Media Access") toast("Le micro est bloqué : autorisez-le dans le navigateur.");
       phone.session = null;
       phone.state = "";
@@ -394,6 +406,8 @@
     const number = digits(raw);
     if (!number || number.replace(/\D/g, "").length < 3) return toast("Entrez un numéro.");
     if (!phone.ua || !phone.registered) return toast(st.me?.line ? "La ligne n’est pas encore connectée au central." : "Aucune ligne n’est attribuée à votre compte.");
+    if (st.me?.status && st.me.status.operatorSet === false) return toast("Aucun opérateur n’est réglé : Téléphone → Réglages → Opérateur.");
+    if (/^(\+41|0041|0)90[016]/.test(number)) return toast("Les numéros payants (0900, 0901, 0906) ne peuvent pas être appelés depuis l’application.");
     if (phone.session || core()?.hasDirectCall?.()) return toast("Un appel est déjà en cours.");
     phone.dialed = number;
     try {

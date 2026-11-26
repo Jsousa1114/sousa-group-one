@@ -499,14 +499,20 @@ async function onOutbound(db, channel, exten) {
   const operator = await setting(db, "operator");
   const target = dialable(exten, operator || {});
   const refuse = async (reason) => quiet(ari("DELETE", `/channels/${channel.id}`, { reason }));
-  if (!line || !operator?.host) return refuse("congestion");
+  if (!line || !operator?.host) {
+    console.warn("[telephone] appel refusé : " + (line ? "aucun opérateur n’est réglé" : "pas de ligne pour ce compte"));
+    return refuse("congestion");
+  }
   if (!target.allowed) {
     console.warn("[telephone] appel refusé :", target.reason);
-    return refuse("congestion");
+    return refuse(target.number ? "rejected" : "unallocated");
   }
   const now = Date.now();
   const mine = (recent.get(userId) || []).filter((t) => now - t < 10 * 60 * 1000);
-  if (mine.length >= Number(process.env.PHONE_CALLS_PER_10MIN || 30)) return refuse("congestion");
+  if (mine.length >= Number(process.env.PHONE_CALLS_PER_10MIN || 30)) {
+    console.warn("[telephone] appel refusé : trop d’appels en peu de temps");
+    return refuse("congestion");
+  }
   recent.set(userId, [...mine, now]);
   const id = (await db.query("INSERT INTO phone_calls(user_id,direction,number,status) VALUES($1,'out',$2,'ringing') RETURNING id", [userId, target.number])).rows[0].id;
   const call = { key: newKey(), id: Number(id), userId, direction: "out", number: target.number, internal: channel.id, external: null, bridge: null, state: "ringing" };
@@ -534,7 +540,7 @@ async function onOutbound(db, channel, exten) {
 }
 
 // One side left: the other is hung up, the call is written down, the recording summarised.
-async function hangup(db, call, channelId, cause) {
+async function hangup(db, call, channelId, cause, causeText = "") {
   if (call.ending) return;
   const fromCaller = channelId === call.external;
   if (call.state === "ringing" && call.direction === "in" && !fromCaller) {
@@ -548,8 +554,12 @@ async function hangup(db, call, channelId, cause) {
   else if (call.state === "voicemail") status = call.recording ? "voicemail" : "missed";
   else if (call.direction === "in") status = "missed";
   else if (!fromCaller) status = "cancelled";
-  else status = Number(cause) === 17 ? "busy" : [18, 19, 21].includes(Number(cause)) ? "no-answer" : "failed";
-  for (const ch of [call.external, call.internal]) if (ch && ch !== channelId) await quiet(ari("DELETE", `/channels/${ch}`, status === "busy" ? { reason: "busy" } : {}));
+  else status = Number(cause) === 17 ? "busy" : [18, 19].includes(Number(cause)) ? "no-answer" : "failed";
+  // A call refused by the operator: the browser is told why (the same cause, so the same
+  // SIP answer: 403 refused, 404 unknown number, 486 busy…) and the reason is written down.
+  const why = call.direction === "out" && fromCaller && call.state === "ringing" && Number(cause) > 0 ? { reason_code: Number(cause) } : {};
+  if (why.reason_code && status !== "busy") console.warn(`[telephone] appel sortant refusé par l’opérateur : ${causeText || "?"} (cause ${cause})`);
+  for (const ch of [call.external, call.internal]) if (ch && ch !== channelId) await quiet(ari("DELETE", `/channels/${ch}`, status === "busy" ? { reason: "busy" } : why));
   if (call.bridge) await quiet(ari("DELETE", `/bridges/${call.bridge}`));
   await finish(db, call, status);
 }
@@ -597,7 +607,7 @@ async function handle(db, e) {
     if (!call) return;
     if (e.type === "StasisEnd" && call.state === "ringing" && channel.id === call.internal && call.direction === "in") return; // the leg is still ringing elsewhere
     byChannel.delete(channel.id);
-    return hangup(db, call, channel.id, e.cause);
+    return hangup(db, call, channel.id, e.cause, e.cause_txt);
   }
   if (e.type === "PlaybackFinished") {
     const info = playbacks.get(e.playback?.id);

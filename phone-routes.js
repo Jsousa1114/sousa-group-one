@@ -217,7 +217,7 @@ function routes(db) {
       res.json({
         access: true,
         canManage: groupAdmin(req.user),
-        status: T.status(),
+        status: { ...T.status(), operatorSet: !!(await T.setting(db, "operator"))?.host },
         line: line?.enabled
           ? {
               did: line.did || "",
