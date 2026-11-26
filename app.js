@@ -113,15 +113,73 @@ const menus = {
   audit: ["Journal", hr],
   settings: ["Mon compte", Object.keys(roles)],
 };
-// Presentation-only navigation. Existing role and fine-permission checks remain authoritative.
-const navigationGroups = [
-  ["Vue d’ensemble", ["dashboard", "messages", "mailbox", "whatsapp", "phone"]],
-  ["Équipe", ["employees", "planning", "time", "absences"]],
-  ["Activité", ["projects", "clients", "maintenance", "documents"]],
-  ["Finances", ["quotes", "invoices", "payments", "expenses"]],
-  ["Ressources", ["inventory", "tools", "vehicles", "suppliers"]],
-  ["Gestion", ["pro", "companies", "reports", "pilotage", "advanced", "audit", "settings"]],
+// Presentation-only navigation: seven sections instead of a long list; the pages of a section
+// are its tabs. Existing role and fine-permission checks remain authoritative.
+const navSections = [
+  { id: "home", label: "Accueil", icon: "dashboard", pages: ["dashboard"] },
+  { id: "communication", label: "Communication", icon: "messages", pages: ["messages", "mailbox", "whatsapp", "phone"] },
+  { id: "work", label: "Chantiers", icon: "projects", pages: ["projects", "clients", "maintenance", "documents"] },
+  { id: "team", label: "Équipe", icon: "planning", pages: ["planning", "time", "absences", "employees"] },
+  { id: "money", label: "Finances", icon: "invoices", pages: ["quotes", "invoices", "payments", "expenses"] },
+  { id: "stock", label: "Matériel", icon: "inventory", pages: ["inventory", "tools", "vehicles", "suppliers"] },
+  { id: "manage", label: "Gestion", icon: "pro", pages: ["pro", "pilotage", "reports", "companies", "advanced", "audit", "settings"] },
 ];
+const navigationGroups = navSections.map((s) => [s.label, s.pages]);
+// What the person calls things: a client's « Gestion » is their own space.
+function sectionLabel(s) {
+  if (s.id === "manage") return profile?.role === "client" ? "Mon espace" : profile?.role === "employee" ? "Outils" : s.label;
+  return s.label;
+}
+function pageLabel(k) {
+  if (k === "advanced" && profile?.role === "client") return "Mon espace client";
+  if (k === "dashboard") return "Accueil";
+  return menus[k]?.[0] || k;
+}
+function pageAvailable(k) {
+  return (
+    !!menus[k] &&
+    can(menus[k][1]) &&
+    k !== "users" &&
+    (k !== "mailbox" || !!window.SGOWebmail?.hasAccess?.()) &&
+    (k !== "whatsapp" || !!window.SGOWhatsApp?.hasAccess?.()) &&
+    (k !== "phone" || !!window.SGOPhone?.hasAccess?.())
+  );
+}
+function availableSections() {
+  return navSections.map((s) => ({ ...s, pages: s.pages.filter(pageAvailable) })).filter((s) => s.pages.length);
+}
+function pageUnread(k) {
+  if (k === "messages") return Object.values(messageStats || {}).reduce((total, stat) => total + Number(stat?.unread || 0), 0);
+  if (k === "mailbox") return Number(window.SGOWebmail?.unreadTotal?.() || 0);
+  if (k === "whatsapp") return Number(window.SGOWhatsApp?.unreadTotal?.() || 0);
+  if (k === "phone") return Number(window.SGOPhone?.unreadTotal?.() || 0);
+  return 0;
+}
+const unreadBadge = (n) => (n ? `<span class="nav-unread">${n > 99 ? "99+" : n}</span>` : "");
+// The page last opened in each section, to come back to it.
+const lastPageIn = {};
+// Unread counters of the menu, the tabs and the phone bar, without drawing the page again.
+function updateBadges() {
+  for (const el of document.querySelectorAll("[data-section]")) {
+    const s = availableSections().find((x) => x.id === el.dataset.section);
+    const n = s ? s.pages.reduce((t, k) => t + pageUnread(k), 0) : 0;
+    el.querySelector(".nav-unread")?.remove();
+    if (n) el.insertAdjacentHTML("beforeend", unreadBadge(n));
+  }
+  for (const el of document.querySelectorAll(".section-tab[data-page]")) {
+    const n = pageUnread(el.dataset.page);
+    el.querySelector(".nav-unread")?.remove();
+    if (n) el.insertAdjacentHTML("beforeend", unreadBadge(n));
+  }
+}
+// Phone bar: four sections chosen for the role, then « Plus » for the others.
+const BOTTOM_SECTIONS = {
+  client: ["home", "work", "money", "communication"],
+  employee: ["home", "team", "work", "communication"],
+  accounting: ["home", "money", "work", "communication"],
+  hr: ["home", "team", "communication", "work"],
+  default: ["home", "communication", "work", "money"],
+};
 function navigationIcon(key) {
   const paths = {
     dashboard: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
@@ -266,7 +324,15 @@ const name = (k, id) => {
 };
 const btn = (label, action, id = "", kind = "secondary") =>
   `<button type="button" class="btn ${kind}" data-action="${esc(action)}" data-id="${esc(id)}">${esc(label)}</button>`;
-const badge = (s) => `<span class="status neutral">${esc(s)}</span>`;
+// Statuses in colour: done in green, under way in blue, waiting in orange, a problem in red.
+const STATUS_TONE = {
+  ok: ["Payée", "Payé", "Accepté", "Acceptée", "Validée", "Validé", "Approuvée", "Approuvé", "Terminé", "Terminée", "Actif", "Active", "Signé", "Signée", "En service", "Livré", "Livrée", "Encaissé"],
+  info: ["Émise", "Émis", "Envoyé", "Envoyée", "En cours", "Planifié", "Planifiée", "Ouvert", "Ouverte", "Confirmé", "Confirmée"],
+  warning: ["En attente", "Partiellement payée", "Partiel", "À valider", "Proposé", "Proposée", "En pause", "À relancer"],
+  danger: ["En retard", "Refusé", "Refusée", "Annulé", "Annulée", "Rejeté", "Rejetée", "Hors service", "Expiré", "Expirée", "Bloqué", "Bloquée", "Échec"],
+};
+const statusTone = (s) => Object.keys(STATUS_TONE).find((k) => STATUS_TONE[k].includes(String(s ?? "").trim())) || "neutral";
+const badge = (s) => `<span class="status ${statusTone(s)}">${esc(s)}</span>`;
 const kpi = (label, value) =>
   `<article class="card kpi"><p class="muted">${esc(label)}</p><b class="kpi-value">${esc(value)}</b></article>`;
 const cards = (items) =>
@@ -391,7 +457,9 @@ function enhanceContent(root) {
   });
 }
 function heading(title, actions = "") {
-  return `<div class="section-head"><h3>${esc(title)}</h3><div class="actions">${actions}</div></div>`;
+  // The page's name is already the title above: it is kept only for screen readers.
+  const same = typeof page !== "undefined" && (title === menus[page]?.[0] || title === pageLabel(page));
+  return `<div class="section-head${same ? " no-title" : ""}"><h3${same ? ' class="sr-only"' : ""}>${esc(title)}</h3><div class="actions">${actions}</div></div>`;
 }
 function toast(t) {
   $("toast").textContent = t;
@@ -713,11 +781,12 @@ function render() {
     state.companies.find((c) => c.id === activeCompanyId),
   );
   if (!can(menus[page]?.[1] || [])) page = "dashboard";
-  $("title").textContent = menus[page][0];
+  $("title").textContent = pageLabel(page);
   document.body.dataset.view = page;
-  if ($("sectionLabel"))
-    $("sectionLabel").textContent =
-      navigationGroups.find(([, keys]) => keys.includes(page))?.[0] || "Espace de travail";
+  const sections = availableSections();
+  const current = sections.find((s) => s.pages.includes(page));
+  if (current) lastPageIn[current.id] = page;
+  if ($("sectionLabel")) $("sectionLabel").textContent = current ? sectionLabel(current) : "Espace de travail";
   if ($("userInitials"))
     $("userInitials").textContent = profile.name
       .trim()
@@ -727,40 +796,39 @@ function render() {
       .join("");
   $("userName").textContent = profile.name + " · " + roles[profile.role];
   const navScroll = $("nav").scrollTop;
-  $("nav").innerHTML = navigationGroups
-    .map(([group, keys]) => {
-      // « Boîte mail » only appears for people allowed to open at least one Gmail mailbox.
-      const available = keys.filter(
-        (k) =>
-          menus[k] &&
-          can(menus[k][1]) &&
-          k !== "users" &&
-          (k !== "mailbox" || window.SGOWebmail?.hasAccess?.()) &&
-          (k !== "whatsapp" || window.SGOWhatsApp?.hasAccess?.()) &&
-          (k !== "phone" || window.SGOPhone?.hasAccess?.()),
-      );
-      if (!available.length) return "";
-      return `<div class="nav-section"><p class="nav-group">${esc(group)}</p>${available
-        .map((k) => {
-          const label = menus[k][0];
-          const unread =
-            k === "messages"
-              ? Object.values(messageStats || {}).reduce(
-                  (total, stat) => total + Number(stat?.unread || 0),
-                  0,
-                )
-              : k === "mailbox"
-                ? Number(window.SGOWebmail?.unreadTotal?.() || 0)
-                : k === "whatsapp"
-                  ? Number(window.SGOWhatsApp?.unreadTotal?.() || 0)
-                  : k === "phone"
-                    ? Number(window.SGOPhone?.unreadTotal?.() || 0)
-                    : 0;
-          return `<button class="nav-item ${page === k ? "active" : ""}" data-page="${k}" ${page === k ? 'aria-current="page"' : ""}>${navigationIcon(k)}<span>${esc(label)}</span>${unread ? ` <span class="nav-unread">${unread > 99 ? "99+" : unread}</span>` : ""}</button>`;
-        })
-        .join("")}</div>`;
+  $("nav").innerHTML = `<div class="nav-section">${sections
+    .map((sec) => {
+      const n = sec.pages.reduce((t, k) => t + pageUnread(k), 0);
+      const active = current?.id === sec.id;
+      return `<button type="button" class="nav-item nav-sec ${active ? "active" : ""}" data-section="${sec.id}" data-pages="${sec.pages.join(" ")}" ${active ? 'aria-current="page"' : ""}>${navigationIcon(sec.icon)}<span>${esc(sectionLabel(sec))}</span>${unreadBadge(n)}</button>`;
     })
-    .join("");
+    .join("")}</div>`;
+  // The pages of the section, as tabs above the page.
+  const tabs = $("sectionTabs");
+  if (tabs) {
+    const many = current && current.pages.length > 1;
+    tabs.classList.toggle("hidden", !many);
+    tabs.setAttribute("aria-label", current ? "Pages : " + sectionLabel(current) : "Pages");
+    tabs.innerHTML = many
+      ? current.pages.map((k) => `<button type="button" class="section-tab ${k === page ? "active" : ""}" data-page="${k}" ${k === page ? 'aria-current="page"' : ""}>${navigationIcon(k)}<span>${esc(pageLabel(k))}</span>${unreadBadge(pageUnread(k))}</button>`).join("")
+      : "";
+  }
+  const bottom = $("bottomNav");
+  if (bottom) {
+    const wanted = BOTTOM_SECTIONS[profile.role] || BOTTOM_SECTIONS.default;
+    const shown = wanted.map((id) => sections.find((x) => x.id === id)).filter(Boolean).slice(0, 4);
+    bottom.innerHTML =
+      shown
+        .map((sec) => {
+          const n = sec.pages.reduce((t, k) => t + pageUnread(k), 0);
+          const active = current?.id === sec.id;
+          // Short words for the phone bar.
+          const label = sec.id === "communication" ? "Messages" : sectionLabel(sec);
+          return `<button type="button" class="bottom-item ${active ? "active" : ""}" data-section="${sec.id}" ${active ? 'aria-current="page"' : ""} aria-label="${esc(sectionLabel(sec))}">${navigationIcon(sec.icon)}<span>${esc(label)}</span>${unreadBadge(n)}</button>`;
+        })
+        .join("") +
+      `<button type="button" class="bottom-item ${current && !shown.includes(current) ? "active" : ""}" data-action="open-side" aria-label="Toutes les rubriques"><svg class="nav-icon" aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg><span>Plus</span></button>`;
+  }
   $("nav").scrollTop = navScroll;
   $("companyFilter").innerHTML =
     '<option value="">Vue globale</option>' +
@@ -841,50 +909,112 @@ function projectRows(list) {
 function sum(k, field) {
   return visible(k).reduce((n, r) => n + (Number(r[field]) || 0), 0);
 }
+// Home: what to do first (big buttons), what is waiting (a list that opens the right page),
+// and a few numbers that matter. Each role sees its own.
 function dashboard() {
-  const shortcutKeys = ["planning", "projects", "messages", "pro"].filter(
-    (k) => menus[k] && can(menus[k][1]),
-  ).slice(0, 3);
-  const intro = `<section class="workspace-welcome"><div><p class="eyebrow">${esc(new Date().toLocaleDateString("fr-CH", {weekday:"long", day:"numeric", month:"long",timeZone:"Europe/Zurich"}))}</p><h1>Bonjour, ${esc(profile.name.split(" ")[0])}.</h1><p>Voici l’essentiel de votre activité.</p></div><div class="workspace-shortcuts">${shortcutKeys.map(k=>`<button type="button" class="workspace-shortcut" data-shortcut="${k}">${navigationIcon(k)}<span>${esc(menus[k][0])}</span></button>`).join("")}</div></section>`;
-  if (profile.role === "client")
-    return (
-      intro +
-      heading("Mes chantiers") +
-      cards([
-        ["Chantiers", visible("projects").length],
-        ["Factures", visible("invoices").length],
-        [
-          "Solde à payer",
-          money(sum("invoices", "amount") - sum("invoices", "paid")),
-        ],
-      ]) +
-      projectRows(visible("projects"))
-    );
-  if (profile.role === "employee") {
-    const e = find("employees", profile.employee_id);
-    return (
-      intro +
-      cards([
-        ["Heures enregistrées", sum("time", "hours").toFixed(2) + " h"],
-        ["Vacances disponibles", (e?.vacation ?? 0) + " jours"],
-        ["Chantiers affectés", visible("projects").length],
-      ]) +
-      clockView() +
-      projectRows(visible("projects"))
-    );
+  const first = esc(profile.name.split(" ")[0]);
+  const todayIso = today();
+  const startOfMonth = todayIso.slice(0, 8) + "01";
+  const role = profile.role;
+  const has = (k) => pageAvailable(k);
+  const quick = [];
+  const action = (icon, label, attrs) => quick.push({ icon, label, attrs });
+  if (role === "client") {
+    if (has("projects")) action("projects", "Mes chantiers", 'data-shortcut="projects"');
+    if (has("invoices")) action("invoices", "Mes factures", 'data-shortcut="invoices"');
+    if (has("quotes")) action("quotes", "Mes devis", 'data-shortcut="quotes"');
+    if (has("messages")) action("messages", "Écrire un message", 'data-shortcut="messages"');
+  } else {
+    if (can(fin)) action("quotes", "Nouveau devis", 'data-action="new" data-id="quotes"');
+    if (can(fin)) action("invoices", "Nouvelle facture", 'data-action="new" data-id="invoices"');
+    if (can(ops)) action("projects", "Nouveau chantier", 'data-action="new" data-id="projects"');
+    if (can(ops)) action("clients", "Nouveau client", 'data-action="new" data-id="clients"');
+    if (can(ops)) action("planning", "Planifier", 'data-action="new" data-id="planning"');
+    if (role === "employee" && has("planning")) action("planning", "Mon planning", 'data-shortcut="planning"');
+    if (can([...hr, "manager", "employee"]) && has("time")) action("time", "Ajouter des heures", 'data-action="time-add"');
+    if (role === "employee" && has("absences")) action("absences", "Demander une absence", 'data-action="absence-form"');
+    if (has("phone")) action("phone", "Appeler", 'data-shortcut="phone"');
+    if (has("messages")) action("messages", "Messages", 'data-shortcut="messages"');
   }
+  const quickHtml = quick.length
+    ? `<section class="home-quick" aria-label="Actions rapides"><h2 class="home-title">Que voulez-vous faire ?</h2><div class="home-quick-grid">${quick
+        .slice(0, 8)
+        .map((q) => `<button type="button" class="home-action" ${q.attrs}><span class="home-action-icon">${navigationIcon(q.icon)}</span><span>${esc(q.label)}</span></button>`)
+        .join("")}</div></section>`
+    : "";
+
+  // What is waiting, from the data the person may see.
+  const todo = [];
+  const open = (inv) => (Number(inv.amount) || 0) - (Number(inv.paid) || 0) > 0.004 && !["Payée", "Annulée", "Brouillon"].includes(inv.status);
+  if (has("invoices")) {
+    const late = visible("invoices").filter((i) => open(i) && i.due && i.due < todayIso);
+    if (late.length)
+      todo.push({ tone: "danger", icon: "invoices", page: "invoices", text: role === "client" ? `${late.length} facture${late.length > 1 ? "s" : ""} à régler` : `${late.length} facture${late.length > 1 ? "s" : ""} en retard de paiement`, detail: money(late.reduce((t, i) => t + (Number(i.amount) || 0) - (Number(i.paid) || 0), 0)) });
+    const drafts = role === "client" ? [] : visible("invoices").filter((i) => i.status === "Brouillon");
+    if (drafts.length) todo.push({ tone: "info", icon: "invoices", page: "invoices", text: `${drafts.length} facture${drafts.length > 1 ? "s" : ""} en brouillon à émettre` });
+  }
+  if (has("quotes")) {
+    const waiting = visible("quotes").filter((q) => q.status === "Envoyé");
+    if (waiting.length) todo.push({ tone: "warn", icon: "quotes", page: "quotes", text: role === "client" ? `${waiting.length} devis à accepter` : `${waiting.length} devis en attente de réponse`, detail: money(waiting.reduce((t, q) => t + (Number(q.amount) || 0), 0)) });
+  }
+  if (has("time") && can([...hr, "manager"])) {
+    const pending = visible("time").filter((t) => t.status === "En attente");
+    if (pending.length) todo.push({ tone: "warn", icon: "time", page: "time", text: `${pending.length} saisie${pending.length > 1 ? "s" : ""} d’heures à valider` });
+  }
+  if (has("absences") && can([...hr, "manager"])) {
+    const pending = visible("absences").filter((a) => a.status === "En attente");
+    if (pending.length) todo.push({ tone: "warn", icon: "absences", page: "absences", text: `${pending.length} demande${pending.length > 1 ? "s" : ""} d’absence à approuver` });
+  }
+  if (has("inventory") && role !== "employee") {
+    const low = visible("inventory").filter((x) => Number(x.min) > 0 && Number(x.stock) <= Number(x.min));
+    if (low.length) todo.push({ tone: "info", icon: "inventory", page: "inventory", text: `${low.length} article${low.length > 1 ? "s" : ""} à recommander`, detail: low.slice(0, 2).map((x) => x.name).join(", ") });
+  }
+  if (has("planning") && role !== "client") {
+    const mine = visible("planning").filter((x) => x.date === todayIso && (role !== "employee" || same(x.employeeId, profile.employee_id)));
+    if (mine.length)
+      todo.push({ tone: "ok", icon: "planning", page: "planning", text: role === "employee" ? `Aujourd’hui : ${mine.map((x) => `${x.start}–${x.end} ${name("projects", x.project)}`).join(" · ")}` : `${mine.length} intervention${mine.length > 1 ? "s" : ""} prévue${mine.length > 1 ? "s" : ""} aujourd’hui` });
+  }
+  const todoHtml = `<section class="card home-todo" aria-label="À faire"><h2 class="home-title">À faire</h2>${
+    todo.length
+      ? `<ul class="home-todo-list">${todo
+          .map((t) => `<li><button type="button" class="home-todo-item tone-${t.tone}" data-shortcut="${t.page}"><span class="home-todo-icon">${navigationIcon(t.icon)}</span><span class="home-todo-text"><b>${esc(t.text)}</b>${t.detail ? `<small>${esc(t.detail)}</small>` : ""}</span><span class="home-todo-go" aria-hidden="true">›</span></button></li>`)
+          .join("")}</ul>`
+      : '<p class="home-empty">Rien n’attend pour l’instant.</p>'
+  }</section>`;
+
+  // A few numbers that matter.
+  const figures = [];
+  const openBalance = visible("invoices").filter(open).reduce((t, i) => t + (Number(i.amount) || 0) - (Number(i.paid) || 0), 0);
+  const running = visible("projects").filter((p) => p.status === "En cours").length;
+  if (role === "client") {
+    figures.push(["Mes chantiers", visible("projects").length]);
+    figures.push(["Solde à payer", money(openBalance)]);
+  } else if (role === "employee") {
+    const e = find("employees", profile.employee_id);
+    const monthHours = visible("time").filter((t) => (t.date || "") >= startOfMonth && same(t.employeeId, profile.employee_id)).reduce((t, x) => t + (Number(x.hours) || 0), 0);
+    figures.push(["Mes heures ce mois", monthHours.toFixed(1) + " h"]);
+    figures.push(["Vacances restantes", (e?.vacation ?? 0) + " jours"]);
+    figures.push(["Mes chantiers", visible("projects").length]);
+  } else {
+    if (can(fin)) figures.push(["À encaisser", money(openBalance)]);
+    if (can(fin)) figures.push(["Facturé ce mois", money(visible("invoices").filter((i) => (i.date || "") >= startOfMonth && i.status !== "Brouillon").reduce((t, i) => t + (Number(i.amount) || 0), 0))]);
+    figures.push(["Chantiers en cours", running]);
+    if (!can(fin) && has("time")) figures.push(["Heures ce mois", visible("time").filter((t) => (t.date || "") >= startOfMonth).reduce((t, x) => t + (Number(x.hours) || 0), 0).toFixed(1) + " h"]);
+  }
+  const figuresHtml = `<section class="home-figures" aria-label="Chiffres">${figures.map(([label, value]) => `<article class="card home-figure"><span>${esc(label)}</span><b>${esc(value)}</b></article>`).join("")}</section>`;
+
+  const intro = `<section class="workspace-welcome"><div><p class="eyebrow">${esc(new Date().toLocaleDateString("fr-CH", { weekday: "long", day: "numeric", month: "long", timeZone: "Europe/Zurich" }))}</p><h1>Bonjour, ${first}.</h1></div></section>`;
+  const projectsHtml =
+    has("projects") && visible("projects").length
+      ? heading(role === "client" ? "Mes chantiers" : role === "employee" ? "Mes chantiers" : "Chantiers en cours") + projectRows(visible("projects").filter((p) => role === "client" || p.status !== "Terminé").slice(0, 6))
+      : "";
   return (
     intro +
-    cards([
-      ["Salariés visibles", visible("employees").length],
-      [
-        "Chantiers ouverts",
-        visible("projects").filter((p) => p.status !== "Terminé").length,
-      ],
-      ["Encaissements enregistrés", money(sum("payments", "amount"))],
-    ]) +
-    heading("Chantiers") +
-    projectRows(visible("projects"))
+    quickHtml +
+    `<div class="home-columns">${todoHtml}${figuresHtml}</div>` +
+    (role === "employee" ? clockView() : "") +
+    projectsHtml +
+    '<div id="homeMore" class="home-more"></div>'
   );
 }
 function clockView() {
@@ -3173,9 +3303,15 @@ document.addEventListener("change", (e) => {
   }
 });
 document.addEventListener("click", async (e) => {
-  const nav = e.target.closest("[data-page], [data-shortcut]");
+  const section = e.target.closest("[data-section]");
+  const nav = section || e.target.closest("[data-page], [data-shortcut]");
   if (nav) {
-    const nextPage = nav.dataset.page || nav.dataset.shortcut;
+    let nextPage = nav.dataset.page || nav.dataset.shortcut;
+    if (section) {
+      const sec = availableSections().find((x) => x.id === section.dataset.section);
+      if (!sec) return;
+      nextPage = sec.pages.includes(lastPageIn[sec.id]) ? lastPageIn[sec.id] : sec.pages[0];
+    }
     if (page === "messages" && nextPage !== "messages") cancelChatRecording();
     page = nextPage;
     if (page === "messages") mobileChatOpen = false;
@@ -4109,6 +4245,7 @@ window.addEventListener("online", () => {
     .finally(() => refresh().catch(() => {}));
 });
 window.SGOChatCore = {
+  updateBadges,
   api,
   mutate,
   command,

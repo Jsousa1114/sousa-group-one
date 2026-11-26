@@ -119,6 +119,7 @@ function createApp(db = pool) {
     "whatsapp.css",
     "phone-center.js",
     "phone.css",
+    "ui-simple.css",
     "supplier-suite.js",
     "supplier.css",
     "styles.css",

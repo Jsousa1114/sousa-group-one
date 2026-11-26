@@ -1,4 +1,5 @@
 "use strict";
+const { openPage, offered } = require("./browser-nav.cjs");
 const assert = require("node:assert/strict");
 const { requireProductionUrl } = require("./production-url.cjs");
 
@@ -30,10 +31,13 @@ const password = process.env.E2E_ADMIN_PASSWORD || "";
       await page.locator("#password").fill(password);
       await page.locator('#loginForm button[type="submit"]').click();
       await page.locator("#app").waitFor({ state: "visible", timeout: 15000 });
+      // The menu shows sections (the pages are tabs); an older deployment still lists pages.
+      const sectioned = (await page.locator("#nav [data-pages]").count()) > 0;
       for (const key of ["dashboard", "projects", "clients", "messages", "settings"]) {
         const nav = page.locator('[data-page="' + key + '"]');
-        if (await nav.count()) {
-          await nav.click();
+        if (sectioned ? await offered(page, key) : await nav.count()) {
+          if (sectioned) await openPage(page, key);
+          else await nav.click();
           await page.waitForTimeout(120);
           assert.ok((await page.locator("#content").innerText()).trim().length > 0);
         }

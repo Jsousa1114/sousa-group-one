@@ -1,5 +1,6 @@
 "use strict";
 process.env.JWT_SECRET="p2-browser-secret-2026-long-enough";
+const { openPage } = require("./browser-nav.cjs");
 const fs=require("node:fs");
 const assert=require("node:assert/strict");
 const bcrypt=require("bcryptjs");
@@ -61,11 +62,8 @@ async function login(page,email){
   await page.locator('#loginForm button[type="submit"]').click();
   await page.locator("#app").waitFor({state:"visible"});
 }
-async function openAdvanced(page,mobile=false){
-  if(mobile) await page.locator('[data-action="open-side"]').click();
-  const nav=page.locator('[data-page="advanced"]');
-  await nav.waitFor({state:"visible"});
-  await nav.click();
+async function openAdvanced(page){
+  await openPage(page,"advanced");
   await page.locator(".p2-center").waitFor({timeout:10000});
 }
 async function noOverflow(page,label){

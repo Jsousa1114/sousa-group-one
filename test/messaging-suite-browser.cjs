@@ -1,6 +1,7 @@
 // Messaging suite full regression after script-loader integration.
 "use strict";
 process.env.JWT_SECRET = "suite-browser-secret-2026-with-very-long-value";
+const { openPage } = require("./browser-nav.cjs");
 const assert = require("node:assert/strict");
 const bcrypt = require("bcryptjs");
 const { chromium } = require("playwright");
@@ -98,11 +99,8 @@ async function login(page, email) {
   await page.locator('#loginForm button[type="submit"]').click();
   await page.locator("#app").waitFor({ state: "visible" });
 }
-async function openMessages(page, mobile = false) {
-  if (mobile) {
-    await page.locator('[data-action="open-side"]').click();
-    await page.locator('[data-page="messages"]').click();
-  } else await page.locator('[data-page="messages"]').click();
+async function openMessages(page) {
+  await openPage(page, "messages");
   await page.locator(".whatsapp-chat").waitFor();
 }
 async function waitKeys() {

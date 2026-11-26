@@ -5,11 +5,11 @@
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <meta name="theme-color" content="#111111" />
     <title>Sousa Group One</title>
-    <link rel="stylesheet" href="styles.css?v=20261127-ph1" />
-    <link rel="stylesheet" href="p1.css?v=20261127-ph1" />
-    <link rel="stylesheet" href="p2.css?v=20261127-ph1" />
-    <link rel="stylesheet" href="pro.css?v=20261127-ph1" />
-    <link rel="stylesheet" href="visual-refresh.css?v=20261127-ph1" />
+    <link rel="stylesheet" href="styles.css?v=20261127-ux1" />
+    <link rel="stylesheet" href="p1.css?v=20261127-ux1" />
+    <link rel="stylesheet" href="p2.css?v=20261127-ux1" />
+    <link rel="stylesheet" href="pro.css?v=20261127-ux1" />
+    <link rel="stylesheet" href="visual-refresh.css?v=20261127-ux1" />
     <link
       rel="icon"
       type="image/png"
@@ -21,27 +21,28 @@
       href="/assets/logos/group.png?v=group-20260926"
     />
     <link rel="manifest" href="manifest.webmanifest?v=group-20260926" />
-    <script src="finance.js?v=20261127-ph1" defer></script>
-    <script src="app.js?v=20261127-ph1" defer></script>
-    <script src="messaging-crypto.js?v=20261127-ph1" defer></script>
-    <script src="messaging-suite.js?v=20261127-ph1" defer></script>
-    <script src="account-center.js?v=20261127-ph1" defer></script>
-    <script src="passkeys.js?v=20261127-ph1" defer></script>
-    <script src="p2-runtime.js?v=20261127-ph1" defer></script>
-    <script src="p2-center.js?v=20261127-ph1" defer></script>
-    <script src="p3-center.js?v=20261127-ph1" defer></script>
-    <script src="operations-center.js?v=20261127-ph1" defer></script>
-    <script src="p1-suite.js?v=20261127-ph1" defer></script>
-    <link rel="stylesheet" href="supplier.css?v=20261127-ph1">
-    <script src="supplier-suite.js?v=20261127-ph1" defer></script>
-    <script src="pro-suite.js?v=20261127-ph1" defer></script>
-    <script src="mail-center.js?v=20261127-ph1" defer></script>
-    <link rel="stylesheet" href="webmail.css?v=20261127-ph1">
-    <script src="webmail-center.js?v=20261127-ph1" defer></script>
-    <link rel="stylesheet" href="whatsapp.css?v=20261127-ph1">
-    <script src="whatsapp-center.js?v=20261127-ph1" defer></script>
-    <link rel="stylesheet" href="phone.css?v=20261127-ph1">
-    <script src="phone-center.js?v=20261127-ph1" defer></script>
+    <script src="finance.js?v=20261127-ux1" defer></script>
+    <script src="app.js?v=20261127-ux1" defer></script>
+    <script src="messaging-crypto.js?v=20261127-ux1" defer></script>
+    <script src="messaging-suite.js?v=20261127-ux1" defer></script>
+    <script src="account-center.js?v=20261127-ux1" defer></script>
+    <script src="passkeys.js?v=20261127-ux1" defer></script>
+    <script src="p2-runtime.js?v=20261127-ux1" defer></script>
+    <script src="p2-center.js?v=20261127-ux1" defer></script>
+    <script src="p3-center.js?v=20261127-ux1" defer></script>
+    <script src="operations-center.js?v=20261127-ux1" defer></script>
+    <script src="p1-suite.js?v=20261127-ux1" defer></script>
+    <link rel="stylesheet" href="supplier.css?v=20261127-ux1">
+    <script src="supplier-suite.js?v=20261127-ux1" defer></script>
+    <script src="pro-suite.js?v=20261127-ux1" defer></script>
+    <script src="mail-center.js?v=20261127-ux1" defer></script>
+    <link rel="stylesheet" href="webmail.css?v=20261127-ux1">
+    <script src="webmail-center.js?v=20261127-ux1" defer></script>
+    <link rel="stylesheet" href="whatsapp.css?v=20261127-ux1">
+    <script src="whatsapp-center.js?v=20261127-ux1" defer></script>
+    <link rel="stylesheet" href="phone.css?v=20261127-ux1">
+    <link rel="stylesheet" href="ui-simple.css?v=20261127-ux1">
+    <script src="phone-center.js?v=20261127-ux1" defer></script>
   </head>
   <body data-brand="group">
     <a class="skip-link" href="#content">Aller au contenu</a>
@@ -178,8 +179,7 @@
             </div>
           </div>
           <div class="top-actions">
-            <button class="icon" data-action="refresh" aria-label="Actualiser" title="Actualiser"><svg class="ui-icon" aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg></button
-            ><button
+            <button
               class="icon"
               data-action="theme"
               aria-label="Changer le thème"
@@ -188,9 +188,11 @@
             ><button type="button" class="profile-button" data-shortcut="settings" aria-label="Ouvrir mon compte"><span class="profile-monogram" id="userInitials" aria-hidden="true"></span><span id="userName"></span></button>
           </div>
         </header>
+        <nav id="sectionTabs" class="section-tabs hidden" aria-label="Pages"></nav>
         <div id="notice" role="status" class="notice hidden"></div>
         <section id="content" class="content" tabindex="-1" aria-labelledby="title"></section>
       </main>
+      <nav id="bottomNav" class="bottom-nav" aria-label="Navigation rapide"></nav>
     </div>
     <div id="toast" role="status" class="toast hidden"></div>
     <div id="modalWrap" class="modal-wrap hidden">

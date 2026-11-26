@@ -1638,7 +1638,11 @@
     if (isClient() || core().getPage?.() !== "dashboard") return;
     const welcome = document.querySelector("#content .workspace-welcome");
     if (!welcome || document.getElementById("aiBriefing")) return;
-    welcome.insertAdjacentHTML("afterend", '<section id="aiBriefing" class="card ai-briefing" aria-live="polite" aria-label="Point du jour"></section>');
+    // On the home page it comes after the buttons and « À faire », which it sums up.
+    const slot = document.querySelector("#content #homeMore");
+    const card = '<section id="aiBriefing" class="card ai-briefing" aria-live="polite" aria-label="Point du jour"></section>';
+    if (slot) slot.insertAdjacentHTML("afterbegin", card);
+    else welcome.insertAdjacentHTML("afterend", card);
     renderBriefing();
     if (!briefing || briefing.loadedFor !== localDay()) loadBriefing();
   }

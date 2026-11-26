@@ -428,9 +428,12 @@
   async function dashboardEnhance() {
     if (core()?.getPage?.() !== "dashboard") return;
     const content = document.getElementById("content");
-    if (!content || content.querySelector(".pro-action-dashboard")) return;
+    // The home page has its own « À faire » list: this block would repeat it.
+    if (!content || content.querySelector(".pro-action-dashboard") || content.querySelector(".home-todo")) return;
     try {
       const out = await loadDashboard();
+      // Another drawing of the page may have added it meanwhile.
+      if (content.querySelector(".pro-action-dashboard") || !content.isConnected) return;
       const a = out.actions || {};
       const role = profile()?.role;
       // Singular for 0 and 1, plural above, as in French; highlighted when something needs attention.

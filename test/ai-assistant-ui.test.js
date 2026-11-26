@@ -52,8 +52,22 @@ async function setup(role = "admin", options = {}) {
   for (let i = 0; i < 5; i++) await flush();
   return { w, d: w.document, calls, close: () => w.close() };
 }
+// The menu shows seven sections; the pages of the open section are its tabs.
+const SECTION_OF = {
+  dashboard: "home", messages: "communication", projects: "work", clients: "work", documents: "work", maintenance: "work",
+  planning: "team", time: "team", absences: "team", employees: "team",
+  quotes: "money", invoices: "money", payments: "money", expenses: "money",
+  inventory: "stock", tools: "stock", vehicles: "stock", suppliers: "stock",
+  pro: "manage", pilotage: "manage", reports: "manage", companies: "manage", advanced: "manage", audit: "manage", settings: "manage",
+};
 const click = (h, selector) => {
-  const el = h.d.querySelector(selector);
+  let el = h.d.querySelector(selector);
+  const m = !el && selector.match(/^\[data-page="([^"]+)"\]$/);
+  if (m) {
+    h.d.querySelector(`#nav [data-section="${SECTION_OF[m[1]]}"]`)?.click();
+    el = h.d.querySelector(selector);
+    if (!el && h.d.body.dataset.view === m[1]) return;
+  }
   assert.ok(el, "missing " + selector);
   el.click();
 };

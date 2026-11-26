@@ -1,5 +1,6 @@
 "use strict";
 process.env.JWT_SECRET = "account-browser-test-secret-2026-long-enough-value";
+const { openPage } = require("./browser-nav.cjs");
 const assert = require("node:assert/strict");
 const bcrypt = require("bcryptjs");
 const { chromium } = require("playwright");
@@ -44,11 +45,8 @@ async function login(page) {
   await page.locator('#loginForm button[type="submit"]').click();
   await page.locator("#app").waitFor({ state:"visible" });
 }
-async function openAccount(page, mobile=false) {
-  if (mobile) {
-    await page.locator('[data-action="open-side"]').click();
-  }
-  await page.locator('[data-page="settings"]').click();
+async function openAccount(page) {
+  await openPage(page, "settings");
   await page.locator(".account-profile-card").waitFor({ timeout:10000 });
 }
 async function noOverflow(page,label) {

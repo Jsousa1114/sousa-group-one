@@ -34,6 +34,8 @@ on:
       - domain.js
       - finance.js
       - test/full-app-browser.cjs
+      - test/browser-nav.cjs
+      - ui-simple.css
       - .github/workflows/full-app-browser.yml
 
 permissions:
