@@ -159,6 +159,17 @@ test("the exchange's settings: operator, lines and relay written as Asterisk fil
   const noRegistration = C.files({ ariPassword: "x", operator: { host: "10.0.0.5", username: "u", password: "p", register: false }, lines: [] });
   assert.doesNotMatch(noRegistration["pjsip.conf"], /type = registration/);
   assert.equal(C.relayHost(["turns:a.b:443?transport=tcp"]), "", "TLS-only relays are for the browsers");
+  // Swisscom « Téléphonie IP locale »: the Internet-Box is the server, its device is the sender.
+  const box = C.pjsip({ operator: { host: "192.168.1.1", port: 5060, username: "225", authUsername: "sousa-group-one", password: "p" }, lines: [] });
+  assert.match(box, /^from_user = 225$/m);
+  assert.match(box, /^username = sousa-group-one$/m);
+  assert.match(box, /^client_uri = sip:225@192\.168\.1\.1$/m);
+  // Swisscom « SIP Credentials »: through the outbound proxy.
+  const credentials = C.pjsip({ operator: { host: "voip.swisscom.ch", username: "u", password: "p", outboundProxy: "fs1.voip.swisscom.ch" }, lines: [] });
+  assert.equal((credentials.match(/^outbound_proxy = sip:fs1\.voip\.swisscom\.ch\\;lr$/gm) || []).length, 3, "registration, address and calls");
+  assert.match(credentials, /^match = fs1\.voip\.swisscom\.ch$/m);
+  assert.doesNotMatch(credentials, /^from_user/m, "the person's mobile can be shown");
+  assert.match(C.manager({ amiPassword: "m" }), /^permit = 172\.16\.0\.0\/255\.240\.0\.0$/m);
 });
 
 test("numbers: Swiss habits, display, what may be dialled", () => {
@@ -181,9 +192,18 @@ test("only group administrators set the phone; clients never reach it", async ()
   assert.equal((await call("admin", "marc")).status, 403);
   assert.equal((await call("admin/operator", "lea", { host: "sip.x.ch", username: "u" }, "PUT")).status, 403);
   assert.equal((await call("admin/operator", "admin", { host: "sip x;y", username: "u" }, "PUT")).status, 400);
+  const spaced = await call("admin/operator", "admin", { host: "192.168.1.1", username: "Swisscom jardiniere" }, "PUT");
+  assert.equal(spaced.status, 400, "a name with a space would break the exchange's settings");
+  assert.match(spaced.data.error, /ni espace/);
+  assert.equal((await call("admin/operator", "admin", { host: "voip.swisscom.ch", username: "u", outboundProxy: "fs1 voip" }, "PUT")).status, 400);
   assert.equal((await call("admin/operator", "admin", { host: "127.0.0.1", port: 5090, username: "sgotest", password: "operator-secret" }, "PUT")).status, 200);
   const admin = (await call("admin", "admin")).data;
   assert.equal(admin.operator.hasPassword, true);
+  assert.equal(admin.operator.dialFormat, "+");
+  assert.equal((await call("admin/operator", "admin", { host: "192.168.1.1", username: "225", authUsername: "sousa-group-one" }, "PUT")).status, 200);
+  assert.equal((await call("admin", "admin")).data.operator.dialFormat, "national", "numbers dialled the Swiss way through the Internet-Box");
+  assert.equal((await call("admin/operator", "admin", { host: "127.0.0.1", port: 5090, username: "sgotest", dialFormat: "+" }, "PUT")).status, 200);
+  assert.ok("registration" in admin.status);
   assert.equal(JSON.stringify(admin).includes("operator-secret"), false, "the password never comes back");
   assert.equal((await call("admin/operator", "admin", { host: "127.0.0.1", port: 5090, username: "sgotest" }, "PUT")).status, 200);
   assert.match(fs.readFileSync(path.join(TEL, "etc", "pjsip.conf"), "utf8"), /password = operator-secret/, "kept when left empty");

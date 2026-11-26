@@ -48,6 +48,28 @@
     "client.create": "Nouveau client",
     callback: "Rappeler",
   };
+  // The operator connection, as the exchange reports it.
+  const REGISTRATION = {
+    registered: ["on", "Opérateur : connecté, les appels peuvent arriver"],
+    rejected: ["off", "Opérateur : identifiant ou mot de passe refusé"],
+    trying: ["off", "Opérateur : pas de réponse pour l’instant (serveur, identifiant ou réseau ?)"],
+    "not-registering": ["on", "Opérateur : sans enregistrement (réglage avancé)"],
+    unknown: ["off", "Opérateur : état inconnu"],
+  };
+  const KIND_HINT = {
+    box: "Dans l’Internet-Box (192.168.1.1 → Téléphonie → Téléphonie IP locale), ajoutez un accès : l’identifiant SIP est son numéro interne (ex. 225), l’identifiant d’authentification est le nom de connexion choisi, sans espace. Les appels partent avec votre numéro fixe.",
+    credentials: "Identifiants affichés dans My Swisscom → SIP Credentials. Ils fonctionnent depuis n’importe où, avec le proxy sortant de Swisscom.",
+    other: "Les informations données par l’opérateur pour un « SIP trunk » ou « compte SIP » compatible Asterisk.",
+  };
+  const KIND_PRESET = {
+    box: { host: "192.168.1.1", port: "5060", outboundProxy: "", dialFormat: "national" },
+    credentials: { host: "voip.swisscom.ch", port: "", outboundProxy: "fs1.voip.swisscom.ch", dialFormat: "national" },
+  };
+  function accountKind(o) {
+    if (/^192\.168\.|^10\./.test(o.host || "")) return "box";
+    if (/voip\.swisscom\.ch$/i.test(o.host || "")) return "credentials";
+    return o.host ? "other" : "box";
+  }
   const FILTERS = [
     ["all", "Tous"],
     ["missed", "Manqués"],
@@ -913,24 +935,33 @@
       return toast(error.message);
     }
     st.admin = a;
-    const o = a.operator;
+    // Nothing set yet: the Internet-Box values are proposed (Swisscom at the office).
+    const o = a.operator.host ? a.operator : { ...a.operator, ...KIND_PRESET.box };
     const s = a.status || {};
     const lineUsers = new Set(a.lines.map((l) => l.userId));
     core().modal(
       "Réglages du téléphone",
       `<div class="ph-modal ph-admin">
-        <p class="ph-state ${s.connected ? "on" : "off"}">${ic(s.connected ? "check" : "alert")}<span>${s.connected ? `Central téléphonique connecté${s.operator === "online" ? " · opérateur joignable" : s.operator === "offline" ? " · opérateur injoignable" : ""}` : "Central téléphonique injoignable (installé avec la mise à jour du serveur)"}</span></p>
+        <p class="ph-state ${s.connected ? "on" : "off"}">${ic(s.connected ? "check" : "alert")}<span>${s.connected ? "Central téléphonique connecté" : "Central téléphonique injoignable (installé avec la mise à jour du serveur)"}</span></p>
+        ${s.connected && a.operator.host ? `<p class="ph-state ${REGISTRATION[s.registration]?.[0] || "off"}">${ic(REGISTRATION[s.registration]?.[0] === "on" ? "check" : "alert")}<span>${esc(REGISTRATION[s.registration]?.[1] || "État de l’opérateur inconnu")}</span></p>` : ""}
         <section>
           <h3>1. Opérateur suisse (compte SIP)</h3>
           <p class="ph-hint">Les informations données par l’opérateur pour un « SIP trunk » ou « compte SIP » compatible Asterisk. Demandez aussi l’option <b>CLIP no screening</b> pour afficher le mobile de chacun.</p>
           <form id="phOperator" class="ph-form ph-grid">
+            <label class="span-2">Type de compte<select name="kind" data-ph-kind>
+              <option value="box"${accountKind(o) === "box" ? " selected" : ""}>Swisscom Internet-Box (téléphonie IP locale)</option>
+              <option value="credentials"${accountKind(o) === "credentials" ? " selected" : ""}>Swisscom SIP Credentials (My Swisscom)</option>
+              <option value="other"${accountKind(o) === "other" ? " selected" : ""}>Autre opérateur (compte SIP)</option>
+            </select></label>
+            <p class="ph-hint span-2" id="phKindHint">${KIND_HINT[accountKind(o)]}</p>
             <label>Serveur SIP<input name="host" value="${esc(o.host)}" placeholder="sip.operateur.ch"></label>
             <label>Port<input name="port" inputmode="numeric" value="${esc(o.port)}" placeholder="5060"></label>
-            <label>Identifiant SIP<input name="username" value="${esc(o.username)}" autocomplete="off"></label>
-            <label>Mot de passe SIP<input name="password" type="password" autocomplete="new-password" placeholder="${o.hasPassword ? "•••••••• (inchangé)" : ""}"></label>
+            <label>Identifiant SIP (nom d’utilisateur)<input name="username" value="${esc(o.username)}" autocomplete="off" placeholder="ex. 225"></label>
+            <label>Identifiant d’authentification (si différent)<input name="authUsername" value="${esc(o.authUsername)}" autocomplete="off" placeholder="ex. sousa-group-one"></label>
+            <label class="span-2">Mot de passe SIP<input name="password" type="password" autocomplete="new-password" placeholder="${o.hasPassword ? "•••••••• (inchangé)" : ""}"></label>
             <details class="span-2"><summary>Options avancées</summary>
               <div class="ph-grid">
-                <label>Identifiant d’authentification (si différent)<input name="authUsername" value="${esc(o.authUsername)}" autocomplete="off"></label>
+                <label>Proxy sortant<input name="outboundProxy" value="${esc(o.outboundProxy)}" autocomplete="off" placeholder="fs1.voip.swisscom.ch"></label>
                 <label>« From » imposé par l’opérateur<input name="fromUser" value="${esc(o.fromUser)}" autocomplete="off"></label>
                 <label>Format des numéros composés<select name="dialFormat"><option value="+"${o.dialFormat === "+" ? " selected" : ""}>+41 79…</option><option value="00"${o.dialFormat === "00" ? " selected" : ""}>0041 79…</option><option value="national"${o.dialFormat === "national" ? " selected" : ""}>079…</option></select></label>
                 <label class="ph-check"><input type="checkbox" name="register"${o.register ? " checked" : ""}><span>Enregistrement auprès de l’opérateur</span></label>
@@ -1278,6 +1309,15 @@
     }
   });
   document.addEventListener("change", async (event) => {
+    if (event.target.matches?.("[data-ph-kind]")) {
+      const form = event.target.form;
+      const kind = event.target.value;
+      const hint = document.getElementById("phKindHint");
+      if (hint) hint.textContent = KIND_HINT[kind] || "";
+      for (const [name, value] of Object.entries(KIND_PRESET[kind] || {})) if (form[name]) form[name].value = value;
+      if (kind !== "other" && form.querySelector("details")) form.querySelector("details").open = kind === "credentials";
+      return;
+    }
     const target = event.target.dataset?.phFile;
     if (target && event.target.files?.[0]) await preview(target, event.target.files[0]);
     if (event.target.name === "encrypted" && event.target.form?.id === "phSmsSetup") document.getElementById("phPassphrase")?.toggleAttribute("hidden", !event.target.checked);
@@ -1293,7 +1333,7 @@
     try {
       const f = Object.fromEntries(new FormData(form));
       if (form.id === "phOperator") {
-        await call("PUT", "admin/operator", { host: f.host, port: f.port, username: f.username, password: f.password, authUsername: f.authUsername, fromUser: f.fromUser, dialFormat: f.dialFormat, register: !!form.register.checked, allowWorld: !!form.allowWorld.checked });
+        await call("PUT", "admin/operator", { host: f.host, port: f.port, username: f.username, password: f.password, authUsername: f.authUsername, fromUser: f.fromUser, outboundProxy: f.outboundProxy, dialFormat: f.dialFormat, register: !!form.register.checked, allowWorld: !!form.allowWorld.checked });
         toast("Opérateur enregistré.");
         return openAdmin();
       }

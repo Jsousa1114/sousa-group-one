@@ -21,7 +21,16 @@ enabled = yes
 bindaddr = $BIND
 bindport = ${ASTERISK_HTTP_PORT:-8188}
 CONF
-chown 1000:1000 /etc/asterisk/http.conf
+# The manager interface, same address: the application reads the operator connection state.
+cat > /etc/asterisk/manager.conf <<CONF
+[general]
+enabled = yes
+bindaddr = $BIND
+port = ${ASTERISK_AMI_PORT:-5038}
+displayconnects = no
+#tryinclude sgo/manager.conf
+CONF
+chown 1000:1000 /etc/asterisk/http.conf /etc/asterisk/manager.conf
 
 i=0
 while [ ! -f /sgo/etc/ready ]; do
