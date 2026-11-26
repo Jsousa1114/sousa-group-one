@@ -1,5 +1,6 @@
 "use strict";
 process.env.JWT_SECRET="full-app-audit-secret-2026-long-enough";
+const { openPage, offered } = require("./browser-nav.cjs");
 const assert=require("node:assert/strict");
 const bcrypt=require("bcryptjs");
 const {chromium}=require("playwright");
@@ -71,15 +72,7 @@ async function noOverflow(page,label){
 }
 async function visitAll(page, expectedPages, mobile=false){
   for(const key of expectedPages){
-    if(mobile){
-      const side=page.locator("#sidebar");
-      const isOpen=await side.evaluate(el=>el.classList.contains("open")).catch(()=>false);
-      if(!isOpen)
-        await page.locator('[data-action="open-side"]').click();
-    }
-    const nav=page.locator('[data-page="'+key+'"]');
-    await nav.waitFor({state:"visible",timeout:5000});
-    await nav.click();
+    await openPage(page,key);
     await page.waitForTimeout(80);
     assert.ok((await page.locator("#content").innerText()).trim().length>0,key+" empty");
     if(key==="settings") await page.locator(".account-profile-card").waitFor({timeout:10000});
@@ -95,7 +88,7 @@ async function visitAll(page, expectedPages, mobile=false){
     await login(admin.page,"audit-admin@test.invalid");
     const adminPages=["dashboard","companies","employees","time","planning","absences","projects","clients","quotes","invoices","payments","expenses","inventory","suppliers","vehicles","tools","maintenance","documents","messages","reports","pilotage","audit","settings"];
     await visitAll(admin.page,adminPages,false);
-    await admin.page.locator('[data-page="suppliers"]').click();
+    await openPage(admin.page,"suppliers");
     await admin.page.locator('.supplier-vendor').first().waitFor();
     assert.equal(await admin.page.locator('.supplier-vendor').count(),3);
     await admin.page.locator('#supplierCompany').selectOption('home');
@@ -120,13 +113,13 @@ async function visitAll(page, expectedPages, mobile=false){
     await noOverflow(admin.page,'mobile fournisseurs avec tarifs');
     await admin.page.setViewportSize({width:1440,height:900});
 
-    await admin.page.locator('[data-page="projects"]').click();
+    await openPage(admin.page,"projects");
     await admin.page.locator('[data-action="project"]').first().click();
     await admin.page.locator("#modalWrap:not(.hidden)").waitFor();
     assert.match(await admin.page.locator("#modalWrap").innerText(),/Chantier audit/);
     await admin.page.locator('[data-action="close-modal"]').click();
 
-    await admin.page.locator('[data-page="pilotage"]').click();
+    await openPage(admin.page,"pilotage");
     await admin.page.locator(".ops-center").waitFor({timeout:10000});
     for(const tab of ["overview","p1","tasks","crm","stock","workorders","analytics","automations","integrations","p3","notifications"]){
       await admin.page.locator('[data-ops-tab="'+tab+'"]').click();
@@ -138,9 +131,7 @@ async function visitAll(page, expectedPages, mobile=false){
     await login(employee.page,"audit-employee@test.invalid");
     const employeePages=["dashboard","time","planning","absences","projects","inventory","tools","documents","messages","pilotage","settings"];
     await visitAll(employee.page,employeePages,true);
-    if(!(await employee.page.locator("#sidebar").evaluate(el=>el.classList.contains("open"))))
-      await employee.page.locator('[data-action="open-side"]').click();
-    await employee.page.locator('[data-page="pilotage"]').click();
+    await openPage(employee.page,"pilotage");
     await employee.page.locator(".ops-center").waitFor({timeout:10000});
     assert.equal(await employee.page.locator('[data-ops-tab="crm"]').count(),0);
     assert.equal(await employee.page.locator('[data-ops-tab="analytics"]').count(),0);
@@ -152,15 +143,15 @@ async function visitAll(page, expectedPages, mobile=false){
     await employee.page.locator('[data-ops-tab="p3"]').click();
     await employee.page.waitForTimeout(150);
     await noOverflow(employee.page,"mobile pilotage p3");
-    assert.equal(await employee.page.locator('[data-page="clients"]').count(),0);
-    assert.equal(await employee.page.locator('[data-page="invoices"]').count(),0);
+    assert.equal(await offered(employee.page,"clients"),false);
+    assert.equal(await offered(employee.page,"invoices"),false);
 
     client=await make({width:390,height:844});
     await login(client.page,"audit-client@test.invalid");
     const clientPages=["dashboard","projects","quotes","invoices","maintenance","documents","messages","settings"];
     await visitAll(client.page,clientPages,true);
-    assert.equal(await client.page.locator('[data-page="employees"]').count(),0);
-    assert.equal(await client.page.locator('[data-page="payments"]').count(),0);
+    assert.equal(await offered(client.page,"employees"),false);
+    assert.equal(await offered(client.page,"payments"),false);
 
     assert.deepEqual(admin.errors,[]);
     assert.deepEqual(employee.errors,[]);

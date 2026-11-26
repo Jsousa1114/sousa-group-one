@@ -136,6 +136,8 @@
   }
 
   function updateNavBadge() {
+    // The menu draws its own counters (sections, tabs, phone bar).
+    if (core()?.updateBadges) return core().updateBadges();
     const item = document.querySelector('.nav-item[data-page="mailbox"]');
     if (!item) return;
     const count = unreadTotal();

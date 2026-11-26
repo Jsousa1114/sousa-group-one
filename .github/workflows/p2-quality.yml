@@ -16,6 +16,8 @@ on:
       - index.html
       - test/p2.test.js
       - test/p2-browser.cjs
+      - test/browser-nav.cjs
+      - ui-simple.css
       - test/p2-load.cjs
       - .github/workflows/p2-quality.yml
   pull_request:
@@ -32,6 +34,8 @@ on:
       - index.html
       - test/p2.test.js
       - test/p2-browser.cjs
+      - test/browser-nav.cjs
+      - ui-simple.css
       - test/p2-load.cjs
       - .github/workflows/p2-quality.yml
 

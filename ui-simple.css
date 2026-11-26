@@ -1,0 +1,143 @@
+/* Sousa Group One — « simple » look: a light menu of seven sections, the pages of a section as
+   tabs, a bar at the bottom on phones, a home page that says what to do, readable tables and
+   statuses in colour. The dark theme keeps its colours; only the layout changes. */
+
+/* ---- Menu: seven sections ---- */
+body.light .sidebar {
+  background:#fff; border-right:1px solid #e3e8ef;
+  --text:#1d2939; --muted:#667085; --panel:#f4f6fa; --border:#e3e8ef; --action:#1f3c66;
+  color:var(--text); color-scheme:light;
+}
+body.light .side-brand span { color:#7a8698; }
+body.light .company-box { background:#f6f8fb; border-color:#e3e8ef; }
+body.light .company-box label { color:#667085; }
+body.light .company-box select { color:#1d2939; }
+body.light .company-box select option { background:#fff; color:#1d2939; }
+body.light .sidebar nav { scrollbar-color:#cfd6e0 transparent; }
+.nav-section { gap:4px; padding-top:8px; }
+.nav-sec { min-height:48px; padding:11px 12px; border-radius:10px; font-size:.97rem; font-weight:550; gap:13px; }
+.nav-sec .nav-icon { width:22px; height:22px; flex:0 0 22px; }
+body.light .nav-item { color:#344054; }
+body.light .nav-item:hover { color:#101828; background:#f2f4f7; }
+body.light .nav-item.active { color:#102a4c; background:#e9effa; box-shadow:inset 3px 0 #1f3c66; font-weight:650; }
+body.light .side-bottom { border-top:1px solid #eef1f5; }
+body.light .side-bottom .btn { color:#475467; background:transparent; border:1px solid #e3e8ef; }
+body.light .side-bottom .btn:hover { background:#f2f4f7; }
+.nav-item .nav-unread, .section-tab .nav-unread, .bottom-item .nav-unread {
+  display:inline-grid; place-items:center; min-width:20px; height:20px; margin-left:auto; padding:0 6px;
+  border-radius:999px; background:#d92d20; color:#fff; font-size:.72rem; font-weight:700; line-height:1;
+}
+
+/* ---- Top bar ---- */
+.topbar h2 { font-size:1.4rem; }
+body.light .topbar { border-bottom-color:#eef1f5; }
+
+/* ---- The pages of a section, as tabs ---- */
+.section-tabs { display:flex; gap:4px; overflow-x:auto; padding:0 32px; background:var(--panel); border-bottom:1px solid var(--border); scrollbar-width:none; }
+.section-tabs::-webkit-scrollbar { display:none; }
+.section-tabs.hidden { display:none; }
+.section-tab { position:relative; display:inline-flex; align-items:center; gap:8px; flex:none; min-height:48px; padding:10px 14px; margin-bottom:-1px; border:0; border-bottom:3px solid transparent; background:transparent; color:var(--muted); font:inherit; font-size:.95rem; font-weight:550; cursor:pointer; }
+.section-tab .nav-icon { width:18px; height:18px; flex:0 0 18px; }
+.section-tab:hover { color:var(--text); }
+.section-tab.active { color:var(--text); border-bottom-color:var(--action); font-weight:650; }
+.section-tab .nav-unread { margin-left:2px; }
+
+/* The page's title is the one at the top: the page heading keeps only its buttons. */
+.section-head.no-title { justify-content:flex-end; }
+.section-head.no-title .actions { margin-left:auto; }
+
+/* ---- Readable lists ---- */
+th { font-size:.8rem; letter-spacing:0; text-transform:none; }
+table.data-table { font-size:.94rem; }
+table.data-table td { padding-top:14px; padding-bottom:14px; }
+table.data-table tbody tr:hover { background:color-mix(in srgb,var(--action) 4%,var(--panel)); }
+
+/* ---- Statuses in colour ---- */
+.status.ok { color:#0f6b3d; background:#e3f5eb; border:1px solid #bfe6cf; }
+.status.info { color:#174a8b; background:#e7effc; border:1px solid #c9dbf6; }
+.status.warning { color:#8a4b00; background:#fdf1dc; border:1px solid #f4d8a6; }
+.status.danger { color:#a5202e; background:#fdeaec; border:1px solid #f6c5cb; }
+body:not(.light) .status.ok { color:#9be2ba; background:#173a29; border-color:#24543b; }
+body:not(.light) .status.info { color:#aecaf5; background:#1b2d4a; border-color:#2b4570; }
+body:not(.light) .status.warning { color:#f5cf8f; background:#3e2e12; border-color:#5d461b; }
+body:not(.light) .status.danger { color:#f7aab3; background:#43202a; border-color:#65303d; }
+
+/* ---- Home ---- */
+.workspace-welcome { margin-bottom:6px; }
+.workspace-welcome h1 { font-size:clamp(1.7rem,3vw,2.3rem); margin:2px 0 0; }
+.home-title { margin:0 0 12px; font-size:1.05rem; font-weight:700; letter-spacing:-.01em; }
+.home-quick { margin:18px 0 20px; }
+.home-quick-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:12px; }
+.home-action { display:flex; flex-direction:column; align-items:flex-start; justify-content:space-between; gap:14px; min-height:108px; padding:16px; border:1px solid var(--border); border-radius:14px; background:var(--panel); color:var(--text); font:inherit; font-size:1rem; font-weight:650; text-align:left; cursor:pointer; box-shadow:var(--shadow); transition:border-color .12s, transform .12s; }
+.home-action:hover { border-color:var(--action); transform:translateY(-1px); }
+.home-action-icon { display:inline-grid; place-items:center; width:44px; height:44px; border-radius:12px; background:var(--accent-soft); color:var(--action); }
+.home-action-icon .nav-icon { width:22px; height:22px; flex-basis:22px; }
+.home-columns { display:grid; grid-template-columns:minmax(0,1.7fr) minmax(250px,1fr); gap:16px; align-items:start; margin-bottom:22px; }
+.home-todo { padding:18px; margin:0; }
+.home-todo-list { list-style:none; display:grid; gap:8px; margin:0; padding:0; }
+.home-todo-item { display:flex; align-items:center; gap:12px; width:100%; padding:12px 14px; border:1px solid var(--border); border-radius:12px; background:var(--soft); color:var(--text); font:inherit; text-align:left; cursor:pointer; }
+.home-todo-item:hover { border-color:var(--action); background:var(--panel); }
+.home-todo-icon { display:inline-grid; place-items:center; flex:none; width:40px; height:40px; border-radius:11px; background:var(--accent-soft); color:var(--action); }
+.home-todo-icon .nav-icon { width:20px; height:20px; flex-basis:20px; }
+.tone-danger .home-todo-icon { background:color-mix(in srgb,#d92d20 13%,var(--panel)); color:#c0261b; }
+.tone-warn .home-todo-icon { background:color-mix(in srgb,#dc8a00 15%,var(--panel)); color:#9a5b00; }
+.tone-ok .home-todo-icon { background:color-mix(in srgb,#1f9e50 14%,var(--panel)); color:#167a3d; }
+body:not(.light) .tone-danger .home-todo-icon { color:#f7a39a; }
+body:not(.light) .tone-warn .home-todo-icon { color:#f5c77a; }
+body:not(.light) .tone-ok .home-todo-icon { color:#8fdcae; }
+.home-todo-text { display:grid; flex:1; min-width:0; }
+.home-todo-text b { font-weight:600; overflow-wrap:anywhere; }
+.home-todo-text small { color:var(--muted); }
+.home-todo-go { flex:none; color:var(--muted); font-size:1.5rem; line-height:1; }
+.home-empty { margin:0; color:var(--muted); }
+.home-figures { display:grid; gap:12px; }
+.home-figure { display:grid; gap:2px; margin:0; padding:16px 18px; }
+.home-figure span { color:var(--muted); font-size:.9rem; }
+.home-figure b { font-size:1.6rem; font-weight:700; letter-spacing:-.02em; font-variant-numeric:tabular-nums; }
+.home-more:empty { display:none; }
+.home-more { margin-top:22px; }
+#aiBriefing { margin-top:16px; }
+
+/* ---- Phones: a bar at the bottom ---- */
+.bottom-nav { display:none; }
+@media (max-width:900px) {
+  .bottom-nav {
+    position:fixed; left:0; right:0; bottom:0; z-index:30; display:grid; grid-template-columns:repeat(5,minmax(0,1fr));
+    gap:2px; padding:6px 6px calc(6px + env(safe-area-inset-bottom)); background:var(--panel);
+    border-top:1px solid var(--border); box-shadow:0 -6px 22px rgba(16,24,40,.07);
+  }
+  .bottom-item { position:relative; display:grid; justify-items:center; align-content:center; gap:3px; min-height:54px; padding:4px 2px; border:0; border-radius:12px; background:transparent; color:var(--muted); font:inherit; font-size:.7rem; font-weight:650; cursor:pointer; }
+  .bottom-item span:not(.nav-unread) { max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .bottom-item .nav-icon { width:24px; height:24px; flex-basis:24px; }
+  .bottom-item.active { color:var(--action); background:var(--accent-soft); }
+  .bottom-item .nav-unread { position:absolute; top:2px; left:calc(50% + 6px); margin:0; min-width:18px; height:18px; font-size:.65rem; }
+  .content { padding-bottom:calc(96px + env(safe-area-inset-bottom)); }
+  .toast { bottom:calc(88px + env(safe-area-inset-bottom)); }
+  .ph-callbox { bottom:calc(84px + env(safe-area-inset-bottom)); }
+  .section-tabs { padding:0 10px; }
+  .section-tab { min-height:46px; padding:8px 11px; font-size:.9rem; }
+  .home-columns { grid-template-columns:minmax(0,1fr); }
+  .home-quick-grid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+  .home-action { min-height:96px; padding:14px; font-size:.95rem; }
+  .home-figures { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .home-figure b { font-size:1.3rem; }
+  /* An open conversation takes the whole screen, as in a messaging app: it has its own back button. */
+  body:has(.whatsapp-chat.mobile-chat-open, .wa.wa-reading, .wm.wm-reading, .ph.ph-reading) .bottom-nav,
+  body:has(.whatsapp-chat.mobile-chat-open, .wa.wa-reading, .wm.wm-reading, .ph.ph-reading) .section-tabs { display:none; }
+  body:has(.whatsapp-chat.mobile-chat-open, .wa.wa-reading, .wm.wm-reading, .ph.ph-reading) .content { padding-bottom:calc(16px + env(safe-area-inset-bottom)); }
+  body:has(.whatsapp-chat.mobile-chat-open) .content:has(.whatsapp-chat) { padding-bottom:6px; }
+  body:has(.whatsapp-chat.mobile-chat-open) .toast,
+  body:has(.wa.wa-reading, .wm.wm-reading, .ph.ph-reading) .toast { bottom:calc(16px + env(safe-area-inset-bottom)); }
+  /* The list of conversations leaves room for the tabs above and the bar below. */
+  .whatsapp-chat:not(.mobile-chat-open) { height:calc(100dvh - 240px - env(safe-area-inset-bottom)); max-height:none; }
+  .content:has(.whatsapp-chat:not(.mobile-chat-open)) { padding-bottom:calc(78px + env(safe-area-inset-bottom)); }
+}
+@media (max-width:600px) {
+  .whatsapp-chat:not(.mobile-chat-open) { height:calc(100dvh - 216px - env(safe-area-inset-bottom)); }
+}
+@media (max-width:360px) {
+  .home-quick-grid { gap:8px; }
+  .home-action { min-height:88px; padding:12px; }
+  .bottom-item { font-size:.64rem; }
+}
+@media print { .bottom-nav, .section-tabs { display:none !important; } }

@@ -444,6 +444,7 @@
     const content=document.getElementById("content"); if(!content||content.querySelector(".p1-dashboard-extra")) return;
     try{
       const out=await api("dashboard"), prefs=out.preferences||{};
+      if(content.querySelector(".p1-dashboard-extra")||core()?.getPage?.()!=="dashboard") return;
       const planning=prefs.showPlanning===false?"":`<article class="card"><h3>Prochaines interventions</h3><div class="p1-list">${(out.planning||[]).map(x=>`<div><span><b>${esc(projects().find(p=>String(p.id)===String(x.project))?.title||x.project)}</b><small>${date(x.date)} · ${esc(x.start)}–${esc(x.end)}${x.employeeName?` · ${esc(x.employeeName)}`:""}</small></span></div>`).join("")||"<p>Aucune intervention planifiée.</p>"}</div></article>`;
       const changeOrders = profile().role==="client" && (out.clientActions?.changeOrders||[]).length
         ? `<article class="card"><h3>Plus-values à valider</h3><div class="p1-list">${out.clientActions.changeOrders.map(x=>`<div><span><b>${esc(x.title)} · ${money(x.amount)}</b><small>${esc(x.description||"")}</small></span>${btn("Signer et approuver","client-change-approve",`data-id="${esc(x.id)}" data-project="${esc(x.project_id)}"`,"primary")}</div>`).join("")}</div></article>`
@@ -454,7 +455,8 @@
       const signatures = workToSign.length
         ? `<article class="card"><h3>Bons de travail à signer</h3><div class="p1-list">${workToSign.map(x=>`<div><span><b>${esc(x.title)}</b><small>${esc(x.description||"")} · ${date(x.scheduled_at)}</small></span>${btn("Signer","client-work-sign",`data-id="${esc(x.id)}"`,"primary")}</div>`).join("")}</div></article>`
         : "";
-      content.insertAdjacentHTML("afterbegin",`<section class="p1-dashboard-extra ${prefs.compact?"compact":""}"><div class="p1-dashboard-head"><span>Mon tableau de bord</span>${btn("Personnaliser","dashboard-settings")}</div><div class="p1-dashboard-grid"><article class="card"><h3>Notifications</h3><b class="p1-big">${esc(out.kpis?.unread||0)}</b><small>${Number(out.kpis?.unread||0)>1?"non lues":"non lue"}</small></article>${planning}${changeOrders}${signatures}</div></section>`);
+      // On the home page, below « À faire » and the numbers.
+      (document.getElementById("homeMore")||content).insertAdjacentHTML(document.getElementById("homeMore")?"beforeend":"afterbegin",`<section class="p1-dashboard-extra ${prefs.compact?"compact":""}"><div class="p1-dashboard-head"><span>Mon tableau de bord</span>${btn("Personnaliser","dashboard-settings")}</div><div class="p1-dashboard-grid"><article class="card"><h3>Notifications</h3><b class="p1-big">${esc(out.kpis?.unread||0)}</b><small>${Number(out.kpis?.unread||0)>1?"non lues":"non lue"}</small></article>${planning}${changeOrders}${signatures}</div></section>`);
     }catch{}
   }
 

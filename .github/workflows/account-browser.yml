@@ -18,6 +18,8 @@ on:
       - service-worker.js
       - test/account.test.js
       - test/account-browser.cjs
+      - test/browser-nav.cjs
+      - ui-simple.css
       - .github/workflows/account-browser.yml
 
 permissions:

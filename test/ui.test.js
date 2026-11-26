@@ -115,10 +115,38 @@ async function setup(
   h.close = () => w.close();
   return h;
 }
+// The menu shows seven sections; the pages of the open section are its tabs. A page is
+// reached as a person would: its section first, then its tab.
+const SECTION_OF = {
+  dashboard: "home", messages: "communication", mailbox: "communication", whatsapp: "communication", phone: "communication",
+  projects: "work", clients: "work", maintenance: "work", documents: "work",
+  planning: "team", time: "team", absences: "team", employees: "team",
+  quotes: "money", invoices: "money", payments: "money", expenses: "money",
+  inventory: "stock", tools: "stock", vehicles: "stock", suppliers: "stock",
+  pro: "manage", pilotage: "manage", reports: "manage", companies: "manage", advanced: "manage", audit: "manage", settings: "manage",
+};
 function click(h, selector) {
-  const e = h.w.document.querySelector(selector);
+  const d = h.w.document;
+  let e = d.querySelector(selector);
+  const m = !e && selector.match(/^\[data-page="([^"]+)"\]$/);
+  if (m) {
+    d.querySelector(`#nav [data-section="${SECTION_OF[m[1]]}"]`)?.click();
+    e = d.querySelector(selector);
+    if (!e && d.body.dataset.view === m[1]) return;
+  }
   assert.ok(e, "Missing " + selector);
   e.click();
+}
+// Every page the person can open: each section, then each of its tabs.
+function reachablePages(h) {
+  const d = h.w.document;
+  const pages = [];
+  for (const id of [...d.querySelectorAll("#nav [data-section]")].map((x) => x.dataset.section)) {
+    d.querySelector(`#nav [data-section="${id}"]`).click();
+    const tabs = [...d.querySelectorAll("#sectionTabs [data-page]")].map((t) => t.dataset.page);
+    pages.push(...(tabs.length ? tabs : [d.body.dataset.view]));
+  }
+  return [...new Set(pages)];
 }
 function fill(h, name, value) {
   const e = h.w.document.querySelector(`#entityForm [name="${name}"]`);
@@ -283,9 +311,7 @@ test("all role navigation and empty dashboards render without errors", async () 
         h.w.document.getElementById("app").classList.contains("hidden"),
         false,
       );
-      const buttons = [...h.w.document.querySelectorAll("[data-page]")].map(
-        (b) => b.dataset.page,
-      );
+      const buttons = reachablePages(h);
       for (const p of buttons) {
         click(h, `[data-page="${p}"]`);
         await flush();

@@ -9,6 +9,8 @@ on:
       - state-routes.js
       - db.js
       - test/messaging-browser.cjs
+      - test/browser-nav.cjs
+      - ui-simple.css
       - .github/workflows/messaging-browser.yml
 
 permissions:

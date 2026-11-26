@@ -20,6 +20,8 @@ on:
       - "scripts/**"
       - "test/production-hardening.test.js"
       - "test/full-app-browser.cjs"
+      - "test/browser-nav.cjs"
+      - "ui-simple.css"
       - ".github/workflows/production-hardening.yml"
   push:
     branches: [main]
@@ -40,6 +42,8 @@ on:
       - "scripts/**"
       - "test/production-hardening.test.js"
       - "test/full-app-browser.cjs"
+      - "test/browser-nav.cjs"
+      - "ui-simple.css"
       - ".github/workflows/production-hardening.yml"
 
 permissions:
