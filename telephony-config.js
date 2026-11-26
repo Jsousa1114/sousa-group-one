@@ -7,6 +7,8 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const PRIVATE_NETS = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10", "127.0.0.0/8"];
+// An operator on the office network: the Internet-Box itself (Swisscom « Téléphonie IP locale »).
+const isLocal = (host) => /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(String(host || ""));
 
 // A value on one line: no line breaks, and « ; » (a comment in Asterisk files) escaped.
 const value = (v) => String(v ?? "").replace(/[\r\n\0]/g, "").replace(/;/g, "\\;").trim();
@@ -56,7 +58,13 @@ function pjsip({ operator = null, lines = [], publicIp = "", sipPort = 5060 }) {
     const host = hostPort(operator.host, operator.port);
     const authUser = operator.authUsername || operator.username;
     out.push(section("operator-auth", [["type", "auth"], ["auth_type", "userpass"], ["username", authUser], ["password", operator.password || ""]]));
-    out.push(section("operator", [["type", "aor"], ["contact", `sip:${host}`], ["qualify_frequency", 60]]));
+    // Some operators are reached through a separate entry point (Swisscom « SIP Credentials »:
+    // voip.swisscom.ch through fs1.voip.swisscom.ch).
+    const proxy = operator.outboundProxy ? `sip:${operator.outboundProxy.replace(/^sips?:/i, "")};lr` : "";
+    // The Internet-Box only knows its own device (internal number): the person's mobile cannot be
+    // shown through it, the From must be that device.
+    const fromUser = operator.fromUser || (isLocal(operator.host) ? operator.username : "");
+    out.push(section("operator", [["type", "aor"], ["contact", `sip:${host}`], ["qualify_frequency", 60], proxy && ["outbound_proxy", proxy]]));
     out.push(
       section("operator", [
         ["type", "endpoint"],
@@ -67,7 +75,8 @@ function pjsip({ operator = null, lines = [], publicIp = "", sipPort = 5060 }) {
         ["outbound_auth", "operator-auth"],
         ["aors", "operator"],
         ["from_domain", operator.fromDomain || operator.host],
-        operator.fromUser && ["from_user", operator.fromUser],
+        fromUser && ["from_user", fromUser],
+        proxy && ["outbound_proxy", proxy],
         // The person's own mobile number is shown to the people called (« CLIP no screening »,
         // to be enabled by the operator): sent in From and P-Asserted-Identity.
         ["send_pai", "yes"],
@@ -80,7 +89,7 @@ function pjsip({ operator = null, lines = [], publicIp = "", sipPort = 5060 }) {
         ["timers", "no"],
       ]),
     );
-    out.push(section("operator-identify", [["type", "identify"], ["endpoint", "operator"], ["match", operator.host]]));
+    out.push(section("operator-identify", [["type", "identify"], ["endpoint", "operator"], ["match", operator.host], operator.outboundProxy && ["match", operator.outboundProxy.replace(/^sips?:/i, "").replace(/:\d+$/, "")]]));
     if (operator.register !== false)
       out.push(
         section("operator-registration", [
@@ -90,6 +99,7 @@ function pjsip({ operator = null, lines = [], publicIp = "", sipPort = 5060 }) {
           ["server_uri", `sip:${host}`],
           ["client_uri", `sip:${operator.username}@${operator.host}`],
           ["contact_user", operator.username],
+          proxy && ["outbound_proxy", proxy],
           ["retry_interval", 60],
           ["forbidden_retry_interval", 300],
           ["fatal_retry_interval", 300],
@@ -141,8 +151,22 @@ function ari({ password }) {
   return [section("general", [["enabled", "yes"], ["pretty", "no"], ["allowed_origins", ""]]), section("sgo", [["type", "user"], ["read_only", "no"], ["password", password]])].join("\n");
 }
 
+// The exchange's manager account: the application only reads the operator connection state.
+function manager({ amiPassword }) {
+  return section("sgo", [["secret", amiPassword], ["deny", "0.0.0.0/0.0.0.0"], ...PRIVATE_NETS.map((n) => ["permit", n.replace(/\/(\d+)$/, (m, bits) => "/" + maskOf(Number(bits)))]), ["read", "system,reporting"], ["write", "system,reporting"]]);
+}
+function maskOf(bits) {
+  const n = bits === 0 ? 0 : (~0 << (32 - bits)) >>> 0;
+  return [24, 16, 8, 0].map((s) => (n >>> s) & 255).join(".");
+}
+
 function files(settings) {
-  return { "pjsip.conf": pjsip(settings), "rtp.conf": rtp(settings), "ari.conf": ari({ password: settings.ariPassword }) };
+  return {
+    "pjsip.conf": pjsip(settings),
+    "rtp.conf": rtp(settings),
+    "ari.conf": ari({ password: settings.ariPassword }),
+    ...(settings.amiPassword ? { "manager.conf": manager(settings) } : {}),
+  };
 }
 
 // Written atomically; « ready » tells the exchange it may start (first start only).
@@ -166,4 +190,4 @@ function write(dir, contents) {
   return changed;
 }
 
-module.exports = { files, write, pjsip, rtp, ari, relayHost, stunHost, endpointOf, value };
+module.exports = { files, write, pjsip, rtp, ari, manager, relayHost, stunHost, endpointOf, value, isLocal };

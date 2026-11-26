@@ -469,8 +469,8 @@ function routes(db) {
       ).rows;
       const users = (await db.query("SELECT id,name,email,role,company FROM users WHERE disabled=false AND role<>'client' ORDER BY name")).rows;
       res.json({
-        status: T.status(),
-        operator: { host: operator.host || "", port: operator.port || "", username: operator.username || "", authUsername: operator.authUsername || "", fromUser: operator.fromUser || "", register: operator.register !== false, dialFormat: operator.dialFormat || "+", allowWorld: !!operator.allowWorld, hasPassword: !!operator.password },
+        status: { ...T.status(), registration: (await T.registration(db).catch(() => ({ state: "unknown" }))).state },
+        operator: { host: operator.host || "", port: operator.port || "", username: operator.username || "", authUsername: operator.authUsername || "", fromUser: operator.fromUser || "", outboundProxy: operator.outboundProxy || "", register: operator.register !== false, dialFormat: operator.dialFormat || "+", allowWorld: !!operator.allowWorld, hasPassword: !!operator.password },
         relay: { stun: relay.stun || "", turnUrls: relay.turnUrls || [], turnUser: relay.turnUser || "", hasPassword: !!relay.turnPassword },
         recording: { enabled: recording.enabled !== false, keepDays: Number(recording.keepDays) || 30, announcement: hasSound("sgo-announce"), greeting: hasSound("sgo-greeting") },
         lines: lines.map((l) => ({ userId: Number(l.user_id), name: l.name, email: l.email, role: l.role, did: l.did || "", mobile: l.mobile || "", ringSeconds: l.ring_seconds, enabled: l.enabled, sms: l.sms_mode })),
@@ -489,15 +489,28 @@ function routes(db) {
       if (port && !(port > 0 && port < 65536)) D.fail("Port invalide.");
       const username = clean(req.body?.username, 120);
       if (host && !username) D.fail("Indiquez l’identifiant SIP donné par l’opérateur.");
+      // A SIP name has no space nor « @ : ; < > " » (e.g. 225, or 0215550000, or sousa-group-one).
+      const sipName = (value, label) => {
+        if (value && !/^[^\s@:;<>"\\]+$/.test(value)) D.fail(`${label} ne doit contenir ni espace ni caractère @ : ; < > (ex. 225 ou sousa-group-one).`);
+        return value;
+      };
+      sipName(username, "L’identifiant SIP");
+      const authUsername = sipName(clean(req.body?.authUsername, 120), "L’identifiant d’authentification");
+      const fromUser = sipName(clean(req.body?.fromUser, 120), "Le « From » imposé");
+      const outboundProxy = clean(req.body?.outboundProxy, 200).replace(/^sips?:/i, "");
+      if (outboundProxy && !/^[A-Za-z0-9.-]+(:\d{2,5})?$/.test(outboundProxy)) D.fail("Proxy sortant invalide (ex. fs1.voip.swisscom.ch).");
+      const local = require("./telephony-config").isLocal(host);
       const next = {
         host,
         port,
         username,
-        authUsername: clean(req.body?.authUsername, 120),
-        fromUser: clean(req.body?.fromUser, 120),
+        authUsername,
+        fromUser,
+        outboundProxy,
         password: req.body?.password ? String(req.body.password).slice(0, 200) : before.password || "",
         register: req.body?.register !== false,
-        dialFormat: ["+", "00", "national"].includes(req.body?.dialFormat) ? req.body.dialFormat : "+",
+        // The Internet-Box dials numbers as they are written in Switzerland (079…).
+        dialFormat: ["+", "00", "national"].includes(req.body?.dialFormat) ? req.body.dialFormat : local ? "national" : "+",
         allowWorld: !!req.body?.allowWorld,
       };
       await T.saveSetting(db, "operator", next);

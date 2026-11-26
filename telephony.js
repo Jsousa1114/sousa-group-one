@@ -8,6 +8,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const dgram = require("node:dgram");
+const net = require("node:net");
 const { createCipheriv, createDecipheriv, createHash, randomBytes } = require("node:crypto");
 const WebSocket = require("ws");
 const config = require("./telephony-config");
@@ -145,11 +146,17 @@ async function apply(db, { reload = true } = {}) {
     await saveSetting(db, "ari", ari_);
   }
   ariPassword = ari_.password;
+  let ami_ = await setting(db, "ami");
+  if (!ami_?.password) {
+    ami_ = { password: randomBytes(24).toString("base64url") };
+    await saveSetting(db, "ami", ami_);
+  }
   const operator = await setting(db, "operator");
   const relay = (await setting(db, "relay")) || {};
   const list = await lines(db);
   const files = config.files({
     ariPassword,
+    amiPassword: ami_.password,
     operator,
     relay,
     publicIp: runtime.publicIp,
@@ -170,10 +177,82 @@ async function apply(db, { reload = true } = {}) {
     if (changed.includes("pjsip.conf")) {
       await quiet(ari("PUT", "/asterisk/modules/res_pjsip.so"));
       await follow(list, operator);
+      // New account details are tried at once, not at the next renewal (5 minutes).
+      if (operator?.host && operator.register !== false) await amiAction(ami_.password, "PJSIPRegister\r\nRegistration: operator-registration");
     }
     if (changed.includes("rtp.conf")) await quiet(ari("PUT", "/asterisk/modules/res_rtp_asterisk.so"));
+    if (changed.includes("manager.conf")) await quiet(ari("PUT", "/asterisk/modules/manager"));
   }
   return changed;
+}
+
+// The exchange's manager interface (AMI), for what ARI does not tell: whether the operator
+// accepted the account. One short question per call, nothing else.
+function amiAction(password, action) {
+  return new Promise((resolve) => {
+    let target;
+    try {
+      target = new URL(ariBase());
+    } catch {
+      return resolve(null);
+    }
+    const socket = net.connect(Number(process.env.ASTERISK_AMI_PORT || 5038), target.hostname);
+    let buffer = "";
+    let stage = "banner";
+    const messages = [];
+    const done = (value) => {
+      clearTimeout(timer);
+      socket.destroy();
+      resolve(value);
+    };
+    const timer = setTimeout(() => done(null), 5000);
+    socket.on("error", () => done(null));
+    socket.on("data", (chunk) => {
+      buffer += chunk.toString("utf8");
+      if (stage === "banner") {
+        const i = buffer.indexOf("\r\n");
+        if (i < 0) return;
+        buffer = buffer.slice(i + 2);
+        stage = "login";
+        socket.write(`Action: Login\r\nUsername: sgo\r\nSecret: ${password}\r\nEvents: off\r\n\r\n`);
+      }
+      let end;
+      while ((end = buffer.indexOf("\r\n\r\n")) >= 0) {
+        const block = buffer.slice(0, end);
+        buffer = buffer.slice(end + 4);
+        const message = {};
+        for (const line of block.split("\r\n")) {
+          const at = line.indexOf(":");
+          if (at > 0) message[line.slice(0, at).trim()] = line.slice(at + 1).trim();
+        }
+        if (stage === "login") {
+          if (message.Response !== "Success") return done(null);
+          stage = "action";
+          socket.write(`Action: ${action}\r\nActionID: sgo\r\n\r\n`);
+          continue;
+        }
+        messages.push(message);
+        if (message.EventList === "Complete" || message.Response === "Error" || (message.Response && message.EventList !== "start")) {
+          socket.write("Action: Logoff\r\n\r\n");
+          return done(messages);
+        }
+      }
+    });
+  });
+}
+// « registered » (accepted by the operator), « rejected » (account refused), « trying » (no answer
+// yet), « none » (no operator set), « unknown » (the exchange cannot be asked).
+async function registration(db) {
+  const operator = await setting(db, "operator");
+  if (!operator?.host) return { state: "none" };
+  if (operator.register === false) return { state: "not-registering" };
+  const ami_ = await setting(db, "ami");
+  if (!ami_?.password || !runtime.connected) return { state: "unknown" };
+  const out = await amiAction(ami_.password, "PJSIPShowRegistrationsOutbound");
+  const detail = (out || []).find((m) => m.Event === "OutboundRegistrationDetail" && m.ObjectName === "operator-registration");
+  if (!detail) return { state: out ? "trying" : "unknown" };
+  const status = String(detail.Status || "").toLowerCase();
+  return { state: status === "registered" ? "registered" : status === "rejected" ? "rejected" : "trying", raw: detail.Status || "" };
 }
 
 // The presence of each line (browsers signed in or not) and of the operator, followed by name:
@@ -642,6 +721,7 @@ module.exports = {
   stop,
   maintain,
   status,
+  registration,
   decline,
   ari,
   stunAddress,
