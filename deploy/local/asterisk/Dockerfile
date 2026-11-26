@@ -10,7 +10,7 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/* \
  && ln -sfn fr_CA_f_June /usr/share/asterisk/sounds/fr \
  && rm -rf /etc/asterisk/* \
- && mkdir -p /sgo /var/run/asterisk \
+ && mkdir -p /sgo /var/run/asterisk /var/lib/asterisk/keys \
  && chown -R ubuntu:ubuntu /var/lib/asterisk /var/spool/asterisk /var/log/asterisk /var/run/asterisk /etc/asterisk /sgo
 
 COPY deploy/local/asterisk/etc/ /etc/asterisk/

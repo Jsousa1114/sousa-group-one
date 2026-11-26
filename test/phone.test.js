@@ -241,8 +241,13 @@ test("the application drives the exchange: it connects, then reloads the setting
   const password = fs.readFileSync(path.join(TEL, "etc", "ari.conf"), "utf8").match(/password = (\S+)/)[1];
   assert.equal(Buffer.from(ast.appAuth().slice(6), "base64").toString(), "sgo:" + password, "with the password written for the exchange");
   await until(() => ast.last("PUT", /res_pjsip\.so$/), "pjsip reloaded");
-  assert.ok(ast.last("POST", /\/applications\/sgo\/subscription$/), "the browsers' presence is followed");
+  await until(() => ast.all("POST", /\/applications\/sgo\/subscription$/).some((c) => c.query.eventSource === `endpoint:PJSIP/sgo${ids.lea}`), "presence followed");
+  assert.ok(ast.all("POST", /\/applications\/sgo\/subscription$/).some((c) => c.query.eventSource === "endpoint:PJSIP/operator"), "and the operator's");
   await until(() => T.status().connected, "status");
+  // A line added later is followed as soon as it exists (the exchange may start with none).
+  assert.equal((await call(`admin/lines/${ids.marc}`, "admin", { did: "021 555 00 09" }, "PUT")).status, 200);
+  await until(() => ast.all("POST", /\/applications\/sgo\/subscription$/).some((c) => c.query.eventSource === `endpoint:PJSIP/sgo${ids.marc}`), "new line followed");
+  assert.equal((await call(`admin/lines/${ids.marc}`, "admin", undefined, "DELETE")).status, 200);
 });
 
 test("a customer calls: the browsers ring, the announcement plays, then the call is recorded and summarised", async () => {
@@ -441,7 +446,7 @@ test("a phone that signs its webhooks: wrong or missing signatures refused", asy
   const sig = require("node:crypto").createHmac("sha256", "sign-key").update(body + ts).digest("hex");
   const hook = url + "/api/phone/sms/hook/" + line.sms_token;
   assert.equal((await fetch(hook, { method: "POST", headers: { "Content-Type": "application/json" }, body })).status, 401);
-  assert.equal((await fetch(hook, { method: "POST", headers: { "Content-Type": "application/json", "X-Signature": "00" + sig.slice(2), "X-Timestamp": ts }, body })).status, 401);
+  assert.equal((await fetch(hook, { method: "POST", headers: { "Content-Type": "application/json", "X-Signature": (sig[0] === "0" ? "1" : "0") + sig.slice(1), "X-Timestamp": ts }, body })).status, 401);
   assert.equal((await fetch(hook, { method: "POST", headers: { "Content-Type": "application/json", "X-Signature": sig, "X-Timestamp": ts }, body })).status, 200);
   // a batch of messages
   const batch = JSON.stringify({ event: "sms:batch:received", payload: { messages: [{ messageId: "m3", message: "Un", phoneNumber: "+41790000001", receivedAt: new Date().toISOString() }, { messageId: "m4", message: "Deux", phoneNumber: "+41790000001", receivedAt: new Date().toISOString() }] } });
