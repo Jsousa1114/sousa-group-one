@@ -203,7 +203,7 @@
         ${card("Modèles de devis",`<div class="p1-list">${(out.templates||[]).map(x=>`<div><span><b>${esc(x.name)}</b><small>${esc(x.company)} · ${x.lines?.length||0} ligne(s)</small></span>${btn("Créer devis","template-quote",`data-id="${esc(x.id)}"`,"primary")}</div>`).join("")||"<p>Aucun modèle.</p>"}</div>`)}
         ${card("Catalogue prestations / prix",`<div class="p1-list">${(out.catalog||[]).map(x=>`<div><span><b>${esc(x.name)}</b><small>${esc(x.sku||"")} · ${money(x.price)} / ${esc(x.unit)}</small></span></div>`).join("")||"<p>Aucune prestation.</p>"}</div>`)}
         ${card("Factures récurrentes",`<div class="p1-list">${(out.recurring||[]).map(x=>`<div><span><b>${esc(x.title)}</b><small>${esc(x.frequency)} · prochaine ${date(x.next_run)} · ${x.active?"active":"inactive"}</small></span></div>`).join("")||"<p>Aucune récurrence.</p>"}</div>`)}
-        ${card("Avoirs",`<div class="p1-list">${(out.credits||[]).map(x=>`<div><span><b>${esc(x.number)} · ${money(x.amount)}</b><small>${esc(x.invoice_id)} · ${esc(x.reason)}</small></span></div>`).join("")||"<p>Aucun avoir.</p>"}</div>`)}
+        ${card("Avoirs",`<div class="p1-list">${(out.credits||[]).map(x=>`<div><span><b>${esc(x.number)} · ${money(x.amount)}</b><small>${esc(x.invoice_id)} · ${esc(x.reason)}${x.payment_id?" · déduit de la facture":""}</small></span>${x.payment_id?"":btn("Déduire de la facture","credit-apply",`data-id="${esc(x.id)}"`,"primary")}</div>`).join("")||"<p>Aucun avoir.</p>"}</div>`)}
         ${card("Relances automatiques",`<div class="p1-list">${(out.reminders||[]).slice(0,30).map(x=>`<div><span><b>${esc(x.invoice_id)} · J+${esc(x.stage)}</b><small>${money(x.amount_due)} · ${date(x.created_at)}</small></span></div>`).join("")||"<p>Aucune relance générée.</p>"}</div>`)}
         ${card("Liens de paiement",`<div class="p1-list">${(out.links||[]).map(x=>`<div><span><b>${esc(x.invoice_id)}</b><small>Expire ${date(x.expires_at)} · ${x.active?"actif":"inactif"}</small></span></div>`).join("")||"<p>Aucun lien.</p>"}</div>`)}
       </div>`;
@@ -333,7 +333,7 @@
       else if(kind==="finance-catalog"){p.price=Number(p.price);p.vatRate=Number(p.vatRate);await api("finance/catalog",p);}
       else if(kind==="client-pricing"){p.discountPct=Number(p.discountPct);p.paymentDays=Number(p.paymentDays);await api("finance/client-pricing",p);}
       else if(kind==="recurring-invoice"){p.lines=singleLine(form);p.paymentDays=Number(p.paymentDays);await api("finance/recurring",p);}
-      else if(kind==="credit-note"){p.amount=Number(p.amount);await api("finance/credit-note",p);}
+      else if(kind==="credit-note"){p.amount=Number(p.amount);const out=await api("finance/credit-note",p);core().toast(`Avoir ${out.number} déduit de la facture.${out.refund>0?` À rembourser au client : ${money(out.refund)}.`:""}`);await core().refresh?.();}
       else if(kind==="payment-link"){const out=await api("finance/payment-link",{invoiceId:p.invoiceId,days:Number(p.days)});navigator.clipboard?.writeText(location.origin+out.url).catch(()=>{});core().notice("Lien créé et copié : "+location.origin+out.url);}
       else if(kind==="location") await api("procurement/location",p);
       else if(kind==="order"){p.lines=singleLine(form);await api("procurement/order",p);}
@@ -514,6 +514,7 @@
       else if(a==="client-pricing")openForm("client-pricing");
       else if(a==="recurring-invoice")openForm("recurring-invoice");
       else if(a==="credit-note")openForm("credit-note");
+      else if(a==="credit-apply"){if(!confirm("Déduire cet avoir du solde de sa facture ?"))return;const out=await api("finance/credit-note/"+encodeURIComponent(b.dataset.id)+"/apply",{});core().toast(`Avoir ${out.number} déduit de la facture.${out.refund>0?` À rembourser au client : ${money(out.refund)}.`:""}`);await core().refresh?.();const root=document.getElementById("p1Suite")?.parentElement;if(root)await renderInto(root);}
       else if(a==="payment-link")openForm("payment-link");
       else if(a==="template-quote")openForm("template-quote",{id:b.dataset.id});
       else if(a==="run-reminders"){const out=await api("finance/run-reminders",{});core().toast(out.created+" relance(s) générée(s).");}

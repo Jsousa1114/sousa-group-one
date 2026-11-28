@@ -143,15 +143,15 @@
         ${actionKpi("Notifications non lues", a.unreadNotifications || 0, "tab-activity")}
       </div>
       ${finance ? `<div class="pro-finance-grid">
-        <article><span>CA facturé</span><b>${money(finance.revenue)}</b></article>
-        <article><span>Marge estimée</span><b>${money(finance.margin)}</b></article>
-        <article><span>Dépenses</span><b>${money(finance.expenses)}</b></article>
+        <article><span>CA facturé (hors TVA)</span><b>${money(finance.revenue)}</b></article>
+        <article><span>Marge${finance.marginPct == null ? "" : ` · ${finance.marginPct} %`}</span><b>${money(finance.margin)}</b></article>
+        <article><span>Coûts des chantiers</span><b>${money(finance.projectCost)}</b></article>
         <article><span>Impayés</span><b>${money(finance.outstanding)}</b></article>
         <article><span>Heures productives</span><b>${Number(finance.productiveHours || 0).toFixed(2)} h</b></article>
       </div>` : ""}
       ${finance?.byCompany?.length ? `<div class="pro-grid-2">
-        ${card("Rentabilité par entreprise", simpleRows(finance.byCompany, (x) => `<button type="button" data-pro-action="company-profit" data-company="${esc(x.company)}"><span><b>${esc((state().companies || []).find((c) => String(c.id) === String(x.company))?.name || x.company)}</b><small>CA ${money(x.revenue)} · coût ${money(Math.max(Number(x.expenses || 0), Number(x.projectCost || 0)))} · impayés ${money(x.outstanding)}</small></span><strong>${money(x.margin)}</strong></button>`))}
-        ${card("Rentabilité par chantier", simpleRows((finance.byProject || []).slice(0, 12), (x) => `<button type="button" data-pro-action="project-central" data-id="${esc(x.id)}"><span><b>${esc(x.title || x.id)}</b><small>${esc(x.id)} · CA ${money(x.revenue)} · coût ${money(x.cost)} · ${Number(x.productiveHours || 0).toFixed(1)} h</small></span><strong>${money(x.margin)}</strong></button>`))}
+        ${card("Rentabilité par entreprise", simpleRows(finance.byCompany, (x) => `<button type="button" data-pro-action="company-profit" data-company="${esc(x.company)}"><span><b>${esc((state().companies || []).find((c) => String(c.id) === String(x.company))?.name || x.company)}</b><small>CA hors TVA ${money(x.revenue)} · coûts ${money(x.projectCost)} · impayés ${money(x.outstanding)}</small></span><strong>${money(x.margin)}${x.marginPct == null ? "" : ` · ${x.marginPct} %`}</strong></button>`))}
+        ${card("Rentabilité par chantier", simpleRows((finance.byProject || []).slice(0, 12), (x) => `<button type="button" data-pro-action="project-central" data-id="${esc(x.id)}"><span><b>${esc(x.title || x.id)}</b><small>${esc(x.id)} · CA hors TVA ${money(x.revenue)} · coûts ${money(x.cost)} · ${Number(x.productiveHours || 0).toFixed(1)} h</small></span><strong>${money(x.margin)}${x.marginPct == null ? "" : ` · ${x.marginPct} %`}</strong></button>`))}
       </div>` : ""}
       <div class="pro-grid-2">
         ${card("Chantiers en retard", `<div class="pro-list">${(out.lists?.overdueProjects || []).map((x) => `<button type="button" data-pro-action="project-central" data-id="${esc(x.id)}"><span><b>${esc(x.title)}</b><small>${esc(x.id)} · prévu ${fmtDate(x.end)}</small></span><strong>Ouvrir</strong></button>`).join("") || empty("Aucun chantier en retard.")}</div>`)}
@@ -184,6 +184,65 @@
     return `<div class="pro-list">${rows.map(renderer).join("") || empty(none)}</div>`;
   }
 
+  // The profitability of the project (profit.js): what was sold, what it cost, the margin.
+  function profitHtml(f) {
+    const pct = (v) => (v == null ? "" : ` · ${v} %`);
+    const line = (label, value, note = "") => `<div class="profit-line"><span>${label}${note ? `<small>${note}</small>` : ""}</span><b>${value}</b></div>`;
+    const tone = f.margin < 0 ? "danger" : f.marginPct != null && f.marginPct < 10 ? "warning" : "ok";
+    return `<div class="profit">
+      <div class="profit-head"><article class="profit-margin ${tone}"><span>Marge à ce jour${pct(f.marginPct)}</span><b>${money(f.margin)}</b><small>Ventes moins coûts, sans la TVA</small></article>${
+        f.forecast ? `<article class="profit-forecast"><span>Marge prévue en fin de chantier${pct(f.forecast.marginPct)}</span><b>${money(f.forecast.margin)}</b><small>Prix ${money(f.forecast.priceHT)} − coût prévu ${money(f.forecast.plannedCost)}${f.forecast.hoursUsedPct != null ? ` · ${f.forecast.hoursUsedPct} % des heures prévues utilisées` : ""}</small></article>` : ""
+      }</div>
+      <div class="pro-grid-2">
+        <section class="profit-col"><h4>Ventes</h4>${line("Facturé", money(f.sales.invoicedHT))}${f.sales.creditedHT ? line("Avoirs", "− " + money(f.sales.creditedHT)) : ""}${line("<b>Ventes</b>", `<b>${money(f.sales.salesHT)}</b>`)}${line("Prix convenu", money(f.sales.priceHT), "devis acceptés + plus-values acceptées")}${line("Reste à facturer", money(f.sales.remainingToInvoiceHT))}${line("Encaissé", money(f.sales.paid), "argent reçu, TVA comprise")}</section>
+        <section class="profit-col"><h4>Coûts</h4>${line("Main-d’œuvre", money(f.costs.labour), `${f.costs.labourHours} h validées`)}${line("Matériel du stock", money(f.costs.material), `${f.costs.materialLines.length} article${f.costs.materialLines.length > 1 ? "s" : ""} sorti${f.costs.materialLines.length > 1 ? "s" : ""}`)}${line("Achats et dépenses", money(f.costs.purchases), `${f.costs.purchasesCount} dépense${f.costs.purchasesCount > 1 ? "s" : ""}, TVA déduite`)}${line("<b>Coûts</b>", `<b>${money(f.costs.total)}</b>`)}</section>
+      </div>
+      ${f.costs.people.length ? `<details class="profit-details"><summary>Détail de la main-d’œuvre</summary>${f.costs.people.map((x) => line(esc(x.name || "Salarié"), money(x.cost), `${x.hours} h`)).join("")}</details>` : ""}
+      ${f.costs.materialLines.length ? `<details class="profit-details"><summary>Détail du matériel</summary>${f.costs.materialLines.map((x) => line(esc(x.name), money(x.cost), `${x.quantity} ${esc(x.unit)}`)).join("")}</details>` : ""}
+      ${f.warnings.length ? `<ul class="profit-warnings">${f.warnings.map((w) => `<li>${esc(w)}</li>`).join("")}</ul>` : ""}
+      <p class="muted profit-note">Coût horaire = salaire + charges patronales, réparti sur les heures réellement travaillées dans l’année. <button type="button" class="link-btn" data-pro-action="profit-settings">Réglages des coûts</button></p>
+    </div>`;
+  }
+  // « Réglages des coûts »: how an hour of work is valued, per company.
+  let profitCfg = null;
+  async function profitSettings(companyId) {
+    core().modal("Réglages des coûts", '<p class="muted">Chargement…</p>');
+    try {
+      profitCfg = await core().api("profit/settings");
+    } catch (error) {
+      return (document.getElementById("modalBody").textContent = error.message);
+    }
+    const c = profitCfg.companies.find((x) => x.id === companyId) || profitCfg.companies[0];
+    if (!c) return (document.getElementById("modalBody").textContent = "Aucune entreprise.");
+    const s = c.settings;
+    const ro = profitCfg.canEdit ? "" : "disabled";
+    const field = (name, label, value, min, max, step, help) => `<label>${label}<input type="number" name="${name}" value="${esc(value)}" min="${min}" max="${max}" step="${step}" required ${ro}>${help ? `<small class="muted">${help}</small>` : ""}</label>`;
+    document.getElementById("modalBody").innerHTML = `<form id="profitSettingsForm" class="trade-form">${
+      profitCfg.companies.length > 1 ? `<label>Entreprise<select name="company" id="profitCompany">${profitCfg.companies.map((x) => `<option value="${esc(x.id)}" ${x.id === c.id ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select></label>` : `<input type="hidden" name="company" value="${esc(c.id)}">`
+    }<p class="muted">Le coût d’une heure de travail = salaire annuel + charges patronales, divisé par les heures réellement travaillées dans l’année.</p><div class="mv-grid">${field("chargesPercent", "Charges patronales (%)", s.chargesPercent, 0, 100, 0.5, "AVS/AI/APG, AC, LPP, LAA… en plus du salaire")}${field("salariesPerYear", "Salaires par an", s.salariesPerYear, 12, 14, 1, "13 avec le 13e salaire")}${field("weeksPerYear", "Semaines travaillées par an", s.weeksPerYear, 30, 52, 1, "52 moins vacances et jours fériés")}${field("fullTimeHours", "Heures par semaine à plein temps", s.fullTimeHours, 20, 60, 0.5, "si l’horaire du salarié n’est pas indiqué")}${field("purchaseVat", "TVA des achats sans taux (%)", s.purchaseVat, 0, 30, 0.1, "pour les dépenses saisies sans taux")}</div>${
+      profitCfg.showRates && c.employees.length
+        ? `<h4>Coût horaire par salarié</h4><p class="muted">Calculé depuis le salaire. Pour un sous-traitant ou un cas particulier, indiquez un coût fixe (laisser vide pour le calcul).</p><div class="profit-rates">${c.employees
+            .map((e) => `<div class="profit-rate"><span><b>${esc(e.name)}</b><small>${e.source === "missing" ? "Salaire non renseigné" : `Calculé : ${money(e.rate)} / h`}</small></span><input type="number" min="0" max="999" step="0.5" name="rate_${esc(e.id)}" value="${esc(e.fixed || "")}" placeholder="Coût fixe / h" ${ro} aria-label="Coût horaire fixe de ${esc(e.name)}"></div>`)
+            .join("")}</div>`
+        : ""
+    }${profitCfg.canEdit ? '<div class="trade-form-actions"><button type="submit" class="btn primary">Enregistrer</button></div>' : ""}</form>`;
+    document.getElementById("profitCompany")?.addEventListener("change", (e) => profitSettings(e.target.value));
+  }
+  document.addEventListener("submit", async (event) => {
+    if (event.target.id !== "profitSettingsForm") return;
+    event.preventDefault();
+    const form = event.target;
+    const v = Object.fromEntries(new FormData(form));
+    const rates = {};
+    for (const [k, val] of Object.entries(v)) if (k.startsWith("rate_")) rates[k.slice(5)] = val === "" ? "" : Number(val);
+    try {
+      await core().api("profit/settings", { company: v.company, chargesPercent: Number(v.chargesPercent), salariesPerYear: Number(v.salariesPerYear), weeksPerYear: Number(v.weeksPerYear), fullTimeHours: Number(v.fullTimeHours), purchaseVat: Number(v.purchaseVat), rates });
+      core().toast("Réglages des coûts enregistrés.");
+      core().closeModal(true);
+    } catch (error) {
+      core().toast(error.message);
+    }
+  });
   async function openProject(id) {
     if (!id) throw new Error("Chantier introuvable.");
     const out = await api("project/" + encodeURIComponent(id));
@@ -207,14 +266,14 @@
         <article><span>Équipe</span><b>${team.length}</b></article>
         <article><span>Heures</span><b>${time.reduce((n, x) => n + Number(x.hours || 0), 0).toFixed(2)} h</b></article>
         <article><span>Documents</span><b>${docs.length}</b></article>
-        ${finance ? `<article><span>Marge réelle</span><b>${money(finance.margin)}</b></article>` : ""}
+        ${finance ? `<article><span>Marge${finance.marginPct == null ? "" : ` · ${finance.marginPct} %`}</span><b>${money(finance.margin)}</b></article>` : ""}
       </div>
       ${section("Client, responsable & équipe", `<div class="pro-info-grid"><div><span>Client</span><b>${esc(out.client?.name || "—")}</b><small>${esc(out.client?.phone || "")} ${esc(out.client?.email || "")}</small></div><div><span>Adresse</span><b>${esc(p.address || "—")}</b></div><div><span>Responsable</span><b>${esc(p.managerName || p.responsible || "À définir")}</b></div><div><span>Salariés assignés</span><b>${team.map((x) => esc(x.name)).join(", ") || "Aucun"}</b></div></div>`)}
       ${section("Planning & rendez-vous", simpleRows([...plan, ...(out.appointments || [])], (x) => `<div><span><b>${esc(x.title || projectName(x.project))}</b><small>${x.date ? `${fmtDate(x.date)} · ${esc(x.start)}–${esc(x.end)} · ${esc(person(x.employeeId))}` : `${fmtDateTime(x.starts_at)} · ${esc(x.status || "")}`}</small></span></div>`, "Rien de planifié."))}
       ${section("Tâches, jalons & checklist", `<div class="pro-grid-3">${card("Tâches", simpleRows(out.tasks || [], (x) => `<div><span><b>${esc(x.title)}</b><small>${esc(x.status)} · ${fmtDate(x.due_date)}</small></span></div>`))}${card("Jalons", simpleRows(out.milestones || [], (x) => `<div><span><b>${esc(x.title)}</b><small>${esc(x.status)} · ${fmtDate(x.due_date)}</small></span></div>`))}${card("Checklist", simpleRows(out.checklist || [], (x) => `<div><span><b>${x.completed ? "✓ " : "○ "}${esc(x.label)}</b></span></div>`))}</div>`)}
       ${section("Photos, documents & rapports", `<div class="pro-grid-2">${card("Documents", simpleRows(docs, (x) => `<div><span><b>${esc(x.name)}</b><small>${esc(x.category || "Document")}</small></span></div>`))}${card("Albums photo", simpleRows(out.photoMeta || [], (x) => `<div><span><b>${esc(x.album)}</b><small>${esc(x.note || "")} · ${(x.annotation || []).length || 0} annotation(s)</small></span></div>`))}</div>${simpleRows(out.reports || [], (x) => `<div><span><b>Rapport ${fmtDate(x.report_date)}</b><small>${esc(x.summary || "")}</small></span></div>`, "Aucun rapport journalier.")}`)}
-      ${section("Matériel, heures & dépenses", `<div class="pro-grid-3">${card("Matériel", simpleRows(out.materialMovements || [], (x) => `<div><span><b>${esc(x.inventory_id)}</b><small>${esc(x.movement_type)} · ${esc(x.quantity)}</small></span></div>`))}${card("Heures", simpleRows(time, (x) => `<div><span><b>${esc(person(x.employeeId))}</b><small>${fmtDate((x.startedAt || x.date || "").slice(0, 10))} · ${esc(x.hours)} h · ${esc(x.status)}</small></span></div>`))}${card("Dépenses", simpleRows(out.expenses || [], (x) => `<div><span><b>${esc(x.supplier || "Dépense")}</b><small>${money(x.amount)} · ${fmtDate(x.date)}</small></span></div>`))}</div>`)}
-      ${finance ? section("Finance & marge réelle", `<div class="pro-finance-grid"><article><span>Budget</span><b>${money(finance.budget)}</b></article><article><span>Facturé</span><b>${money(finance.invoiced)}</b></article><article><span>Plus-values acceptées</span><b>${money(finance.acceptedChangeOrders)}</b></article><article><span>Coût réel</span><b>${money(finance.realCost)}</b></article><article><span>Marge</span><b>${money(finance.margin)}</b></article><article><span>Encaissé</span><b>${money(finance.paid)}</b></article></div>`) : ""}
+      ${section("Matériel, heures & dépenses", `<div class="pro-grid-3">${card("Matériel", simpleRows(out.materialMovements || [], (x) => `<div><span><b>${esc(x.item_name || x.inventory_id)}</b><small>${Number(x.quantity) < 0 ? "Sorti pour le chantier" : "Rentré en stock"} · ${esc(Math.abs(Number(x.quantity)))} ${esc(x.item_unit || "")}</small></span></div>`))}${card("Heures", simpleRows(time, (x) => `<div><span><b>${esc(person(x.employeeId))}</b><small>${fmtDate((x.startedAt || x.date || "").slice(0, 10))} · ${esc(x.hours)} h · ${esc(x.status)}</small></span></div>`))}${card("Dépenses", simpleRows(out.expenses || [], (x) => `<div><span><b>${esc(x.supplier || "Dépense")}</b><small>${money(x.amount)} · ${fmtDate(x.date)}</small></span></div>`))}</div>`)}
+      ${finance ? section("Rentabilité (hors TVA)", profitHtml(finance)) : ""}
       ${section("Devis, factures & paiements", `<div class="pro-grid-3">${card("Devis", simpleRows(out.quotes || [], (x) => `<button type="button" data-pro-action="open-finance" data-kind="quotes" data-id="${esc(x.id)}"><span><b>${esc(x.id)}</b><small>${esc(x.status)} · ${money(x.amount)}</small></span></button>`))}${card("Factures", simpleRows(out.invoices || [], (x) => `<button type="button" data-pro-action="open-finance" data-kind="invoices" data-id="${esc(x.id)}"><span><b>${esc(x.id)}</b><small>${esc(x.status)} · ${money(x.amount)}</small></span></button>`))}${card("Paiements", simpleRows(out.payments || [], (x) => `<div><span><b>${money(x.amount)}</b><small>${fmtDate(x.date)} · ${esc(x.method || "")}</small></span></div>`))}</div>`)}
       ${section("Interventions & signatures", simpleRows(work, (x) => `<div><span><b>${esc(x.title)}</b><small>${esc(x.status)} · ${fmtDateTime(x.scheduled_at)}${x.customer_signature ? ` · signé par ${esc(x.customer_signature)}` : " · signature en attente"}</small></span><a class="btn secondary" href="/api/pro/intervention/${encodeURIComponent(x.id)}.pdf">PDF</a></div>`, "Aucun bon d'intervention."))}
       ${section("Réception du chantier", out.acceptance
@@ -502,6 +561,7 @@
       else if (action === "goto-inventory") core().setPage("inventory");
       else if (action === "goto-invoice") { core().setPage("invoices"); setTimeout(() => core().documentModal("invoices", b.dataset.id), 0); }
       else if (action === "project-central") await openProject(b.dataset.id || b.dataset.projectId);
+      else if (action === "profit-settings") await profitSettings();
       else if (action === "open-conversation") { core().closeModal(true); core().selectConversation(b.dataset.key); }
       else if (action === "open-finance") core().documentModal(b.dataset.kind, b.dataset.id);
       else if (action === "finish-project") {
