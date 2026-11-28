@@ -379,44 +379,43 @@ function routes(db) {
     const projectCost = projects.reduce((n, x) => n + Number(x.cost || 0), 0);
     const outstanding = unpaid.reduce((n, x) => n + Math.max(0, Number(x.amount || 0) - Number(x.paid || 0)), 0);
     const financeVisible = D.privileged(req.user, ["admin", "direction", "accounting"]) || await hasPermission(db, req.user, "margin.view");
-    const projectFinance = financeVisible ? projects.map((project) => {
-      const projectInvoices = invoices.filter((invoice) => same(invoice.project, project.id));
-      const projectExpenses = scoped(view.expenses).filter((expense) => same(expense.project, project.id));
-      const projectRevenue = projectInvoices.filter((invoice) => invoice.status !== "Brouillon").reduce((sum, invoice) => sum + Number(invoice.amount || 0), 0);
-      const expenseTotal = projectExpenses.reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
-      const cost = Math.max(Number(project.cost || 0), expenseTotal);
-      const projectOutstanding = projectInvoices.reduce((sum, invoice) => sum + Math.max(0, Number(invoice.amount || 0) - Number(invoice.paid || 0)), 0);
-      const hours = times.filter((entry) => same(entry.project, project.id) && entry.status === "Validée").reduce((sum, entry) => sum + Number(entry.hours || 0), 0);
-      return {
-        id: project.id,
-        title: project.title,
-        company: project.company,
-        revenue: money(projectRevenue),
-        cost: money(cost),
-        margin: money(projectRevenue - cost),
-        outstanding: money(projectOutstanding),
-        productiveHours: money(hours),
-      };
-    }).sort((a, b) => Math.abs(Number(b.revenue)) - Math.abs(Number(a.revenue))) : [];
+    // The single profitability calculation (profit.js): excluding VAT, labour, material, credit notes.
+    const Profit = require("./profit-routes");
+    const fullProjects = projects.map((p) => (data.projects || []).find((x) => same(x.id, p.id)) || p);
+    const profits = financeVisible ? await Profit.profitsFor(db, data, fullProjects) : new Map();
+    const projectFinance = financeVisible
+      ? fullProjects.map((project) => {
+          const r = profits.get(String(project.id));
+          const projectOutstanding = invoices.filter((invoice) => same(invoice.project, project.id)).reduce((sum, invoice) => sum + Math.max(0, Number(invoice.amount || 0) - Number(invoice.paid || 0)), 0);
+          return {
+            id: project.id,
+            title: project.title,
+            company: project.company,
+            revenue: r.sales.salesHT,
+            cost: r.costs.total,
+            margin: r.margin,
+            marginPct: r.marginPct,
+            outstanding: money(projectOutstanding),
+            productiveHours: r.costs.labourHours,
+          };
+        }).sort((a, b) => Math.abs(Number(b.revenue)) - Math.abs(Number(a.revenue)))
+      : [];
     const companyIds = [...new Set(projects.map((project) => String(project.company || "")).filter(Boolean))];
     const companyFinance = financeVisible ? companyIds.map((companyId) => {
       const companyInvoices = invoices.filter((invoice) => String(invoice.company || "") === companyId);
-      const companyExpenses = scoped(view.expenses).filter((expense) => String(expense.company || "") === companyId);
-      const companyProjects = projects.filter((project) => String(project.company || "") === companyId);
-      const companyTimes = times.filter((entry) => String(entry.company || "") === companyId && entry.status === "Validée");
-      const companyRevenue = companyInvoices.filter((invoice) => invoice.status !== "Brouillon").reduce((sum, invoice) => sum + Number(invoice.amount || 0), 0);
-      const companyExpenseTotal = companyExpenses.reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
-      const companyProjectCost = companyProjects.reduce((sum, project) => sum + Number(project.cost || 0), 0);
+      const t = require("./profit").total(fullProjects.filter((p) => String(p.company || "") === companyId).map((p) => profits.get(String(p.id))));
       return {
         company: companyId,
-        revenue: money(companyRevenue),
-        expenses: money(companyExpenseTotal),
-        projectCost: money(companyProjectCost),
-        margin: money(companyRevenue - Math.max(companyExpenseTotal, companyProjectCost)),
+        revenue: t.salesHT,
+        expenses: t.purchases,
+        projectCost: t.costs,
+        margin: t.margin,
+        marginPct: t.marginPct,
         outstanding: money(companyInvoices.reduce((sum, invoice) => sum + Math.max(0, Number(invoice.amount || 0) - Number(invoice.paid || 0)), 0)),
-        productiveHours: money(companyTimes.reduce((sum, entry) => sum + Number(entry.hours || 0), 0)),
+        productiveHours: t.labourHours,
       };
     }) : [];
+    const groupTotal = financeVisible ? require("./profit").total([...profits.values()]) : null;
     res.json({
       at: new Date().toISOString(),
       company: currentCompany || null,
@@ -441,10 +440,11 @@ function routes(db) {
         urgentWork: urgentWork.slice(0, 20),
       },
       finance: financeVisible ? {
-        revenue: money(revenue),
-        expenses: money(expenses),
-        projectCost: money(projectCost),
-        margin: money(revenue - Math.max(expenses, projectCost)),
+        revenue: groupTotal.salesHT,
+        expenses: groupTotal.purchases,
+        projectCost: groupTotal.costs,
+        margin: groupTotal.margin,
+        marginPct: groupTotal.marginPct,
         outstanding: money(outstanding),
         productiveHours: times.filter((x) => x.status === "Validée").reduce((n, x) => n + Number(x.hours || 0), 0),
         byCompany: companyFinance,
@@ -454,7 +454,7 @@ function routes(db) {
   }));
 
   router.get("/project/:id", wrap(async (req, res) => {
-    const { view } = await stateContext(db, req.user);
+    const { data, view } = await stateContext(db, req.user);
     const project = active(view.projects).find((x) => same(x.id, req.params.id));
     if (!project) D.fail("Chantier inaccessible.", 404);
     const pid = String(project.id);
@@ -482,15 +482,6 @@ function routes(db) {
       db.query("SELECT id,event_type,entity_type,entity_id,payload,created_at FROM app_events WHERE project_id=$1 ORDER BY created_at DESC LIMIT 300", [pid]),
     ]);
     const team = (project.team || []).map((id) => active(view.employees).find((x) => same(x.id, id))).filter(Boolean);
-    const materialCost = movements.rows.filter((x) => Number(x.quantity || 0) > 0).reduce((sum, movement) => {
-      const item = active(view.inventory).find((x) => same(x.id, movement.inventory_id));
-      return sum + Math.abs(Number(movement.quantity || 0)) * Number(item?.buy || 0);
-    }, 0);
-    const expenseCost = expenses.reduce((sum, x) => sum + Number(x.amount || 0), 0);
-    const recordedCost = Number(project.cost || 0);
-    const realCost = Math.max(recordedCost, expenseCost + materialCost);
-    const invoiced = invoices.filter((x) => x.status !== "Brouillon").reduce((sum, x) => sum + Number(x.amount || 0), 0);
-    const acceptedChangeOrders = changes.rows.filter((x) => ["approved", "accepted"].includes(String(x.status).toLowerCase())).reduce((sum, x) => sum + Number(x.amount || 0), 0);
     const marginVisible = D.privileged(req.user, ["admin", "direction", "accounting"]) || await hasPermission(db, req.user, "margin.view");
     const thread = (view.messageThreads || []).find((x) => same(x.projectId, pid)) || null;
     const acceptance = (await db.query(
@@ -516,20 +507,20 @@ function routes(db) {
       punch: punch.rows,
       changeOrders: changes.rows,
       photoMeta: photoMeta.rows,
-      materialMovements: movements.rows,
+      // With the article's name and unit (the list showed internal identifiers).
+      materialMovements: movements.rows.map((m) => {
+        const item = active(view.inventory).find((x) => same(x.id, m.inventory_id));
+        return { ...m, item_name: item?.name || "Article supprimé", item_unit: item?.unit || "" };
+      }),
       workOrders: workOrders.rows,
       appointments: appointments.rows,
       conversation: thread,
       acceptance,
       history: events.rows,
-      finance: marginVisible ? {
-        budget: money(project.budget),
-        invoiced: money(invoiced),
-        acceptedChangeOrders: money(acceptedChangeOrders),
-        realCost: money(realCost),
-        margin: money(invoiced + acceptedChangeOrders - realCost),
-        paid: money(payments.reduce((sum, x) => sum + Number(x.amount || 0), 0)),
-      } : null,
+      // The single profitability calculation (profit.js), for those who may see margins.
+      finance: marginVisible
+        ? (await require("./profit-routes").profitsFor(db, data, [(data.projects || []).find((x) => same(x.id, pid)) || project])).get(pid)
+        : null,
     });
   }));
 
@@ -1264,4 +1255,4 @@ function routes(db) {
   return router;
 }
 
-module.exports = { routes, ensureSchema, PERMISSIONS, DEFAULT_PERMISSION_KEYS };
+module.exports = { routes, ensureSchema, PERMISSIONS, DEFAULT_PERMISSION_KEYS, hasPermission };

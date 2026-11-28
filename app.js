@@ -921,6 +921,7 @@ function render() {
   )
     loadUsers();
   if (page === "audit") loadAudit();
+  if (page === "reports") loadProfitReport();
   if (page === "messages" && $("messageThread")) {
     const sameConversation = previousKey === chatKey();
     $("messageText").value = chatTextDrafts.get(chatKey()) || "";
@@ -2164,9 +2165,40 @@ function messagesView() {
   </section>`;
 }
 
+// Rapports: sales, costs and margin of the visible projects (single calculation, excluding VAT).
+async function loadProfitReport() {
+  const host = $("profitReport");
+  if (!host) return;
+  try {
+    const out = await api("profit/summary" + (company ? "?company=" + encodeURIComponent(company) : ""));
+    if (!$("profitReport")) return;
+    const t = out.total;
+    $("profitReport").innerHTML =
+      cards([
+        ["Ventes hors TVA", money(t.salesHT)],
+        ["Coûts des chantiers", money(t.costs)],
+        ["Marge" + (t.marginPct == null ? "" : ` (${t.marginPct} %)`), money(t.margin)],
+        ["Reste à facturer", money(t.remainingToInvoiceHT)],
+      ]) +
+      `<p class="muted">Coûts = main-d’œuvre ${money(t.labour)} (${t.labourHours} h validées) + matériel du stock ${money(t.material)} + achats ${money(t.purchases)}, sans la TVA. <button type="button" class="link-btn" data-pro-action="profit-settings">Réglages des coûts</button></p>` +
+      table(
+        ["Chantier", "Ventes", "Coûts", "Marge", "Prévue"],
+        out.projects.map((x) => [
+          `<button type="button" class="link-btn" data-pro-action="project-central" data-id="${esc(x.id)}">${esc(x.title)}</button>`,
+          money(x.salesHT),
+          money(x.costs),
+          `<span class="status ${x.margin < 0 ? "danger" : x.marginPct != null && x.marginPct < 10 ? "warning" : "ok"}">${money(x.margin)}${x.marginPct == null ? "" : ` · ${x.marginPct} %`}</span>`,
+          x.forecastMarginPct == null ? "—" : x.forecastMarginPct + " %",
+        ]),
+      );
+  } catch {
+    host.innerHTML = "";
+  }
+}
 function reportsView() {
   const months = new Map();
   for (const p of visible("payments")) {
+    if (p.kind === "credit") continue; // a credit note is not money received
     const m = p.date.slice(0, 7);
     months.set(m, (months.get(m) || 0) + p.amount);
   }
@@ -2177,12 +2209,8 @@ function reportsView() {
     ) +
     cards([
       ["Heures enregistrées", sum("time", "hours").toFixed(2) + " h"],
-      ["Coûts chantiers", money(sum("projects", "cost"))],
-      [
-        "Budget moins coûts",
-        money(sum("projects", "budget") - sum("projects", "cost")),
-      ],
     ]) +
+    '<div id="profitReport"></div>' +
     table(
       ["Mois", "Encaissements"],
       [...months].sort().map(([m, n]) => [esc(m), money(n)]),
@@ -2496,6 +2524,8 @@ const schemas = {
     ["start", "Début", "date"],
     ["end", "Fin", "date"],
     ["budget", "Budget CHF", "number"],
+    ["plannedHours", "Heures prévues", "number?"],
+    ["plannedMaterial", "Matériel prévu CHF hors TVA", "number?"],
     ["description", "Description", "textarea?"],
   ],
   planning: [
@@ -2533,7 +2563,7 @@ const schemas = {
     ["supplier", "Fournisseur"],
     ["reference", "N° de facture", "text?"],
     ["project", "Chantier", "@projects?"],
-    ["amount", "Montant CHF", "number"],
+    ["amount", "Montant CHF (TVA comprise)", "number"],
     ["date", "Date", "date"],
   ],
   inventory: [
@@ -2796,7 +2826,9 @@ function newForm(k) {
       ? `<h4 class="spaced">Lignes du document</h4><div id="lines">${lineRow()}</div>${btn("Ajouter une ligne", "add-line")}`
       : k === "clients"
         ? contactsEditor({}) + field(["notes", "Remarques (accès, consignes, interlocuteurs…)", "textarea?"])
-        : "",
+        : k === "expenses"
+          ? `<label for="f_vatRate">TVA comprise dans le montant</label><select id="f_vatRate" name="vatRate"><option value="8.1" selected>8,1 % (taux normal)</option><option value="2.6">2,6 % (taux réduit)</option><option value="3.8">3,8 % (hébergement)</option><option value="0">Sans TVA</option></select><p class="muted">La TVA des achats est récupérée : seul le montant hors TVA compte dans le coût du chantier.</p>`
+          : "",
     k === "clients" ? "Nouveau client" : menus[k][0],
   );
   if (k === "clients") arrangeClientForm({});
@@ -2950,7 +2982,7 @@ function projectModal(id) {
         .filter((i) => find("invoices", i))
         .map((i) => btn("Ouvrir la facture " + i, "invoice", i))
         .join(" ") +
-      `${p.description ? `<p>${esc(p.description)}</p>` : ""}${p.address ? `<p class="go-line"><span>${esc(p.address)}</span> ${goButton(p.address)}</p>` : ""}<p class="project-summary">${[p.clientId ? esc(name("clients", p.clientId)) : "", p.status ? badge(p.status) : "", p.start && p.end ? `${date(p.start)} – ${date(p.end)}` : p.start ? "Début " + date(p.start) : p.end ? "Fin " + date(p.end) : "", "Avancement " + esc(p.progress ?? 0) + " %"].filter(Boolean).join(" · ")}</p><p>Équipe : ${(p.team || []).map((id) => esc(name("employees", id))).join(", ") || "Non affectée"}</p>${p.budget !== undefined ? `<p>Budget ${money(p.budget)} · Coûts ${money(p.cost)}</p>` : ""}${can(ops) ? btn("Modifier le suivi", "project-edit", id) + " " + btn("Supprimer le chantier", "project-delete", id, "danger") : ""} ${(() => { const thread = (state.messageThreads || []).find((t) => same(t.projectId, id)); return thread ? btn("Ouvrir la discussion", "chat-open-project", thread.id, "primary") : can(ops) ? btn("Créer la discussion chantier", "chat-create-project", id) : ""; })()}<h4 class="spaced">Documents et photos</h4>${table(
+      `${p.description ? `<p>${esc(p.description)}</p>` : ""}${p.address ? `<p class="go-line"><span>${esc(p.address)}</span> ${goButton(p.address)}</p>` : ""}<p class="project-summary">${[p.clientId ? esc(name("clients", p.clientId)) : "", p.status ? badge(p.status) : "", p.start && p.end ? `${date(p.start)} – ${date(p.end)}` : p.start ? "Début " + date(p.start) : p.end ? "Fin " + date(p.end) : "", "Avancement " + esc(p.progress ?? 0) + " %"].filter(Boolean).join(" · ")}</p><p>Équipe : ${(p.team || []).map((id) => esc(name("employees", id))).join(", ") || "Non affectée"}</p><p class="profit-summary" data-profit-summary="${esc(id)}" hidden></p>${can(ops) ? btn("Modifier le suivi", "project-edit", id) + " " + btn("Supprimer le chantier", "project-delete", id, "danger") : ""} ${(() => { const thread = (state.messageThreads || []).find((t) => same(t.projectId, id)); return thread ? btn("Ouvrir la discussion", "chat-open-project", thread.id, "primary") : can(ops) ? btn("Créer la discussion chantier", "chat-create-project", id) : ""; })()}<h4 class="spaced">Documents et photos</h4>${table(
         ["Fichier", ""],
         state.documents
           .filter((x) => same(x.project, id))
@@ -2963,6 +2995,20 @@ function projectModal(id) {
       )}<div data-trade-project="${esc(id)}"></div>`,
   );
   window.SGOTrade?.projectModal?.(p);
+  loadProfitSummary(id);
+}
+// The project's margin (for those who may see margins), from the single calculation.
+async function loadProfitSummary(id) {
+  const host = document.querySelector(`[data-profit-summary="${CSS.escape(String(id))}"]`);
+  if (!host) return;
+  try {
+    const { profit: f } = await api("profit/project/" + encodeURIComponent(id));
+    const tone = f.margin < 0 ? "danger" : f.marginPct != null && f.marginPct < 10 ? "warning" : "ok";
+    host.innerHTML = `Ventes ${money(f.sales.salesHT)} · Coûts ${money(f.costs.total)} · <span class="status ${tone}">Marge ${money(f.margin)}${f.marginPct == null ? "" : ` (${f.marginPct} %)`}</span> <span class="muted">hors TVA</span>${f.forecast ? ` · prévue ${f.forecast.marginPct == null ? money(f.forecast.margin) : f.forecast.marginPct + " %"}` : ""} <button type="button" class="link-btn" data-pro-action="project-central" data-id="${esc(id)}">Détail</button>`;
+    host.hidden = false;
+  } catch {
+    host.remove();
+  }
 }
 function documentModal(k, id) {
   const r = find(k, id);
@@ -4054,6 +4100,8 @@ document.addEventListener("click", async (e) => {
       formShell(
         [
           ["progress", "Avancement %", "number", p.progress],
+          ["plannedHours", "Heures prévues", "number?", p.plannedHours || ""],
+          ["plannedMaterial", "Matériel prévu CHF hors TVA", "number?", p.plannedMaterial || ""],
           ["description", "Description", "textarea?", p.description],
         ],
         "project.update",

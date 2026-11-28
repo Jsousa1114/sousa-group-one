@@ -1812,22 +1812,27 @@ function routes(db) {
           (n, x) => n + Math.max(0, (Number(x.amount) || 0) - (Number(x.paid) || 0)),
           0,
         ),
-        byProject = ctx.view.projects.map((p) => {
-          const invoices = ctx.view.invoices.filter((i) => D.same(i.project, p.id)),
-            revenue = sum(invoices, "amount"),
-            paid = sum(invoices, "paid"),
-            cost = Number(p.cost) || 0;
-          return {
-            id: p.id,
-            title: p.title,
-            company: p.company,
-            revenue,
-            paid,
-            cost,
-            margin: revenue - cost,
-            progress: Number(p.progress) || 0,
-          };
+        byProject = [];
+      // One calculation of profitability everywhere (profit.js): sales and costs excluding VAT,
+      // labour, material, credit notes. Costs and margins only for those who may see margins.
+      const Profit = require("./profit-routes");
+      const marginOk = await Profit.marginVisible(db, req.user);
+      const full = ctx.view.projects.map((p) => ctx.data.projects.find((x) => D.same(x.id, p.id)) || p);
+      const profits = await Profit.profitsFor(db, ctx.data, full);
+      for (const p of full) {
+        const r = profits.get(String(p.id));
+        byProject.push({
+          id: p.id,
+          title: p.title,
+          company: p.company,
+          revenue: r.sales.salesHT,
+          paid: r.sales.paid,
+          cost: marginOk ? r.costs.total : null,
+          margin: marginOk ? r.margin : null,
+          marginPct: marginOk ? r.marginPct : null,
+          progress: Number(p.progress) || 0,
         });
+      }
       const byCompany = {};
       for (const c of ctx.view.companies.filter((x) => x.id !== "group"))
         byCompany[c.id] = {
@@ -1839,16 +1844,30 @@ function routes(db) {
           projectCost: 0,
           hours: 0,
         };
+      // Issued invoices excluding VAT, less credit notes; cash received without credit notes.
+      const credited = new Map();
+      for (const x of ctx.view.payments.filter((x) => x.kind === "credit")) credited.set(String(x.invoice), (credited.get(String(x.invoice)) || 0) + (Number(x.amount) || 0));
+      const cashBy = new Map();
+      for (const x of ctx.view.payments.filter((x) => x.kind !== "credit")) cashBy.set(String(x.invoice), (cashBy.get(String(x.invoice)) || 0) + (Number(x.amount) || 0));
+      const netSales = (i) => {
+        if (i.status === "Brouillon" || (i.status === "Annulée" && !credited.get(String(i.id)))) return 0;
+        const ratio = Number(i.amount) > 0 ? require("./profit").netOf(i) / Number(i.amount) : 1;
+        return require("./profit").netOf(i) - (credited.get(String(i.id)) || 0) * ratio;
+      };
       for (const i of ctx.view.invoices) {
         const c = i.company || ctx.data.projects.find((p) => D.same(p.id, i.project))?.company;
         if (byCompany[c]) {
           byCompany[c].invoices++;
-          byCompany[c].revenue += Number(i.amount) || 0;
-          byCompany[c].paid += Number(i.paid) || 0;
+          byCompany[c].revenue += netSales(i);
+          byCompany[c].paid += cashBy.get(String(i.id)) || 0;
         }
       }
-      for (const p of ctx.view.projects)
-        if (byCompany[p.company]) byCompany[p.company].projectCost += Number(p.cost) || 0;
+      for (const p of full)
+        if (byCompany[p.company] && marginOk) byCompany[p.company].projectCost += profits.get(String(p.id)).costs.total;
+      for (const c of Object.values(byCompany)) {
+        c.revenue = Math.round(c.revenue * 100) / 100;
+        c.projectCost = marginOk ? Math.round(c.projectCost * 100) / 100 : null;
+      }
       for (const t of ctx.view.time) {
         const p = ctx.data.projects.find((x) => D.same(x.id, t.project));
         const c = p?.company || ctx.data.employees.find((e) => D.same(e.id, t.employeeId))?.company;
@@ -1879,8 +1898,8 @@ function routes(db) {
       }
       res.json({
         kpis: {
-          invoiceRevenue: sum(ctx.view.invoices, "amount"),
-          collected: sum(ctx.view.payments, "amount"),
+          invoiceRevenue: Math.round(ctx.view.invoices.reduce((t, i) => t + netSales(i), 0) * 100) / 100,
+          collected: sum(ctx.view.payments.filter((x) => x.kind !== "credit"), "amount"),
           outstanding,
           expenses: sum(ctx.view.expenses, "amount"),
           hours: sum(ctx.view.time, "hours"),

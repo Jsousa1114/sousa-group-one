@@ -171,6 +171,8 @@ async function ensureSchema(db) {
       created_by INTEGER NOT NULL,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )`);
+    // A credit note is applied to its invoice as a settlement (payment of kind « credit »).
+    await q("ALTER TABLE p1_credit_notes ADD COLUMN IF NOT EXISTS payment_id TEXT");
     await q(`CREATE TABLE IF NOT EXISTS p1_invoice_reminders(
       id TEXT PRIMARY KEY,
       invoice_id TEXT NOT NULL,
@@ -887,16 +889,45 @@ function routes(db) {
       [id,client.company,String(client.id),b.projectId?String(b.projectId):null,clean(String(b.title||""),250),JSON.stringify(lines),frequency,isoDate(b.nextRun,false),Math.round(num(b.paymentDays??30,0,365)),b.active!==false,req.user.id]
     ); res.json({ok:true,id});
   }));
+  // A credit note lowers what the client owes: it is recorded on the invoice as a settlement
+  // (not as money received), so the balance, the reminders, the QR slip and the profitability all
+  // take it into account. Beyond what is still due, the rest is to be refunded to the client.
+  async function applyCredit(userId, { invoiceId, amount, number, reason, existingId }) {
+    return withStateWrite(db, userId, "finance.credit_note", async (c, data, user) => {
+      const inv = D.viewState(data, user).invoices.find((x) => D.same(x.id, invoiceId) && !x.deletedAt);
+      if (!inv) D.fail("Facture inaccessible.", 403);
+      if (inv.status === "Brouillon") D.fail("Émettez la facture avant de lui appliquer un avoir.");
+      const payment = D.applyCommand(data, user, {
+        action: "create",
+        collection: "payments",
+        payload: { invoice: inv.id, amount, date: new Date().toISOString().slice(0, 10), method: `Avoir ${number}`, kind: "credit", creditNote: number },
+      }).result;
+      if (existingId) await c.query("UPDATE p1_credit_notes SET status='applied', payment_id=$2 WHERE id=$1 AND payment_id IS NULL", [existingId, payment.id]);
+      else
+        await c.query(
+          "INSERT INTO p1_credit_notes(id,number,company,invoice_id,client_id,amount,reason,status,created_by,payment_id) VALUES($1,$2,$3,$4,$5,$6,$7,'applied',$8,$9)",
+          [randomUUID(), number, inv.company, String(inv.id), String(inv.clientId), amount, reason, userId, payment.id],
+        );
+      const invoice = data.invoices.find((x) => D.same(x.id, inv.id));
+      return { changed: ["payments", "invoices"], audit: { invoice: inv.id, number, amount }, number, refund: Math.max(0, Math.round((Number(invoice.paid) - Number(invoice.amount)) * 100) / 100) };
+    });
+  }
   r.post("/finance/credit-note", wrap(async (req,res) => {
     if(!finance(req.user)) D.fail("Accès comptabilité requis.",403);
-    const ctx=await stateContext(db,req.user), inv=ctx.view.invoices.find((x)=>D.same(x.id,req.body?.invoiceId)&&!x.deletedAt);
-    if(!inv) D.fail("Facture inaccessible.",403);
-    const amount=money(req.body?.amount); if(amount>Number(inv.amount||0)) D.fail("Avoir supérieur à la facture.");
-    const id=randomUUID(), number="AV-"+new Date().getUTCFullYear()+"-"+String(Number((await db.query("SELECT COUNT(*)::int n FROM p1_credit_notes WHERE EXTRACT(YEAR FROM created_at)=EXTRACT(YEAR FROM NOW())")).rows[0]?.n||0)+1).padStart(4,"0");
-    await db.query(
-      "INSERT INTO p1_credit_notes(id,number,company,invoice_id,client_id,amount,reason,status,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,'issued',$8)",
-      [id,number,inv.company,String(inv.id),String(inv.clientId),amount,clean(String(req.body?.reason||""),2000),req.user.id]
-    ); res.json({ok:true,id,number});
+    const amount=money(req.body?.amount); if(!(amount>0)) D.fail("Montant invalide.");
+    const reason=clean(String(req.body?.reason||""),2000); if(!reason) D.fail("Indiquez le motif de l’avoir.");
+    const number="AV-"+new Date().getUTCFullYear()+"-"+String(Number((await db.query("SELECT COUNT(*)::int n FROM p1_credit_notes WHERE EXTRACT(YEAR FROM created_at)=EXTRACT(YEAR FROM NOW())")).rows[0]?.n||0)+1).padStart(4,"0");
+    const out=await applyCredit(req.user.id,{invoiceId:req.body?.invoiceId,amount,number,reason});
+    res.json({ok:true,number:out.number,refund:out.refund});
+  }));
+  // Credit notes issued before they were applied to their invoice.
+  r.post("/finance/credit-note/:id/apply", wrap(async (req,res) => {
+    if(!finance(req.user)) D.fail("Accès comptabilité requis.",403);
+    const note=(await db.query("SELECT * FROM p1_credit_notes WHERE id=$1",[String(req.params.id)])).rows[0];
+    if(!note||!inScope(req.user,note.company)) D.fail("Avoir introuvable.",404);
+    if(note.payment_id) D.fail("Cet avoir est déjà appliqué à sa facture.");
+    const out=await applyCredit(req.user.id,{invoiceId:note.invoice_id,amount:Number(note.amount),number:note.number,reason:note.reason,existingId:note.id});
+    res.json({ok:true,number:out.number,refund:out.refund});
   }));
   r.post("/finance/payment-link", wrap(async (req,res) => {
     if(!finance(req.user)) D.fail("Accès comptabilité requis.",403);

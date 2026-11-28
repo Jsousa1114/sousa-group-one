@@ -93,6 +93,7 @@ function createApp(db = pool) {
   app.use("/api/suppliers", require("./supplier-routes").routes(db));
   app.use("/api/bank", require("./bank-routes").routes(db));
   app.use("/api/trade", require("./trade-routes").routes(db));
+  app.use("/api/profit", require("./profit-routes").routes(db));
   app.use("/api/moving-public", require("./moving-routes").publicRoutes(db));
   app.use("/api/moving", require("./moving-routes").routes(db));
   app.use("/api/reviews-public", require("./review-routes").publicRoutes(db));

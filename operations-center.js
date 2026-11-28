@@ -337,7 +337,7 @@
       k = out.kpis || {};
     root().querySelector("#opsBody").innerHTML = `
       ${kpis([
-        ["CA facturé", money(k.invoiceRevenue)],
+        ["CA facturé (hors TVA)", money(k.invoiceRevenue)],
         ["Encaissé", money(k.collected)],
         ["À encaisser", money(k.outstanding)],
         ["Dépenses", money(k.expenses)],
@@ -345,15 +345,15 @@
         ["Chantiers ouverts", k.openProjects || 0],
       ])}
       <div class="ops-grid-2">
-        <article class="card"><h3>Rentabilité par entreprise</h3><div class="table"><table><thead><tr><th>Entreprise</th><th>CA</th><th>Encaissé</th><th>Coûts chantier</th><th>Heures</th></tr></thead><tbody>
-          ${(out.byCompany || []).map((x) => `<tr><td>${esc(x.name)}</td><td>${money(x.revenue)}</td><td>${money(x.paid)}</td><td>${money(x.projectCost)}</td><td>${Number(x.hours || 0).toFixed(1)} h</td></tr>`).join("")}
+        <article class="card"><h3>Rentabilité par entreprise</h3><div class="table"><table><thead><tr><th>Entreprise</th><th>CA hors TVA</th><th>Encaissé</th><th>Coûts chantiers</th><th>Heures</th></tr></thead><tbody>
+          ${(out.byCompany || []).map((x) => `<tr><td>${esc(x.name)}</td><td>${money(x.revenue)}</td><td>${money(x.paid)}</td><td>${x.projectCost == null ? "—" : money(x.projectCost)}</td><td>${Number(x.hours || 0).toFixed(1)} h</td></tr>`).join("")}
         </tbody></table></div></article>
         <article class="card"><h3>Charge équipe à venir</h3><div class="ops-load-list">
           ${(out.teamLoad || []).map((x) => `<div><span>${esc(x.name)}</span><b>${esc(x.hours)} h</b></div>`).join("") || '<p class="muted">Aucune charge future.</p>'}
         </div></article>
       </div>
-      <article class="card"><h3>Rentabilité par chantier</h3><div class="table"><table><thead><tr><th>Chantier</th><th>CA</th><th>Coût</th><th>Marge</th><th>Avancement</th></tr></thead><tbody>
-        ${(out.byProject || []).map((x) => `<tr><td>${esc(x.title)}</td><td>${money(x.revenue)}</td><td>${money(x.cost)}</td><td>${money(x.margin)}</td><td>${esc(x.progress)} %</td></tr>`).join("")}
+      <article class="card"><h3>Rentabilité par chantier</h3><div class="table"><table><thead><tr><th>Chantier</th><th>CA hors TVA</th><th>Coûts</th><th>Marge</th><th>Avancement</th></tr></thead><tbody>
+        ${(out.byProject || []).map((x) => `<tr><td>${esc(x.title)}</td><td>${money(x.revenue)}</td><td>${x.cost == null ? "—" : money(x.cost)}</td><td>${x.margin == null ? "—" : money(x.margin) + (x.marginPct == null ? "" : ` (${x.marginPct} %)`)}</td><td>${esc(x.progress)} %</td></tr>`).join("")}
       </tbody></table></div></article>`;
   }
   async function renderAutomations() {

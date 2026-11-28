@@ -740,6 +740,8 @@ function applyCommand(
         team,
         status: "Planifié",
         description: text(p.description, "Description", 5000, true),
+        plannedHours: p.plannedHours === undefined || p.plannedHours === "" ? 0 : num(p.plannedHours, "Heures prévues", 0, 100000),
+        plannedMaterial: p.plannedMaterial === undefined || p.plannedMaterial === "" ? 0 : num(p.plannedMaterial, "Matériel prévu", 0, 1e8),
       };
       if (r.end < r.start) fail("La fin précède le début.");
     } else if (k === "planning") {
@@ -848,7 +850,12 @@ function applyCommand(
       const amount = cents(p.amount),
         remaining =
           Math.round(inv.amount * 100) - Math.round((inv.paid || 0) * 100);
-      if (amount > remaining) fail("Le paiement dépasse le solde restant.");
+      // A credit note may go beyond what is still due (the rest is refunded), never beyond
+      // what was invoiced.
+      if (p.kind === "credit") {
+        if (amount > Math.round(inv.amount * 100) - Math.round((inv.credited || 0) * 100))
+          fail("L’avoir dépasse le montant de la facture (avoirs déjà déduits).");
+      } else if (amount > remaining) fail("Le paiement dépasse le solde restant.");
       r = {
         ...r,
         id: identifier(d, k, "P", now),
@@ -860,8 +867,21 @@ function applyCommand(
         method: text(p.method, "Mode de paiement", 80),
         status: "Confirmé",
       };
+      // A credit note settles part of the invoice without money coming in.
+      if (p.kind === "credit") {
+        r.kind = "credit";
+        r.creditNote = text(p.creditNote, "N° d’avoir", 40);
+      }
       inv.paid = fromCents(Math.round((inv.paid || 0) * 100) + amount);
-      inv.status = inv.paid === inv.amount ? "Payée" : "Partiellement payée";
+      if (r.kind === "credit")
+        inv.credited = fromCents(Math.round((inv.credited || 0) * 100) + amount);
+      const cash = Math.round((inv.paid || 0) * 100) - Math.round((inv.credited || 0) * 100);
+      inv.status =
+        inv.paid >= inv.amount
+          ? cash > 0
+            ? "Payée"
+            : "Annulée"
+          : "Partiellement payée";
     } else if (k === "expenses") {
       const c = company(d, u, p.company),
         proj = p.project ? ref(d, "projects", p.project) : null;
@@ -876,6 +896,9 @@ function applyCommand(
         date: iso(p.date),
         status: "Enregistrée",
       };
+      // The VAT included in the amount (recovered: the cost of the purchase is the rest).
+      if (p.vatRate !== undefined && p.vatRate !== null && p.vatRate !== "")
+        r.vatRate = num(p.vatRate, "TVA", 0, 30);
       if (proj)
         proj.cost = fromCents(
           Math.round((proj.cost || 0) * 100) + Math.round(r.amount * 100),
@@ -1082,9 +1105,14 @@ function applyCommand(
               Math.round(r.amount * 100),
           ),
         );
+        if (r.kind === "credit")
+          inv.credited = fromCents(Math.max(0, Math.round(Number(inv.credited || 0) * 100) - Math.round(r.amount * 100)));
+        const cash = Math.round(Number(inv.paid || 0) * 100) - Math.round(Number(inv.credited || 0) * 100);
         inv.status =
           inv.paid >= inv.amount
-            ? "Payée"
+            ? cash > 0
+              ? "Payée"
+              : "Annulée"
             : inv.paid > 0
               ? "Partiellement payée"
               : "Émise";
@@ -1182,6 +1210,11 @@ function applyCommand(
     r.status = p.status;
     r.progress = num(p.progress, "Avancement", 0, 100);
     r.description = text(p.description, "Description", 5000, true);
+    // What the job should take: hours and material (excluding VAT), for the expected margin.
+    if (p.plannedHours !== undefined)
+      r.plannedHours = p.plannedHours === "" ? 0 : num(p.plannedHours, "Heures prévues", 0, 100000);
+    if (p.plannedMaterial !== undefined)
+      r.plannedMaterial = p.plannedMaterial === "" ? 0 : num(p.plannedMaterial, "Matériel prévu", 0, 1e8);
     if (!Array.isArray(p.team)) fail("Équipe invalide.");
     for (const id of p.team)
       if (!employeeInCompany(ref(d, "employees", id), r.company))
