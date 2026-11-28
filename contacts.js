@@ -57,7 +57,8 @@
   const findByEmail = (clients, address) => (clients || []).find((c) => !c?.deletedAt && hasEmail(c, address)) || null;
   const findByPhone = (clients, number) => (clients || []).find((c) => !c?.deletedAt && hasPhone(c, number)) || null;
   // What a client can be searched by.
-  const searchText = (c) => [...emails(c).map((e) => e.address + " " + e.label), ...phones(c).map((p) => p.number + " " + p.label)].join(" ");
+  const searchText = (c) =>
+    [...emails(c).map((e) => e.address + " " + e.label), ...phones(c).map((p) => p.number + " " + p.label), ...(Array.isArray(c?.sites) ? c.sites : []).map((x) => [x?.label, x?.street, x?.zip, x?.city].filter(Boolean).join(" "))].join(" ");
 
   // What a form sends, checked: { emails:[{label,address}], phones:[{label,number}] }, or only
   // « email » / « phone » (older forms, imports), which then replace the main entry of « current ».
@@ -92,7 +93,37 @@
     return { email: outEmails[0]?.address || "", phone: outPhones[0]?.number || "", emails: outEmails, phones: outPhones };
   }
 
-  const api = { emails, phones, hasEmail, hasPhone, findByEmail, findByPhone, searchText, normalize, phoneKey, emailKey, MAX };
+  // Addresses. The client's own address (street, number, zip, city) is the billing address: it is
+  // printed on quotes, invoices and the QR slip. « sites » are where the work is done (a residence,
+  // a depot…); without any, the work is done at the billing address.
+  const billingText = (c) =>
+    [[c?.street, c?.buildingNumber].filter(Boolean).join(" "), [c?.zip, c?.city].filter(Boolean).join(" ")].filter(Boolean).join(", ");
+  const siteText = (s) => [String(s?.street || "").trim(), [s?.zip, s?.city].filter(Boolean).join(" ").trim()].filter(Boolean).join(", ");
+  function sites(c) {
+    return (Array.isArray(c?.sites) ? c.sites : [])
+      .map((s) => ({ label: clean(s?.label, 60), street: clean(s?.street, 200), zip: clean(s?.zip, 20), city: clean(s?.city, 100) }))
+      .filter((s) => s.street || s.city);
+  }
+  // Where to go for this client: its first work address, or the billing address.
+  const workAddress = (c) => (sites(c)[0] ? siteText(sites(c)[0]) : billingText(c));
+  function normalizeSites(list) {
+    if (!Array.isArray(list)) throw new Error("Adresses d’intervention invalides.");
+    const out = [],
+      seen = new Set();
+    for (const raw of list) {
+      const s = { label: clean(raw?.label, 60), street: clean(raw?.street, 200), zip: clean(raw?.zip, 20), city: clean(raw?.city, 100) };
+      if (!s.street && !s.city && !s.zip) continue;
+      if (!s.street || !s.city) throw new Error(`Adresse d’intervention incomplète${s.label ? " (« " + s.label + " »)" : ""} : indiquez au moins la rue et la localité.`);
+      const key = siteText(s).toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(s);
+    }
+    if (out.length > 20) throw new Error("20 adresses d’intervention au maximum.");
+    return out;
+  }
+
+  const api = { emails, phones, hasEmail, hasPhone, findByEmail, findByPhone, searchText, normalize, phoneKey, emailKey, MAX, sites, siteText, billingText, workAddress, normalizeSites };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.SGOContacts = api;
 })(typeof window === "undefined" ? {} : window);

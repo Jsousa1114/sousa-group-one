@@ -425,6 +425,10 @@ async function renderPDF(r, kind, issuer, customer, includeQR = false) {
     [t[3], date(r.date)],
     [t[quote ? 4 : 5], date(r.valid || r.due)],
     ...(r.quoteId ? [[t[17], r.quoteId]] : []),
+    // Where the work is done, when it is not the billing address.
+    ...(r.site
+      ? [[{ fr: "Lieu d’intervention", de: "Einsatzort", it: "Luogo dell’intervento", en: "Work site" }[r.language || "fr"] || "Lieu d’intervention", r.site]]
+      : []),
   ]) {
     const a = wrap(key, 100, 10),
       b = wrap(value, 300, 10.5);

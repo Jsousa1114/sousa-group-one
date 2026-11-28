@@ -360,7 +360,8 @@
       const c = (core().getState().clients || []).find((x) => String(x.id) === e.target.value);
       const form = e.target.form;
       if (c && !form.elements.address.value)
-        form.elements.address.value = [[c.street, c.buildingNumber].filter(Boolean).join(" "), [c.zip, c.city].filter(Boolean).join(" ")].filter(Boolean).join(", ");
+        // Where the installation is: the client's first work address, or its billing address.
+        form.elements.address.value = window.SGOContacts?.workAddress(c) || [[c.street, c.buildingNumber].filter(Boolean).join(" "), [c.zip, c.city].filter(Boolean).join(" ")].filter(Boolean).join(", ");
       if (c && !form.elements.label.value) form.elements.label.value = c.name;
     }
   });

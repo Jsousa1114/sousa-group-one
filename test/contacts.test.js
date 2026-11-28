@@ -151,3 +151,55 @@ test("an invoice can go to several of the client's addresses", async () => {
   assert.equal((await call(`mail/finance/invoices/${id}`, { to: ["amb@amb.test", "pas-une-adresse"], qr: false })).status, 400);
   assert.equal((await call(`mail/finance/invoices/${id}`, { to: Array.from({ length: 6 }, (_, i) => `x${i}@amb.test`), qr: false })).status, 400);
 });
+
+test("billing address and work sites: checked, where to go, on the document and the project", () => {
+  assert.deepEqual(C.normalizeSites([{ label: "Résidence", street: "Elfenstrasse 3", zip: "3006", city: "Berne" }, { label: "", street: "", city: "" }, { street: "elfenstrasse 3", zip: "3006", city: "berne" }]).length, 1);
+  assert.throws(() => C.normalizeSites([{ label: "Dépôt", street: "Rue A 1" }]), /incomplète \(« Dépôt »\)/);
+  assert.throws(() => C.normalizeSites(Array.from({ length: 21 }, (_, i) => ({ street: "Rue " + i, city: "X" }))), /20 adresses/);
+  const billing = { street: "Weltpoststrasse", buildingNumber: "20", zip: "3015", city: "Berne" };
+  assert.equal(C.workAddress(billing), "Weltpoststrasse 20, 3015 Berne", "no site: the work is done at the billing address");
+  assert.equal(C.workAddress({ ...billing, sites: [{ street: "Elfenstrasse 3", zip: "3006", city: "Berne" }] }), "Elfenstrasse 3, 3006 Berne");
+  const d = D.emptyState();
+  const admin = { id: 1, role: "admin", company: "group" };
+  const c = D.applyCommand(d, admin, {
+    action: "create",
+    collection: "clients",
+    payload: { name: "Ambassade", company: "home", email: "s@amb.test", ...billing, country: "CH", sites: [{ label: "Résidence de l’ambassadeur", street: "Elfenstrasse 3", zip: "3006", city: "Berne" }] },
+  }).result;
+  assert.equal(c.sites[0].label, "Résidence de l’ambassadeur");
+  // An update without « sites » (older form) keeps them; an empty list removes them.
+  D.applyCommand(d, admin, { action: "client.update", payload: { id: c.id, name: "Ambassade", city: "Berne" } });
+  assert.equal(c.sites.length, 1);
+  assert.throws(() => D.applyCommand(d, admin, { action: "client.update", payload: { id: c.id, name: "A", city: "B", sites: [{ street: "Rue sans localité" }] } }), /incomplète/);
+  // The quote says where the work is done; once accepted, the project goes there.
+  const q = D.applyCommand(d, admin, {
+    action: "create",
+    collection: "quotes",
+    payload: { company: "home", clientId: c.id, title: "Tableau électrique", site: "Elfenstrasse 3, 3006 Berne", date: "2026-11-28", valid: "2026-12-28", lines: [{ description: "Tableau", quantity: 1, unitPrice: 1000, vatRate: 8.1 }] },
+  }).result;
+  assert.equal(q.site, "Elfenstrasse 3, 3006 Berne");
+  D.applyCommand(d, admin, { action: "quote.issue", payload: { id: q.id } });
+  D.applyCommand(d, admin, { action: "quote.decide", payload: { id: q.id, status: "Accepté", note: "Accord écrit de l’ambassade" } });
+  const project = d.projects.find((p) => p.id === q.project);
+  assert.equal(project.address, "Elfenstrasse 3, 3006 Berne");
+  // Without a site on the quote, the client's first work address.
+  D.applyCommand(d, admin, { action: "client.update", payload: { id: c.id, name: "Ambassade", city: "Berne", sites: [{ label: "Dépôt", street: "Route 9", zip: "3000", city: "Berne" }] } });
+  const q2 = D.applyCommand(d, admin, { action: "create", collection: "quotes", payload: { company: "home", clientId: c.id, title: "Éclairage", date: "2026-11-28", valid: "2026-12-28", lines: [{ description: "Spots", quantity: 1, unitPrice: 300, vatRate: 8.1 }] } }).result;
+  D.applyCommand(d, admin, { action: "quote.issue", payload: { id: q2.id } });
+  D.applyCommand(d, admin, { action: "quote.decide", payload: { id: q2.id, status: "Accepté", note: "OK" } });
+  assert.equal(d.projects.find((p) => p.id === q2.project).address, "Route 9, 3000 Berne");
+});
+
+test("the work site is printed on the PDF, the billing address stays in the customer box", async () => {
+  const { renderPDF } = require("../finance-pdf");
+  const r = { id: "D-2026-0009", title: "Tableau", date: "2026-11-28", valid: "2026-12-28", status: "Émise", language: "fr", site: "Elfenstrasse 3, 3006 Berne", lines: [{ description: "Tableau", quantity: 1, unitPrice: 100, vatRate: 0, discount: 0, unit: "pcs" }], amount: 100, subtotal: 100, net: 100, tax: 0, discount: 0, vat: [], depositPercent: 0, paid: 0 };
+  const issuer = { id: "home", name: "Sousa Home", billing: { street: "Rue", zip: "1000", city: "Lausanne", country: "CH" } };
+  const customer = { name: "Ambassade", street: "Weltpoststrasse", buildingNumber: "20", zip: "3015", city: "Berne", country: "CH" };
+  const pdf = await renderPDF(r, "quotes", issuer, customer, false);
+  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  const doc = await pdfjs.getDocument({ data: new Uint8Array(pdf), useSystemFonts: true }).promise;
+  const text = (await (await doc.getPage(1)).getTextContent()).items.map((i) => i.str).join(" ");
+  assert.match(text, /Lieu d’intervention/);
+  assert.match(text, /Elfenstrasse 3, 3006 Berne/);
+  assert.match(text, /Weltpoststrasse 20/);
+});

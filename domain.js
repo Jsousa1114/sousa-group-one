@@ -508,9 +508,10 @@ function quoteProject(d, q, now) {
       company: q.company,
       clientId: q.clientId,
       title: q.title,
-      address: [c.street, c.buildingNumber, c.zip, c.city]
-        .filter(Boolean)
-        .join(" "),
+      address:
+        q.site ||
+        Contacts.workAddress(c) ||
+        [c.street, c.buildingNumber, c.zip, c.city].filter(Boolean).join(" "),
       description: q.scope || q.title,
       start: now.slice(0, 10),
       end: "",
@@ -706,8 +707,14 @@ function applyCommand(
         country: text(p.country || "CH", "Pays", 2),
         type: text(p.type, "Type", 80, true),
         notes: text(p.notes, "Remarques", 2000, true),
+        sites: [],
         status: "Actif",
       };
+      try {
+        r.sites = p.sites === undefined ? [] : Contacts.normalizeSites(p.sites);
+      } catch (e) {
+        fail(e.message);
+      }
     } else if (k === "projects") {
       const c = company(d, u, p.company),
         client = ref(d, "clients", p.clientId);
@@ -805,6 +812,8 @@ function applyCommand(
         message: text(p.message, "Message", 5000, true),
         terms: text(p.terms, "Conditions", 5000, true),
         scope: text(p.scope, "Objet détaillé", 5000, true),
+        // Where the work is done, when it is not the billing address (printed on the PDF).
+        site: text(p.site, "Lieu d’intervention", 300, true),
         exclusions: text(p.exclusions, "Non compris / options", 5000, true),
         paymentNote: text(p.paymentNote, "Consigne de paiement", 1000, true),
         depositPercent:
@@ -1121,6 +1130,12 @@ function applyCommand(
       type: text(value.type, "Type", 80, true),
       notes: text(value.notes ?? "", "Remarques", 2000, true),
     });
+    if (p.sites !== undefined)
+      try {
+        r.sites = Contacts.normalizeSites(p.sites);
+      } catch (e) {
+        fail(e.message);
+      }
     result = r;
   } else if (action === "client.delete") {
     const client = ref(d, "clients", p.id);
