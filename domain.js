@@ -1,6 +1,7 @@
 "use strict";
 const { randomUUID } = require("node:crypto");
 const Finance = require("./finance");
+const Contacts = require("./contacts");
 class AppError extends Error {
   constructor(message, status = 400) {
     super(message);
@@ -684,21 +685,29 @@ function applyCommand(
       };
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(r.email)) fail("E-mail invalide.");
     } else if (k === "clients") {
+      // Access first (name, then company), then the e-mails and numbers.
+      const name = text(p.name, "Nom"),
+        clientCompany = company(d, u, p.company);
+      let contacts;
+      try {
+        contacts = Contacts.normalize(p);
+      } catch (e) {
+        fail(e.message);
+      }
       r = {
         ...r,
-        name: text(p.name, "Nom"),
-        company: company(d, u, p.company),
-        email: text(p.email, "E-mail"),
-        phone: text(p.phone, "Téléphone", 40, true),
+        name,
+        company: clientCompany,
+        ...contacts,
         city: text(p.city, "Ville"),
         street: text(p.street, "Rue", 200, true),
         buildingNumber: text(p.buildingNumber, "Numéro", 20, true),
         zip: text(p.zip, "Code postal", 20, true),
         country: text(p.country || "CH", "Pays", 2),
         type: text(p.type, "Type", 80, true),
+        notes: text(p.notes, "Remarques", 2000, true),
         status: "Actif",
       };
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(r.email)) fail("E-mail invalide.");
     } else if (k === "projects") {
       const c = company(d, u, p.company),
         client = ref(d, "clients", p.clientId);
@@ -1095,18 +1104,22 @@ function applyCommand(
     )
       fail("Modification du client non autorisée.", 403);
     const value = { ...r, ...p };
-    const email = text(value.email, "E-mail", 255);
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) fail("E-mail invalide.");
+    let contacts;
+    try {
+      contacts = Contacts.normalize(p, r);
+    } catch (e) {
+      fail(e.message);
+    }
     Object.assign(r, {
       name: text(value.name, "Nom"),
-      email,
-      phone: text(value.phone, "Téléphone", 40, true),
+      ...contacts,
       street: text(value.street, "Rue", 200, true),
       buildingNumber: text(value.buildingNumber, "Numéro", 20, true),
       zip: text(value.zip, "Code postal", 20, true),
       city: text(value.city, "Ville"),
       country: text(value.country || "CH", "Pays", 2).toUpperCase(),
       type: text(value.type, "Type", 80, true),
+      notes: text(value.notes ?? "", "Remarques", 2000, true),
     });
     result = r;
   } else if (action === "client.delete") {

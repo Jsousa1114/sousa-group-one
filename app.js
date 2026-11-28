@@ -2372,7 +2372,9 @@ function genericPage(k) {
       ],
       visible(k).map((r) => [
         ...cols.map(([f]) =>
-          ["amount", "buy", "sell", "salary"].includes(f)
+          k === "clients" && ["name", "email", "phone"].includes(f)
+            ? clientCell(r, f)
+            : ["amount", "buy", "sell", "salary"].includes(f)
             ? money(r[f])
             : ["date", "next", "service"].includes(f)
               ? date(r[f])
@@ -2479,8 +2481,6 @@ const schemas = {
   clients: [
     ["name", "Nom"],
     ["company", "Entreprise", "@companies"],
-    ["email", "E-mail", "email"],
-    ["phone", "Téléphone", "tel?"],
     ["street", "Rue", "text?"],
     ["buildingNumber", "Numéro", "text?"],
     ["zip", "Code postal", "text?"],
@@ -2793,10 +2793,74 @@ function newForm(k) {
     k,
     ["quotes", "invoices"].includes(k)
       ? `<h4 class="spaced">Lignes du document</h4><div id="lines">${lineRow()}</div>${btn("Ajouter une ligne", "add-line")}`
-      : "",
-    menus[k][0],
+      : k === "clients"
+        ? contactsEditor({}) + field(["notes", "Remarques (accès, consignes, interlocuteurs…)", "textarea?"])
+        : "",
+    k === "clients" ? "Nouveau client" : menus[k][0],
   );
+  if (k === "clients") placeContacts();
   if (company && $("f_company")) $("f_company").value = company;
+}
+// Several e-mails and phone numbers per client, each with a label; the first is the main one.
+// In the list of clients: the name opens the card; the main e-mail / number, and how many more.
+function clientCell(r, f) {
+  if (f === "name") return `<button type="button" class="link-btn client-name" data-action="client-card" data-id="${esc(r.id)}">${esc(r.name)}</button>`;
+  const C = window.SGOContacts;
+  const list = C ? (f === "email" ? C.emails(r).map((e) => e.address) : C.phones(r).map((p) => p.number)) : [r[f]].filter(Boolean);
+  if (!list.length) return "—";
+  return esc(list[0]) + (list.length > 1 ? ` <span class="more-count" title="${esc(list.slice(1).join(", "))}">+${list.length - 1}</span>` : "");
+}
+function contactRow(kind, item = {}, index = 0) {
+  const email = kind === "emails";
+  const value = email ? item.address : item.number;
+  return `<div class="contact-row${index === 0 ? " is-main" : ""}" data-contact-row="${kind}"><input class="contact-value" type="${email ? "email" : "tel"}" value="${esc(value || "")}" placeholder="${email ? "adresse@exemple.ch" : "+41 79 123 45 67"}" aria-label="${email ? "Adresse e-mail" : "Numéro de téléphone"}" ${email && index === 0 ? "required" : ""} maxlength="${email ? 254 : 40}"><input class="contact-label" value="${esc(item.label || "")}" placeholder="${email ? "Libellé (ex. Secrétariat)" : "Libellé (ex. Mobile, Bureau)"}" aria-label="Libellé" maxlength="60"><span class="contact-tools">${index === 0 ? '<span class="contact-main">Principal</span>' : `<button type="button" class="link-btn" data-action="contact-main">Principal</button>`}<button type="button" class="contact-remove" data-action="contact-remove" aria-label="Retirer" title="Retirer">×</button></span></div>`;
+}
+function contactsEditor(c) {
+  const C = window.SGOContacts;
+  const emails = C ? C.emails(c) : c.email ? [{ address: c.email }] : [];
+  const phones = C ? C.phones(c) : c.phone ? [{ number: c.phone }] : [];
+  return `<fieldset class="contact-list" data-contact-kind="emails"><legend>E-mails</legend><p class="muted">Le principal reçoit les factures, les devis et les e-mails automatiques ; les autres sont reconnus quand ils vous écrivent.</p><div class="contact-rows">${(emails.length ? emails : [{}]).map((e, i) => contactRow("emails", e, i)).join("")}</div><button type="button" class="btn secondary" data-action="contact-add" data-id="emails">+ Ajouter un e-mail</button></fieldset><fieldset class="contact-list" data-contact-kind="phones"><legend>Téléphones</legend><p class="muted">Tous les numéros sont reconnus pour les appels, les SMS et WhatsApp.</p><div class="contact-rows">${phones.map((p, i) => contactRow("phones", p, i)).join("")}</div><button type="button" class="btn secondary" data-action="contact-add" data-id="phones">+ Ajouter un numéro</button></fieldset>`;
+}
+// E-mails and numbers right after the name (and company), before the address.
+function placeContacts() {
+  const before = $("f_street")?.labels?.[0] || $("f_street");
+  if (before) for (const list of document.querySelectorAll("#entityForm .contact-list")) before.before(list);
+}
+function renumberContacts(list) {
+  const rows = [...list.querySelectorAll(".contact-row")];
+  const kind = list.dataset.contactKind;
+  rows.forEach((row, i) => {
+    row.classList.toggle("is-main", i === 0);
+    const tools = row.querySelector(".contact-tools");
+    tools.firstElementChild.outerHTML = i === 0 ? '<span class="contact-main">Principal</span>' : '<button type="button" class="link-btn" data-action="contact-main">Principal</button>';
+    if (kind === "emails") row.querySelector(".contact-value").required = i === 0;
+  });
+}
+function readContacts(form) {
+  const out = {};
+  for (const list of form.querySelectorAll(".contact-list")) {
+    const kind = list.dataset.contactKind;
+    out[kind] = [...list.querySelectorAll(".contact-row")]
+      .map((row) => ({ label: row.querySelector(".contact-label").value.trim(), [kind === "emails" ? "address" : "number"]: row.querySelector(".contact-value").value.trim() }))
+      .filter((x) => x.address || x.number);
+  }
+  return out;
+}
+function clientCard(id) {
+  const c = find("clients", id);
+  if (!c) return;
+  const C = window.SGOContacts;
+  const emails = C ? C.emails(c) : [{ address: c.email }];
+  const phones = C ? C.phones(c) : c.phone ? [{ number: c.phone }] : [];
+  const tel = (n) => String(n).replace(/[^\d+]/g, "");
+  const projects = visible("projects").filter((p) => same(p.clientId, id));
+  const open = visible("invoices").filter((i) => same(i.clientId, id) && !["Payée", "Annulée", "Brouillon"].includes(i.status));
+  modal(
+    c.name,
+    `<div class="client-card"><section><h4>E-mails</h4><ul class="client-contacts">${emails
+      .map((e, i) => `<li><a href="mailto:${esc(encodeURIComponent(e.address).replace(/%40/g, "@"))}">${esc(e.address)}</a>${e.label ? ` <span class="muted">· ${esc(e.label)}</span>` : ""}${i === 0 ? ' <span class="contact-main">Principal</span>' : ""}</li>`)
+      .join("")}</ul></section><section><h4>Téléphones</h4>${phones.length ? `<ul class="client-contacts">${phones.map((p) => `<li><a href="tel:${esc(tel(p.number))}">${esc(p.number)}</a>${p.label ? ` <span class="muted">· ${esc(p.label)}</span>` : ""}</li>`).join("")}</ul>` : '<p class="muted">Aucun numéro.</p>'}</section><section><h4>Adresse</h4><p class="go-line"><span>${esc(clientAddress(c) || "—")}</span> ${goButton(clientAddress(c))}</p></section>${c.notes ? `<section><h4>Remarques</h4><p class="preserve-lines">${esc(c.notes)}</p></section>` : ""}<section><h4>Suivi</h4><p>${projects.length} chantier${projects.length > 1 ? "s" : ""} · ${open.length} facture${open.length > 1 ? "s" : ""} ouverte${open.length > 1 ? "s" : ""}${open.length ? " (" + money(open.reduce((t, i) => t + (Number(i.amount) || 0) - (Number(i.paid) || 0), 0)) + ")" : ""}</p></section>${can(createRoles.clients) ? `<div class="form-actions">${btn("Modifier la fiche", "client-edit", id, "primary")}</div>` : ""}</div>`,
+  );
 }
 function clientEdit(id) {
   const client = find("clients", id);
@@ -2805,9 +2869,10 @@ function clientEdit(id) {
   formShell(
     fields,
     "client.update",
-    `<input type="hidden" name="id" value="${esc(id)}"><p>L’e-mail de contact ne modifie pas l’identifiant du compte de connexion. Les documents déjà émis conservent leurs coordonnées d’origine.</p>`,
+    `<input type="hidden" name="id" value="${esc(id)}">${contactsEditor(client)}${field(["notes", "Remarques (accès, consignes, interlocuteurs…)", "textarea?", client.notes || ""])}<p class="muted">Les e-mails de la fiche ne changent pas l’identifiant du compte de connexion du client. Les documents déjà émis gardent leurs coordonnées d’origine.</p>`,
     "Modifier le client",
   );
+  placeContacts();
   for (const [key] of fields)
     $("f_" + key).value = client[key] ?? (key === "country" ? "CH" : "");
 }
@@ -3771,6 +3836,22 @@ document.addEventListener("click", async (e) => {
       }
     } else if (a === "client-edit") {
       clientEdit(id);
+    } else if (a === "client-card") {
+      clientCard(id);
+    } else if (a === "contact-add") {
+      const list = b.closest(".contact-list");
+      list.querySelector(".contact-rows").insertAdjacentHTML("beforeend", contactRow(id, {}, list.querySelectorAll(".contact-row").length));
+      list.querySelector(".contact-row:last-child .contact-value").focus();
+    } else if (a === "contact-remove") {
+      const list = b.closest(".contact-list");
+      b.closest(".contact-row").remove();
+      if (list.dataset.contactKind === "emails" && !list.querySelector(".contact-row")) list.querySelector(".contact-rows").insertAdjacentHTML("beforeend", contactRow("emails", {}, 0));
+      renumberContacts(list);
+    } else if (a === "contact-main") {
+      const row = b.closest(".contact-row"),
+        list = b.closest(".contact-list");
+      list.querySelector(".contact-rows").prepend(row);
+      renumberContacts(list);
     } else if (a === "client-delete") {
       const client = find("clients", id);
       if (
@@ -4216,6 +4297,7 @@ document.addEventListener("submit", async (e) => {
       if (account?.employeeId) await employeeDetail(account.employeeId);
       return;
     }
+    if (k === "clients" || k === "client.update") Object.assign(p, readContacts(f));
     if (k === "project.update") p.team = data.getAll("team");
     if (k === "employee.companies") p.companies = data.getAll("companies");
     if (["quotes", "invoices", "finance.update"].includes(k))

@@ -1,4 +1,5 @@
 "use strict";
+const Contacts = require("./contacts");
 // After a recorded call or a voicemail: what was said, a short summary, and what to do — a
 // quote, an invoice, a task, an appointment, a new client, a call back — proposed to the
 // person, who confirms each proposal in the application. Nothing is created by the assistant.
@@ -83,7 +84,9 @@ async function contextFor(db, userId, number) {
   const view = D.viewState(data, user);
   const key = T.phoneKey(number);
   const clients = (view.clients || []).map((c) => ({ id: String(c.id), name: c.name || "", company: c.company || "", phone: c.phone || c.mobile || "", city: c.city || "" }));
-  const match = key.length >= 6 ? clients.filter((c) => T.phoneKey(c.phone) === key) : [];
+  // The caller is recognised by any of the client's numbers.
+  const callers = new Set(key.length >= 6 ? (view.clients || []).filter((c) => Contacts.hasPhone(c, number)).map((c) => String(c.id)) : []);
+  const match = clients.filter((c) => callers.has(c.id));
   const projects = (view.projects || [])
     .filter((p) => !["Terminé", "Archivé"].includes(p.status))
     .map((p) => ({ id: String(p.id), title: p.title || "", clientId: String(p.clientId || ""), company: p.company || "", address: p.address || "" }));

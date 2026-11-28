@@ -1,4 +1,5 @@
 "use strict";
+const Contacts = require("./contacts");
 // Routes of the « Boîte mail » page (/api/webmail). The mailbox itself is read from Gmail by
 // webmail.js; this file checks who may open which mailbox, and hands what is written to
 // webmail-compose.js (formatting, signature, drafts, outbox: 10 seconds to cancel or a time
@@ -393,7 +394,7 @@ function routes(db) {
       // What we know about the client who wrote, to answer questions about invoices or quotes.
       const lastIn = [...conv.messages].reverse().find((m) => m.from?.address && m.from.address !== box.address.toLowerCase());
       const view = D.viewState(state, req.user);
-      const client = lastIn ? (view.clients || []).find((c) => !c.deletedAt && String(c.email || "").trim().toLowerCase() === lastIn.from.address) : null;
+      const client = lastIn ? Contacts.findByEmail(view.clients, lastIn.from.address) : null;
       let facts = "";
       if (client) {
         const money = (n) => "CHF " + (Number(n) || 0).toFixed(2);

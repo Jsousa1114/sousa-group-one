@@ -1,4 +1,5 @@
 "use strict";
+const Contacts = require("./contacts");
 // « Téléphone »: each person's calls go through the company's exchange (Asterisk, on the same
 // server). Their mobile forwards its calls to their Swiss operator number; the exchange hands
 // every call to this module (ARI), which rings the person's browsers (computer, phone), plays
@@ -643,7 +644,7 @@ async function contactName(db, number) {
   try {
     const { loadState } = require("./db");
     const data = (await loadState(db)).data || {};
-    const client = (data.clients || []).find((c) => phoneKey(c.phone) === key || phoneKey(c.mobile) === key);
+    const client = Contacts.findByPhone(data.clients, number);
     if (client) return client.name || "";
     const employee = (data.employees || []).find((x) => phoneKey(x.phone) === key);
     if (employee) return employee.name || "";

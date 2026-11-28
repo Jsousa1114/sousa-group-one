@@ -1,4 +1,5 @@
 "use strict";
+const Contacts = require("./contacts");
 const express = require("express");
 const { randomUUID, createHmac } = require("node:crypto");
 const dns = require("node:dns").promises;
@@ -451,7 +452,7 @@ function routes(db) {
         });
       for (const c of ctx.view.clients)
         add("client", c.id, c.name, c.email || c.phone || "", "clients", {
-          search: [c.city, c.street, c.email, c.phone].join(" "),
+          search: [c.city, c.street, Contacts.searchText(c)].join(" "),
         });
       for (const e of ctx.view.employees)
         add("employee", e.id, e.name, e.job || "", "employees", {

@@ -1,4 +1,5 @@
 "use strict";
+const Contacts = require("./contacts");
 // Writing in the « Boîte mail »: the formatted text (cleaned), the signature with the company's
 // logo, the attachments (files, the original's, the application's invoices, quotes and
 // documents), drafts kept in Gmail's « Brouillons », and the outbox: a message waits 10 seconds
@@ -245,7 +246,7 @@ async function prepare(db, state, user, box, body, { draft = false } = {}) {
 
   const quote = original && b.quote !== false ? quoteOf(original, mode) : { text: "", html: "" };
   const recipients = [...to, ...cc].map((a) => a.toLowerCase());
-  const client = (state.clients || []).find((c) => !c.deletedAt && recipients.includes(String(c.email || "").trim().toLowerCase()));
+  const client = (state.clients || []).find((c) => !c.deletedAt && recipients.some((a) => Contacts.hasEmail(c, a)));
   return {
     version: 1,
     box: box.id,
