@@ -1121,6 +1121,64 @@ test("a client can have several e-mails and numbers with labels; the main one is
     h.close();
   }
 });
+test("billing address and work sites: client form, card, new project and new quote", async () => {
+  const h = await setup("admin", false, false, (d) => {
+    Object.assign(d.clients[0], { email: "contact@test.invalid", street: "Weltpoststrasse", buildingNumber: "20", zip: "3015", city: "Berne", country: "CH" });
+  });
+  const d = h.w.document;
+  try {
+    click(h, '[data-page="clients"]');
+    click(h, '[data-action="client-edit"]');
+    // The client's address is shown as the billing address; the work sites come after.
+    const billing = d.querySelector("#entityForm .address-block");
+    assert.match(billing.querySelector("legend").textContent, /Adresse de facturation/);
+    assert.ok(billing.contains(d.getElementById("f_street")) && billing.contains(d.getElementById("f_city")));
+    assert.equal(d.querySelectorAll("[data-site-row]").length, 0);
+    click(h, '[data-action="site-add"]');
+    const row = d.querySelector("[data-site-row]");
+    row.querySelector(".site-label").value = "Résidence de l’ambassadeur";
+    row.querySelector(".site-street").value = "Elfenstrasse 3";
+    row.querySelector(".site-zip").value = "3006";
+    row.querySelector(".site-city").value = "Berne";
+    submit(h);
+    await flush();
+    await flush();
+    const saved = JSON.parse(h.requests.filter((r) => r.url.endsWith("/command")).pop().opts.body).payload;
+    assert.deepEqual(saved.sites, [{ label: "Résidence de l’ambassadeur", street: "Elfenstrasse 3", zip: "3006", city: "Berne" }]);
+    // The card: both addresses, each with « Y aller ».
+    d.querySelector('[data-action="client-card"]').click();
+    const card = d.querySelector(".client-card");
+    assert.match(card.textContent, /Adresse de facturation.*Weltpoststrasse 20, 3015 Berne/s);
+    assert.match(card.textContent, /Résidence de l’ambassadeur · Elfenstrasse 3, 3006 Berne/);
+    assert.ok(card.querySelector('[data-action="go-to"][data-id="Elfenstrasse 3, 3006 Berne"]'));
+    click(h, '[data-action="close-modal"]');
+    // The list's « Y aller » goes where the work is done.
+    assert.ok(d.querySelector('#content [data-action="go-to"][data-id="Elfenstrasse 3, 3006 Berne"]'));
+    // A new project for this client starts at the work site; the billing address is offered too.
+    click(h, '[data-page="projects"]');
+    click(h, '[data-action="new"][data-id="projects"]');
+    const select = d.getElementById("f_clientId");
+    select.value = select.querySelector("option").value;
+    select.dispatchEvent(new h.w.Event("change", { bubbles: true }));
+    assert.equal(d.getElementById("f_address").value, "Elfenstrasse 3, 3006 Berne");
+    assert.deepEqual([...d.querySelectorAll("#f_addressChoices option")].map((o) => o.value), ["Elfenstrasse 3, 3006 Berne", "Weltpoststrasse 20, 3015 Berne"]);
+    click(h, '[data-action="close-modal"]');
+    // A new quote: « Lieu d’intervention » filled with the work site.
+    click(h, '[data-page="quotes"]');
+    click(h, '[data-action="new"]');
+    const quoteClient = d.getElementById("f_clientId");
+    quoteClient.value = [...quoteClient.options].find((o) => !o.disabled && o.value).value;
+    quoteClient.dispatchEvent(new h.w.Event("change", { bubbles: true }));
+    assert.equal(d.getElementById("f_site").value, "Elfenstrasse 3, 3006 Berne");
+    // Typed by hand: kept when the client changes again.
+    d.getElementById("f_site").value = "Chantier provisoire";
+    d.getElementById("f_site").dispatchEvent(new h.w.Event("input", { bubbles: true }));
+    quoteClient.dispatchEvent(new h.w.Event("change", { bubbles: true }));
+    assert.equal(d.getElementById("f_site").value, "Chantier provisoire");
+  } finally {
+    h.close();
+  }
+});
 test("client edit is prefilled and saves contact changes from the list", async () => {
   const h = await setup("admin", false, false, (d) => {
     Object.assign(d.clients[0], {

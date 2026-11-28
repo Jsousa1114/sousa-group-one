@@ -168,3 +168,24 @@ body:not(.light) .tone-ok .home-todo-icon { color:#8fdcae; }
   .contact-row { padding-bottom:8px; border-bottom:1px solid var(--border); }
 }
 .client-contacts a { color:var(--action); }
+
+/* ---- Client addresses: billing block and work sites ---- */
+.address-block, .site-list { display:grid; gap:6px; margin:6px 0 4px; padding:12px 14px; border:1px solid var(--border); border-radius:12px; }
+.address-block legend, .site-list legend { padding:0 6px; font-weight:700; }
+.address-block > p, .site-list > p { margin:0 0 4px; }
+.site-rows { display:grid; gap:8px; }
+.site-row { display:grid; grid-template-columns:minmax(0,1.6fr) 90px minmax(0,1fr) auto; gap:8px; align-items:center; padding-bottom:8px; border-bottom:1px solid var(--border); }
+.site-row .site-label { grid-column:1 / 4; grid-row:1; font-weight:600; }
+.site-row .contact-remove { grid-column:4; grid-row:1; }
+.site-row .site-street { grid-column:1; grid-row:2; }
+.site-row .site-zip { grid-column:2; grid-row:2; }
+.site-row .site-city { grid-column:3 / 5; grid-row:2; }
+.site-list > .btn { justify-self:start; }
+@media (max-width:700px) {
+  .site-row { grid-template-columns:90px minmax(0,1fr) auto; }
+  .site-row .site-label { grid-column:1 / 3; grid-row:1; }
+  .site-row .contact-remove { grid-column:3; grid-row:1; }
+  .site-row .site-street { grid-column:1 / 4; grid-row:2; }
+  .site-row .site-zip { grid-column:1; grid-row:3; }
+  .site-row .site-city { grid-column:2 / 4; grid-row:3; }
+}

@@ -2411,7 +2411,7 @@ function genericPage(k) {
           : []),
         ...(k === "clients" && can(createRoles.clients)
           ? [
-              goButton(clientAddress(r)) +
+              goButton(window.SGOContacts?.workAddress(r) || clientAddress(r)) +
                 " " +
                 (profile.role === "admin"
                 ? btn("Créer un compte", "linked-user", k + ":" + r.id) + " "
@@ -2672,7 +2672,7 @@ function financeForm(k, r, initial) {
   formShell(
     schemas[k],
     r ? "finance.update" : k,
-    `<p class="muted">1. Client et dates · 2. Prestations · 3. Vérification puis émission</p><p>${btn("Créer un client", "finance-client", k)}</p><h4>Prestations</h4><p class="muted">Prix hors taxe. Choisissez le taux applicable à chaque prestation ; 0 % par défaut.</p><datalist id="vatRates"><option value="0"><option value="2.6"><option value="3.8"><option value="8.1"></datalist><div id="lines">${(value.lines || [{}]).map(lineRow).join("")}</div>${btn("Ajouter une ligne", "add-line")}<div id="financeTotals" class="finance-totals" role="status" aria-live="polite"></div><label>Langue du document<select name="language">${[
+    `<label for="f_site">Lieu d’intervention (si ce n’est pas l’adresse de facturation)</label><input id="f_site" name="site" maxlength="300" placeholder="Ex. Elfenstrasse 3, 3006 Berne"><p class="muted">1. Client et dates · 2. Prestations · 3. Vérification puis émission</p><p>${btn("Créer un client", "finance-client", k)}</p><h4>Prestations</h4><p class="muted">Prix hors taxe. Choisissez le taux applicable à chaque prestation ; 0 % par défaut.</p><datalist id="vatRates"><option value="0"><option value="2.6"><option value="3.8"><option value="8.1"></datalist><div id="lines">${(value.lines || [{}]).map(lineRow).join("")}</div>${btn("Ajouter une ligne", "add-line")}<div id="financeTotals" class="finance-totals" role="status" aria-live="polite"></div><label>Langue du document<select name="language">${[
       ["fr", "Français"],
       ["de", "Deutsch"],
       ["it", "Italiano"],
@@ -2694,6 +2694,7 @@ function financeForm(k, r, initial) {
       input.value = String(v);
   }
   filterFinanceClient();
+  fillWorkAddress($("f_site"), find("clients", $("f_clientId")?.value));
   financeTotals();
   const previous = [...state.quotes, ...state.invoices]
     .filter((x) => x.company === co)
@@ -2798,7 +2799,8 @@ function newForm(k) {
         : "",
     k === "clients" ? "Nouveau client" : menus[k][0],
   );
-  if (k === "clients") placeContacts();
+  if (k === "clients") arrangeClientForm({});
+  if (k === "projects") fillWorkAddress($("f_address"), find("clients", $("f_clientId")?.value), true);
   if (company && $("f_company")) $("f_company").value = company;
 }
 // Several e-mails and phone numbers per client, each with a label; the first is the main one.
@@ -2820,6 +2822,55 @@ function contactsEditor(c) {
   const emails = C ? C.emails(c) : c.email ? [{ address: c.email }] : [];
   const phones = C ? C.phones(c) : c.phone ? [{ number: c.phone }] : [];
   return `<fieldset class="contact-list" data-contact-kind="emails"><legend>E-mails</legend><p class="muted">Le principal reçoit les factures, les devis et les e-mails automatiques ; les autres sont reconnus quand ils vous écrivent.</p><div class="contact-rows">${(emails.length ? emails : [{}]).map((e, i) => contactRow("emails", e, i)).join("")}</div><button type="button" class="btn secondary" data-action="contact-add" data-id="emails">+ Ajouter un e-mail</button></fieldset><fieldset class="contact-list" data-contact-kind="phones"><legend>Téléphones</legend><p class="muted">Tous les numéros sont reconnus pour les appels, les SMS et WhatsApp.</p><div class="contact-rows">${phones.map((p, i) => contactRow("phones", p, i)).join("")}</div><button type="button" class="btn secondary" data-action="contact-add" data-id="phones">+ Ajouter un numéro</button></fieldset>`;
+}
+// The client form: e-mails and numbers, then the billing address (grouped), then the work sites.
+function arrangeClientForm(client) {
+  placeContacts();
+  const street = $("f_street");
+  if (!street) return;
+  const box = document.createElement("fieldset");
+  box.className = "address-block";
+  box.innerHTML = '<legend>Adresse de facturation</legend><p class="muted">Imprimée sur les devis, les factures et le bulletin QR.</p>';
+  (street.labels?.[0] || street).before(box);
+  for (const key of ["street", "buildingNumber", "zip", "city", "country"]) {
+    const input = $("f_" + key);
+    if (input) box.append(...(input.labels?.[0] ? [input.labels[0]] : []), input);
+  }
+  box.insertAdjacentHTML("afterend", sitesEditor(client));
+}
+function siteRow(x = {}) {
+  return `<div class="site-row" data-site-row><input class="site-label" value="${esc(x.label || "")}" placeholder="Nom du lieu (ex. Résidence)" maxlength="60" aria-label="Nom du lieu"><input class="site-street" value="${esc(x.street || "")}" placeholder="Rue et numéro" maxlength="200" aria-label="Rue et numéro"><input class="site-zip" value="${esc(x.zip || "")}" placeholder="NPA" maxlength="20" inputmode="numeric" aria-label="NPA"><input class="site-city" value="${esc(x.city || "")}" placeholder="Localité" maxlength="100" aria-label="Localité"><button type="button" class="contact-remove" data-action="site-remove" aria-label="Retirer cette adresse" title="Retirer">×</button></div>`;
+}
+function sitesEditor(c) {
+  const list = window.SGOContacts ? window.SGOContacts.sites(c) : [];
+  return `<fieldset class="site-list"><legend>Adresses d’intervention</legend><p class="muted">Où vous travaillez, si ce n’est pas à l’adresse de facturation (résidence, dépôt, autre bâtiment…). Proposées pour les chantiers, les devis, les factures et « Y aller ».</p><div class="site-rows">${list.map(siteRow).join("")}</div><button type="button" class="btn secondary" data-action="site-add">+ Ajouter une adresse d’intervention</button></fieldset>`;
+}
+// The addresses offered for a client (work sites first, then billing), in a list under the field.
+function addressChoices(c) {
+  const C = window.SGOContacts;
+  if (!c || !C) return [];
+  return [...C.sites(c).map((x) => ({ label: x.label || "Intervention", text: C.siteText(x) })), { label: "Facturation", text: C.billingText(c) }].filter((x) => x.text);
+}
+function fillWorkAddress(input, c, always = false) {
+  if (!input) return;
+  const id = input.id + "Choices";
+  let list = $(id);
+  if (!list) {
+    list = document.createElement("datalist");
+    list.id = id;
+    input.after(list);
+    input.setAttribute("list", id);
+  }
+  const choices = addressChoices(c);
+  list.innerHTML = choices.map((x) => `<option value="${esc(x.text)}">${esc(x.label)}</option>`).join("");
+  // Filled automatically only while the person has not typed in it.
+  if (!input.value || input.dataset.auto) {
+    const C = window.SGOContacts;
+    const value = !c || !C ? "" : always ? C.workAddress(c) : C.sites(c)[0] ? C.siteText(C.sites(c)[0]) : "";
+    input.value = value;
+    if (value) input.dataset.auto = "1";
+    else delete input.dataset.auto;
+  }
 }
 // E-mails and numbers right after the name (and company), before the address.
 function placeContacts() {
@@ -2844,6 +2895,10 @@ function readContacts(form) {
       .map((row) => ({ label: row.querySelector(".contact-label").value.trim(), [kind === "emails" ? "address" : "number"]: row.querySelector(".contact-value").value.trim() }))
       .filter((x) => x.address || x.number);
   }
+  if (form.querySelector(".site-list"))
+    out.sites = [...form.querySelectorAll("[data-site-row]")]
+      .map((row) => ({ label: row.querySelector(".site-label").value.trim(), street: row.querySelector(".site-street").value.trim(), zip: row.querySelector(".site-zip").value.trim(), city: row.querySelector(".site-city").value.trim() }))
+      .filter((x) => x.street || x.city || x.zip);
   return out;
 }
 function clientCard(id) {
@@ -2859,7 +2914,13 @@ function clientCard(id) {
     c.name,
     `<div class="client-card"><section><h4>E-mails</h4><ul class="client-contacts">${emails
       .map((e, i) => `<li><a href="mailto:${esc(encodeURIComponent(e.address).replace(/%40/g, "@"))}">${esc(e.address)}</a>${e.label ? ` <span class="muted">· ${esc(e.label)}</span>` : ""}${i === 0 ? ' <span class="contact-main">Principal</span>' : ""}</li>`)
-      .join("")}</ul></section><section><h4>Téléphones</h4>${phones.length ? `<ul class="client-contacts">${phones.map((p) => `<li><a href="tel:${esc(tel(p.number))}">${esc(p.number)}</a>${p.label ? ` <span class="muted">· ${esc(p.label)}</span>` : ""}</li>`).join("")}</ul>` : '<p class="muted">Aucun numéro.</p>'}</section><section><h4>Adresse</h4><p class="go-line"><span>${esc(clientAddress(c) || "—")}</span> ${goButton(clientAddress(c))}</p></section>${c.notes ? `<section><h4>Remarques</h4><p class="preserve-lines">${esc(c.notes)}</p></section>` : ""}<section><h4>Suivi</h4><p>${projects.length} chantier${projects.length > 1 ? "s" : ""} · ${open.length} facture${open.length > 1 ? "s" : ""} ouverte${open.length > 1 ? "s" : ""}${open.length ? " (" + money(open.reduce((t, i) => t + (Number(i.amount) || 0) - (Number(i.paid) || 0), 0)) + ")" : ""}</p></section>${can(createRoles.clients) ? `<div class="form-actions">${btn("Modifier la fiche", "client-edit", id, "primary")}</div>` : ""}</div>`,
+      .join("")}</ul></section><section><h4>Téléphones</h4>${phones.length ? `<ul class="client-contacts">${phones.map((p) => `<li><a href="tel:${esc(tel(p.number))}">${esc(p.number)}</a>${p.label ? ` <span class="muted">· ${esc(p.label)}</span>` : ""}</li>`).join("")}</ul>` : '<p class="muted">Aucun numéro.</p>'}</section><section><h4>Adresse de facturation</h4><p class="go-line"><span>${esc(clientAddress(c) || "—")}</span> ${goButton(clientAddress(c))}</p></section><section><h4>Adresses d’intervention</h4>${
+      C && C.sites(c).length
+        ? `<ul class="client-contacts">${C.sites(c)
+            .map((x) => `<li class="go-line"><span>${x.label ? `<b>${esc(x.label)}</b> · ` : ""}${esc(C.siteText(x))}</span> ${goButton(C.siteText(x))}</li>`)
+            .join("")}</ul>`
+        : '<p class="muted">Identique à l’adresse de facturation.</p>'
+    }</section>${c.notes ? `<section><h4>Remarques</h4><p class="preserve-lines">${esc(c.notes)}</p></section>` : ""}<section><h4>Suivi</h4><p>${projects.length} chantier${projects.length > 1 ? "s" : ""} · ${open.length} facture${open.length > 1 ? "s" : ""} ouverte${open.length > 1 ? "s" : ""}${open.length ? " (" + money(open.reduce((t, i) => t + (Number(i.amount) || 0) - (Number(i.paid) || 0), 0)) + ")" : ""}</p></section>${can(createRoles.clients) ? `<div class="form-actions">${btn("Modifier la fiche", "client-edit", id, "primary")}</div>` : ""}</div>`,
   );
 }
 function clientEdit(id) {
@@ -2872,7 +2933,7 @@ function clientEdit(id) {
     `<input type="hidden" name="id" value="${esc(id)}">${contactsEditor(client)}${field(["notes", "Remarques (accès, consignes, interlocuteurs…)", "textarea?", client.notes || ""])}<p class="muted">Les e-mails de la fiche ne changent pas l’identifiant du compte de connexion du client. Les documents déjà émis gardent leurs coordonnées d’origine.</p>`,
     "Modifier le client",
   );
-  placeContacts();
+  arrangeClientForm(client);
   for (const [key] of fields)
     $("f_" + key).value = client[key] ?? (key === "country" ? "CH" : "");
 }
@@ -3838,6 +3899,12 @@ document.addEventListener("click", async (e) => {
       clientEdit(id);
     } else if (a === "client-card") {
       clientCard(id);
+    } else if (a === "site-add") {
+      const rows = b.closest(".site-list").querySelector(".site-rows");
+      rows.insertAdjacentHTML("beforeend", siteRow({}));
+      rows.lastElementChild.querySelector(".site-label").focus();
+    } else if (a === "site-remove") {
+      b.closest("[data-site-row]").remove();
     } else if (a === "contact-add") {
       const list = b.closest(".contact-list");
       list.querySelector(".contact-rows").insertAdjacentHTML("beforeend", contactRow(id, {}, list.querySelectorAll(".contact-row").length));
@@ -4355,6 +4422,8 @@ function filterChatConversations(value) {
   });
 }
 document.addEventListener("input", (e) => {
+  // Typed by the person: no longer replaced when the client changes.
+  if (["f_address", "f_site"].includes(e.target.id)) delete e.target.dataset.auto;
   if (e.target.closest(".invoice-line") || e.target.name === "depositPercent")
     financeTotals();
   if (e.target.id === "conversationSearch") filterChatConversations(e.target.value);
@@ -4393,6 +4462,18 @@ document.addEventListener("change", async (e) => {
     return;
   }
   if (["f_company", "f_clientId"].includes(e.target.id)) filterFinanceClient();
+  // Work address: the client's sites (chantier: or its billing address); a chosen project's address.
+  if (["f_company", "f_clientId", "f_project"].includes(e.target.id) && $("entityForm")) {
+    const client = find("clients", $("f_clientId")?.value);
+    if ($("f_site")) {
+      const project = find("projects", $("f_project")?.value);
+      if (e.target.id === "f_project" && project?.address && (!$("f_site").value || $("f_site").dataset.auto)) {
+        $("f_site").value = project.address === clientAddress(client) ? "" : project.address;
+        $("f_site").dataset.auto = "1";
+      } else fillWorkAddress($("f_site"), client);
+    }
+    if ($("entityForm").dataset.kind === "projects") fillWorkAddress($("f_address"), client, true);
+  }
   if (
     e.target.id === "f_company" &&
     $("entityForm")?.dataset.kind === "finance.settings"
