@@ -1,4 +1,5 @@
 "use strict";
+const Contacts = require("./contacts");
 // E-mails sent by the application: invoices and quotes with their PDF, messages prepared with
 // the assistant, payment reminders, quote follow-ups, appointment confirmations, client portal
 // invitations and replies received from clients. Every e-mail is recorded in email_log
@@ -595,8 +596,11 @@ function routes(db) {
         .filter((d) => !d.deletedAt && ((document.project && D.same(d.project, document.project)) || (d.clientId && D.same(d.clientId, document.clientId))))
         .slice(0, 30)
         .map((d) => ({ id: String(d.id), name: d.name, category: d.category || "" }));
+      const client = (view.clients || []).find((c) => D.same(c.id, document.clientId));
       res.json({
         to: customer?.email || "",
+        // Every address of the client's card, to choose who receives it.
+        emails: Contacts.emails(client || customer || {}),
         from: mailer.sender(companyOf(view, document.company))?.address || "",
         subject: MS.fill(settings.templates[template].subject, values),
         body: MS.fill(settings.templates[template].body, values),
@@ -622,8 +626,12 @@ function routes(db) {
       const { issuer, customer } = financeParts(view, kind, document);
       const account = companyOf(view, document.company);
       if (!mailer.configured(account)) D.fail(`Aucune adresse Gmail n’est configurée pour ${issuer?.name || document.company}.`, 503);
-      const to = text(req.body?.to, 254) || customer?.email || "";
-      if (!mailer.validEmail(to)) D.fail("Indiquez une adresse e-mail valide pour le client.");
+      // One or several addresses (the client's card may have several), five at most.
+      const wanted = mailer.addressList(req.body?.to).slice(0, 6);
+      if (!wanted.length && customer?.email) wanted.push(customer.email);
+      if (!wanted.length || wanted.some((a) => !mailer.validEmail(a))) D.fail("Indiquez une adresse e-mail valide pour le client.");
+      if (wanted.length > 5) D.fail("Cinq destinataires au maximum.");
+      const to = [...new Set(wanted.map((a) => a.trim()))].join(", ");
       const qr = kind === "invoices" && req.body?.qr !== false && document.status !== "Payée";
       const pdf = await financePdf(kind, document, issuer, customer, qr);
       const extra = await extraAttachments(db, data, req.user, req.body?.documentIds, req.body?.uploads);

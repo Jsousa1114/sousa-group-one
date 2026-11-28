@@ -427,7 +427,7 @@
     const own = ownAddress();
     const lastIn = [...st.conv.messages].reverse().find((m) => m.from?.address && m.from.address !== own);
     const people = unique(st.conv.messages.flatMap((m) => [m.from, ...(m.to || []), ...(m.cc || [])]).map((a) => a?.address).filter((a) => a && a !== own));
-    const client = state.clients.find((c) => !c.deletedAt && people.includes(String(c.email || "").trim().toLowerCase()));
+    const client = state.clients.find((c) => !c.deletedAt && people.some((a) => (window.SGOContacts ? window.SGOContacts.hasEmail(c, a) : String(c.email || "").trim().toLowerCase() === a)));
     const same = core().same || ((a, b) => String(a) === String(b));
     if (client) {
       const invoices = (state.invoices || []).filter(
@@ -805,7 +805,9 @@
 
   function addressBook() {
     const state = core()?.getState?.() || {};
-    const fromClients = (state.clients || []).filter((c) => !c.deletedAt && c.email).map((c) => [String(c.email).trim(), c.name]);
+    const fromClients = (state.clients || [])
+      .filter((c) => !c.deletedAt)
+      .flatMap((c) => (window.SGOContacts ? window.SGOContacts.emails(c) : c.email ? [{ address: c.email, label: "" }] : []).map((e) => [String(e.address).trim(), e.label ? `${c.name} (${e.label})` : c.name]));
     const fromMail = st.list.flatMap((m) => [m.from, ...(m.to || [])]).filter((a) => a?.address && a.address !== ownAddress()).map((a) => [a.address, a.name]);
     const seen = new Set();
     return [...fromClients, ...fromMail]
@@ -1034,7 +1036,7 @@
     const s = core()?.getState?.() || {};
     const same = core().same || ((a, b) => String(a) === String(b));
     const recipients = mailboxAddresses(form);
-    const clientIds = new Set((s.clients || []).filter((c) => !c.deletedAt && recipients.includes(String(c.email || "").trim().toLowerCase())).map((c) => String(c.id)));
+    const clientIds = new Set((s.clients || []).filter((c) => !c.deletedAt && recipients.some((a) => (window.SGOContacts ? window.SGOContacts.hasEmail(c, a) : String(c.email || "").trim().toLowerCase() === a))).map((c) => String(c.id)));
     const clientName = (id) => (s.clients || []).find((c) => same(c.id, id))?.name || "";
     const project = (id) => (s.projects || []).find((p) => same(p.id, id));
     const items = [];
@@ -1455,7 +1457,7 @@
     const clients = (s.clients || []).filter((c) => !c.deletedAt);
     if (!projects.length && !clients.length) return toast("Aucun chantier ni client disponible.");
     const people = unique([m.from?.address, ...(m.to || []).map((a) => a.address)]).filter((a) => a !== ownAddress());
-    const client = clients.find((c) => people.includes(String(c.email || "").trim().toLowerCase()));
+    const client = clients.find((c) => people.some((a) => (window.SGOContacts ? window.SGOContacts.hasEmail(c, a) : String(c.email || "").trim().toLowerCase() === a)));
     const theirs = client ? projects.filter((p) => same(p.clientId, client.id)) : [];
     const option = (value, label) => `<option value="${esc(value)}">${esc(label)}</option>`;
     const groups = [

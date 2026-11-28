@@ -138,7 +138,8 @@
   function clientOf(number) {
     const key = phoneKey(number);
     if (key.length < 6) return null;
-    return (core()?.getState?.()?.clients || []).find((c) => phoneKey(c.phone) === key || phoneKey(c.mobile) === key) || null;
+    const clients = core()?.getState?.()?.clients || [];
+    return window.SGOContacts ? window.SGOContacts.findByPhone(clients, number) : clients.find((c) => phoneKey(c.phone) === key || phoneKey(c.mobile) === key) || null;
   }
   const nameOf = (number, fallback = "") => clientOf(number)?.name || fallback || display(number);
 
@@ -680,10 +681,14 @@
     const q = st.dial.trim().toLowerCase();
     if (q.length < 2) return (el.innerHTML = "");
     const numeric = /^[\d\s+]+$/.test(q);
+    // Every number of every client, with its label (« Secrétariat », « Mobile »…).
+    const digits = q.replace(/\D/g, "").slice(-9);
     const list = (core()?.getState?.()?.clients || [])
-      .filter((c) => (c.phone || c.mobile) && (numeric ? phoneKey(c.phone).includes(q.replace(/\D/g, "").slice(-9)) || phoneKey(c.mobile).includes(q.replace(/\D/g, "").slice(-9)) : String(c.name || "").toLowerCase().includes(q)))
-      .slice(0, 5);
-    el.innerHTML = list.map((c) => `<button type="button" class="ph-suggest-item" data-ph="pick" data-number="${esc(c.phone || c.mobile)}"><b>${esc(c.name)}</b><small>${esc(c.phone || c.mobile)}</small></button>`).join("");
+      .filter((c) => !c.deletedAt)
+      .flatMap((c) => (window.SGOContacts ? window.SGOContacts.phones(c) : [{ number: c.phone || c.mobile, label: "" }]).filter((p) => p.number).map((p) => ({ name: c.name, number: p.number, label: p.label })))
+      .filter((x) => (numeric ? phoneKey(x.number).includes(digits) : String(x.name || "").toLowerCase().includes(q) || String(x.label || "").toLowerCase().includes(q)))
+      .slice(0, 6);
+    el.innerHTML = list.map((x) => `<button type="button" class="ph-suggest-item" data-ph="pick" data-number="${esc(x.number)}"><b>${esc(x.name)}</b><small>${esc(x.number)}${x.label ? " · " + esc(x.label) : ""}</small></button>`).join("");
   }
 
   async function openCall(id, { quiet = false } = {}) {

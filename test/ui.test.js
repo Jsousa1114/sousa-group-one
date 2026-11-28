@@ -110,6 +110,7 @@ async function setup(
     };
   };
   w.eval(fs.readFileSync(require.resolve("../finance.js"), "utf8"));
+  w.eval(fs.readFileSync(require.resolve("../contacts.js"), "utf8"));
   w.eval(script);
   await flush();
   h.close = () => w.close();
@@ -280,7 +281,7 @@ test("creating a client inside a quote returns to the unsaved lines", async () =
     click(h, '[data-action="finance-client"]');
     fill(h, "name", "Nouveau client");
     fill(h, "city", "Lausanne");
-    fill(h, "email", "new@example.com");
+    h.w.document.querySelector('.contact-list[data-contact-kind="emails"] .contact-value').value = "new@example.com";
     submit(h);
     await flush();
     await flush();
@@ -1057,6 +1058,69 @@ test("employee dossier edits profile and assigns tools from the same screen", as
   }
 });
 
+test("a client can have several e-mails and numbers with labels; the main one is chosen", async () => {
+  const h = await setup("admin", false, false, (d) => {
+    Object.assign(d.clients[0], { email: "contact@test.invalid", phone: "021 000 00 00", city: "Nyon" });
+  });
+  const d = h.w.document;
+  const rows = (kind) => [...d.querySelectorAll(`.contact-list[data-contact-kind="${kind}"] .contact-row`)];
+  const set = (row, value, label) => {
+    row.querySelector(".contact-value").value = value;
+    row.querySelector(".contact-label").value = label;
+  };
+  try {
+    // A new client: two addresses and two numbers.
+    click(h, '[data-page="clients"]');
+    click(h, '[data-action="new"][data-id="clients"]');
+    fill(h, "name", "Ambassade du Portugal");
+    fill(h, "city", "Berne");
+    set(rows("emails")[0], "secretariat@ambassade.test", "Secrétariat");
+    click(h, '[data-action="contact-add"][data-id="emails"]');
+    set(rows("emails")[1], "ambassadeur@ambassade.test", "Ambassadeur");
+    click(h, '[data-action="contact-add"][data-id="phones"]');
+    set(rows("phones")[0], "031 352 83 29", "Standard");
+    click(h, '[data-action="contact-add"][data-id="phones"]');
+    set(rows("phones")[1], "+41 79 111 22 33", "Mobile ambassadeur");
+    submit(h);
+    await flush();
+    await flush();
+    const req = h.requests.filter((r) => r.url.endsWith("/command")).pop();
+    const payload = JSON.parse(req.opts.body).payload;
+    assert.deepEqual(payload.emails, [
+      { label: "Secrétariat", address: "secretariat@ambassade.test" },
+      { label: "Ambassadeur", address: "ambassadeur@ambassade.test" },
+    ]);
+    assert.equal(payload.phones.length, 2);
+    // The list shows the main address and « +1 »; the name opens the card with everything.
+    assert.match(d.getElementById("content").textContent, /secretariat@ambassade\.test\s*\+1/);
+    const link = [...d.querySelectorAll('[data-action="client-card"]')].find((b) => b.textContent === "Ambassade du Portugal");
+    link.click();
+    const card = d.querySelector(".client-card").textContent;
+    assert.match(card, /ambassadeur@ambassade\.test/);
+    assert.match(card, /Mobile ambassadeur/);
+    assert.match(card, /\+41 79 111 22 33/);
+    assert.ok(d.querySelector('.client-card a[href="tel:+41791112233"]'));
+    // Edit: the ambassador becomes the main address, the standard number is removed.
+    click(h, '.client-card [data-action="client-edit"]');
+    assert.equal(rows("emails").length, 2);
+    rows("emails")[1].querySelector('[data-action="contact-main"]').click();
+    assert.equal(rows("emails")[0].querySelector(".contact-value").value, "ambassadeur@ambassade.test");
+    assert.ok(rows("emails")[0].querySelector(".contact-main"));
+    rows("phones")[0].querySelector('[data-action="contact-remove"]').click();
+    submit(h);
+    await flush();
+    await flush();
+    const saved = JSON.parse(h.requests.filter((r) => r.url.endsWith("/command")).pop().opts.body).payload;
+    assert.equal(saved.emails[0].address, "ambassadeur@ambassade.test");
+    assert.deepEqual(saved.phones, [{ label: "Mobile ambassadeur", number: "+41 79 111 22 33" }]);
+    // The older client (one e-mail, one number) opens with them in the lists.
+    click(h, '[data-action="client-edit"]');
+    assert.equal(rows("emails")[0].querySelector(".contact-value").value, "contact@test.invalid");
+    assert.equal(rows("phones")[0].querySelector(".contact-value").value, "021 000 00 00");
+  } finally {
+    h.close();
+  }
+});
 test("client edit is prefilled and saves contact changes from the list", async () => {
   const h = await setup("admin", false, false, (d) => {
     Object.assign(d.clients[0], {

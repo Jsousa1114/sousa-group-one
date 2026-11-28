@@ -1,4 +1,5 @@
 "use strict";
+const Contacts = require("./contacts");
 // Routes of the « WhatsApp » page (/api/whatsapp): linking the number (administrators of the
 // group), who may open it, conversations and messages stored by whatsapp.js, sending (10 seconds
 // to cancel, or a time chosen), quick replies, the assistant, filing in documents, reminders.
@@ -506,7 +507,7 @@ function routes(db) {
       const state = await stateOf();
       const view = D.viewState(state, req.user);
       const key = W.phoneKey(chat.phone);
-      const client = key ? (view.clients || []).find((c) => !c.deletedAt && W.phoneKey(c.phone) === key) : null;
+      const client = key ? Contacts.findByPhone(view.clients, chat.phone) : null;
       let facts = "";
       if (client) {
         const money = (n) => "CHF " + (Number(n) || 0).toFixed(2);

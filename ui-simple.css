@@ -141,3 +141,30 @@ body:not(.light) .tone-ok .home-todo-icon { color:#8fdcae; }
   .bottom-item { font-size:.64rem; }
 }
 @media print { .bottom-nav, .section-tabs { display:none !important; } }
+
+/* ---- Client contacts (several e-mails and numbers) ---- */
+.contact-list { display:grid; gap:8px; margin:6px 0 4px; padding:12px 14px; border:1px solid var(--border); border-radius:12px; }
+.contact-list legend { padding:0 6px; font-weight:700; }
+.contact-list > p { margin:0; }
+.contact-rows { display:grid; gap:8px; }
+.contact-row { display:grid; grid-template-columns:minmax(0,1.4fr) minmax(0,1fr) auto; gap:8px; align-items:center; }
+.contact-row.is-main .contact-value { font-weight:600; }
+.contact-tools { display:inline-flex; align-items:center; gap:6px; white-space:nowrap; }
+.contact-main { display:inline-block; padding:2px 8px; border-radius:999px; background:var(--accent-soft); color:var(--action); font-size:.78rem; font-weight:700; }
+.contact-remove { width:36px; height:36px; border:1px solid var(--border); border-radius:10px; background:var(--panel); color:var(--muted); font-size:1.2rem; line-height:1; cursor:pointer; }
+.contact-remove:hover { color:#b42318; border-color:#f6c5cb; }
+.contact-list > .btn { justify-self:start; }
+.more-count { display:inline-block; margin-left:4px; padding:1px 7px; border-radius:999px; background:var(--accent-soft); color:var(--action); font-size:.75rem; font-weight:700; }
+.client-name { font-weight:650; text-align:left; color:var(--text); }
+.client-card { display:grid; gap:14px; }
+.client-card h4 { margin:0 0 6px; }
+.client-card section p { margin:0; }
+.client-contacts { list-style:none; margin:0; padding:0; display:grid; gap:6px; }
+.client-contacts a { font-weight:600; overflow-wrap:anywhere; }
+@media (max-width:600px) {
+  .contact-row { grid-template-columns:minmax(0,1fr) auto; }
+  .contact-row .contact-label { grid-column:1 / 2; grid-row:2; }
+  .contact-row .contact-tools { grid-row:1 / span 2; grid-column:2; flex-direction:column; align-items:flex-end; }
+  .contact-row { padding-bottom:8px; border-bottom:1px solid var(--border); }
+}
+.client-contacts a { color:var(--action); }

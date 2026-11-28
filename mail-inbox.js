@@ -1,4 +1,5 @@
 "use strict";
+const Contacts = require("./contacts");
 // Client replies read from each company's Gmail inbox (IMAP, same address and app password).
 // Only two kinds of messages are kept: replies to an e-mail sent by the application (matched
 // by Message-ID), and messages from the address of a known client. The rest of the mailbox is
@@ -108,7 +109,7 @@ async function classify(db, state, account, parsed) {
     clientId = String(project?.clientId || "");
   }
   if (!clientId && address) {
-    const clients = (state.clients || []).filter((c) => !c.deletedAt && String(c.email || "").trim().toLowerCase() === address);
+    const clients = (state.clients || []).filter((c) => !c.deletedAt && Contacts.hasEmail(c, address));
     const client = clients.find((c) => account.companies.includes(String(c.company))) || clients[0];
     if (client) clientId = String(client.id);
   }

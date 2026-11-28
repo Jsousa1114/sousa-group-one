@@ -1,4 +1,5 @@
 "use strict";
+const Contacts = require("./contacts");
 
 const express = require("express");
 const { randomUUID } = require("node:crypto");
@@ -538,13 +539,13 @@ function routes(db) {
     const { view } = await stateContext(db, req.user);
     const currentCompany = String(req.query.company || "");
     const results = [];
-    const add = (type, row, title, subtitle, page, extra = {}) => {
+    const add = (type, row, title, subtitle, page, { search = "", ...extra } = {}) => {
       if (!row || row.deletedAt || (currentCompany && row.company && String(row.company) !== currentCompany)) return;
-      const hay = [row.id, title, subtitle, row.address, row.street, row.zip, row.city, row.country, row.email, row.phone, row.description, row.notes, row.source, row.next_action, row.status].filter(Boolean).join(" ").toLowerCase();
+      const hay = [row.id, title, subtitle, row.address, row.street, row.zip, row.city, row.country, row.email, row.phone, row.description, row.notes, row.source, row.next_action, row.status, search].filter(Boolean).join(" ").toLowerCase();
       if (!hay.includes(query)) return;
       results.push({ type, id: String(row.id), title: String(title || row.id), subtitle: String(subtitle || ""), page, company: row.company || null, ...extra });
     };
-    for (const row of active(view.clients)) add("client", row, row.name, [row.city, row.email].filter(Boolean).join(" · "), "clients");
+    for (const row of active(view.clients)) add("client", row, row.name, [row.city, row.email].filter(Boolean).join(" · "), "clients", { search: Contacts.searchText(row) });
     for (const row of active(view.projects)) add("project", row, row.title, `${row.id} · ${row.address || ""}`, "projects", { projectId: row.id });
     for (const row of active(view.employees)) add("employee", row, row.name, row.job || "Salarié", "employees");
     for (const row of active(view.quotes)) add("quote", row, row.id, `${row.title || "Devis"} · ${row.status || ""}`, "quotes");

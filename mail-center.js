@@ -7,6 +7,8 @@
 // - client portal invitations (Clients page);
 // - "Mot de passe oublié" and choosing a password from a link (login screen).
 (() => {
+  // The addresses ticked in the send window (a client may have several), plus a typed one.
+  const recipients = (form) => [...form.querySelectorAll("[name=toPick]:checked")].map((x) => x.value).concat(String(form.elements.to?.value || "").trim()).filter(Boolean);
   const core = () => window.SGOChatCore;
   const esc = (value) =>
     core()?.esc?.(value) ?? String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
@@ -103,7 +105,13 @@
     const company = (state().companies || []).find((c) => String(c.id) === String(doc.company));
     document.getElementById("modalBody").innerHTML = `<form id="mailSendForm" class="mail-form" data-kind="${esc(kind)}" data-id="${esc(doc.id)}" data-company="${esc(doc.company)}">
         <p class="muted">Envoyé depuis <b>${esc(draft.from)}</b>, mis en page avec le logo de ${esc(company?.name || "l’entreprise")}${draft.bcc ? `, copie cachée à ${esc(draft.bcc)}` : ""}. Le PDF est joint${unpaid ? " avec le bulletin QR" : ""}.</p>
-        <label>Destinataire<input name="to" type="email" required value="${esc(draft.to)}" placeholder="adresse@client.ch"></label>
+        ${
+          (draft.emails || []).length > 1
+            ? `<fieldset class="mail-recipients"><legend>Destinataires</legend>${draft.emails
+                .map((e, i) => `<label class="mail-check"><input type="checkbox" name="toPick" value="${esc(e.address)}" ${(draft.to ? e.address.toLowerCase() === String(draft.to).toLowerCase() : i === 0) ? "checked" : ""}> ${esc(e.address)}${e.label ? ` <small class="muted">(${esc(e.label)})</small>` : ""}</label>`)
+                .join("")}<label>Autre adresse (facultatif)<input name="to" type="email" placeholder="adresse@client.ch"></label></fieldset>`
+            : `<label>Destinataire<input name="to" type="email" required value="${esc(draft.to)}" placeholder="adresse@client.ch"></label>`
+        }
         <label>Objet<input name="subject" maxlength="200" required value="${esc(draft.subject)}"></label>
         <label>Message<textarea name="text" rows="8" maxlength="8000">${esc(draft.body)}</textarea></label>
         <p class="muted mail-closing">Ajouté automatiquement : « Meilleures salutations, ${esc(profile().name || "")}, ${esc(company?.name || "")} » et les coordonnées de l’entreprise${draft.portal ? ", avec un bouton vers l’espace client" : ""}.</p>
@@ -556,12 +564,13 @@
     button.disabled = true;
     error.textContent = "";
     try {
+      if (!recipients(form).length) throw new Error("Choisissez au moins un destinataire.");
       const files = [...(form.elements.uploads?.files || [])];
       if (files.reduce((n, f) => n + f.size, 0) > 5 * 1024 * 1024) throw new Error("Fichiers ajoutés : 5 Mo au maximum au total.");
       const uploads = [];
       for (const f of files.slice(0, 3)) uploads.push({ name: f.name, type: f.type, content: await fileToBase64(f) });
       const out = await core().api(`mail/finance/${encodeURIComponent(form.dataset.kind)}/${encodeURIComponent(form.dataset.id)}`, {
-        to: form.elements.to.value.trim(),
+        to: recipients(form),
         subject: form.elements.subject.value,
         text: form.elements.text.value,
         qr: form.elements.qr ? form.elements.qr.checked : undefined,

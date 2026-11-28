@@ -395,7 +395,7 @@
     const key = phoneKey(st.chat.phone);
     if (!key) return "";
     const same = core().same || ((a, b) => String(a) === String(b));
-    const client = state.clients.find((c) => !c.deletedAt && phoneKey(c.phone) === key);
+    const client = state.clients.find((c) => !c.deletedAt && (window.SGOContacts ? window.SGOContacts.hasPhone(c, key) : phoneKey(c.phone) === key));
     if (client) {
       const invoices = (state.invoices || []).filter(
         (i) => same(i.clientId, client.id) && !i.deletedAt && !i.archivedAt && !["Payée", "Brouillon"].includes(i.status) && (Number(i.amount) || 0) - (Number(i.paid) || 0) > 0.004,
@@ -688,7 +688,7 @@
     const s = core()?.getState?.() || {};
     const same = core().same || ((a, b) => String(a) === String(b));
     const key = phoneKey(st.chat?.phone);
-    const clientIds = new Set((s.clients || []).filter((c) => key && phoneKey(c.phone) === key).map((c) => String(c.id)));
+    const clientIds = new Set((s.clients || []).filter((c) => key && (window.SGOContacts ? window.SGOContacts.hasPhone(c, key) : phoneKey(c.phone) === key)).map((c) => String(c.id)));
     const clientName = (id) => (s.clients || []).find((c) => same(c.id, id))?.name || "";
     const project = (id) => (s.projects || []).find((p) => same(p.id, id));
     const items = [];
@@ -942,11 +942,14 @@
   // -------------------------------------------------------------------------
   function openNew() {
     const s = core()?.getState?.() || {};
-    const withPhone = (s.clients || []).filter((c) => !c.deletedAt && phoneKey(c.phone));
+    // Every number of every client (a client may have several, with a label).
+    const withPhone = (s.clients || [])
+      .filter((c) => !c.deletedAt)
+      .flatMap((c) => (window.SGOContacts ? window.SGOContacts.phones(c) : [{ number: c.phone, label: "" }]).filter((p) => phoneKey(p.number)).map((p) => ({ id: c.id, name: c.name, phone: p.number, label: p.label })));
     core().modal(
       "Nouvelle conversation WhatsApp",
       `<form id="waNewForm" class="wm-compose" novalidate>
-        <label>Client<select name="client"><option value="">— Saisir un numéro —</option>${withPhone.map((c) => `<option value="${esc(c.id)}" data-phone="${esc(c.phone)}" data-name="${esc(c.name)}">${esc(c.name)} · ${esc(c.phone)}</option>`).join("")}</select></label>
+        <label>Client<select name="client"><option value="">— Saisir un numéro —</option>${withPhone.map((c) => `<option value="${esc(c.id)}" data-phone="${esc(c.phone)}" data-name="${esc(c.name)}">${esc(c.name)} · ${esc(c.phone)}${c.label ? " (" + esc(c.label) + ")" : ""}</option>`).join("")}</select></label>
         <label>Numéro<input name="phone" inputmode="tel" placeholder="+41 79 123 45 67"></label>
         <label>Nom (facultatif)<input name="name" maxlength="120"></label>
         <p class="muted">Une conversation à la fois : l’application n’envoie jamais de messages en masse.</p>
@@ -1005,7 +1008,7 @@
     const clients = (s.clients || []).filter((c) => !c.deletedAt);
     if (!projects.length && !clients.length) return toast("Aucun chantier ni client disponible.");
     const key = phoneKey(st.chat?.phone);
-    const client = key ? clients.find((c) => phoneKey(c.phone) === key) : null;
+    const client = key ? clients.find((c) => (window.SGOContacts ? window.SGOContacts.hasPhone(c, key) : phoneKey(c.phone) === key)) : null;
     const theirs = client ? projects.filter((p) => same(p.clientId, client.id)) : [];
     const option = (value, label) => `<option value="${esc(value)}">${esc(label)}</option>`;
     const groups = [
